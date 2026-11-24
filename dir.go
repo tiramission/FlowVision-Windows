@@ -489,9 +489,10 @@ func isDigit(b byte) bool { return b >= '0' && b <= '9' }
 
 // TreeEntry is one folder in the sidebar tree.
 type TreeEntry struct {
-	Name     string `json:"name"`
-	Path     string `json:"path"`
-	HasMedia bool   `json:"hasMedia"`
+	Name        string `json:"name"`
+	Path        string `json:"path"`
+	HasMedia    bool   `json:"hasMedia"`
+	HasChildren bool   `json:"hasChildren"`
 }
 
 // Place is a drive or well known folder.
@@ -508,16 +509,19 @@ type NavResult struct {
 }
 
 type mediaCacheEntry struct {
-	ok bool
-	at time.Time
+	ok      bool
+	hasDirs bool
+	at      time.Time
 }
 
 var mediaCache sync.Map // path -> mediaCacheEntry
 
-// hasMedia answers whether a folder directly contains an image or a video.
-// The answer is cached for a few seconds: sibling navigation asks the same
-// question repeatedly while the user walks through a large tree.
-func hasMedia(dir string, showHidden bool) bool {
+// folderInfo answers two questions with one directory scan: does this folder
+// directly contain an image or video, and does it contain a visible child
+// folder? The sidebar needs both for its tree. The answer is cached for a few
+// seconds because sibling navigation asks the same question repeatedly while
+// the user walks through a large tree.
+func folderInfo(dir string, showHidden bool) (media, children bool) {
 	key := strings.ToLower(filepath.Clean(dir))
 	if showHidden {
 		key += "|hidden"
@@ -525,34 +529,39 @@ func hasMedia(dir string, showHidden bool) bool {
 	if v, ok := mediaCache.Load(key); ok {
 		e := v.(mediaCacheEntry)
 		if time.Since(e.at) < 5*time.Second {
-			return e.ok
+			return e.ok, e.hasDirs
 		}
 	}
-	ok := false
 	entries, err := os.ReadDir(dir)
 	if err == nil {
-		n := 0
 		for _, e := range entries {
-			if e.IsDir() {
-				continue
-			}
 			full := filepath.Join(dir, e.Name())
 			if !showHidden && (isHidden(full) || strings.HasPrefix(e.Name(), ".")) {
 				continue
 			}
+			if e.IsDir() {
+				children = true
+				if media {
+					break
+				}
+				continue
+			}
 			kind, _ := classify(e.Name())
 			if kind == "image" || kind == "video" {
-				ok = true
-				break
-			}
-			n++
-			if n > 4000 {
-				break
+				media = true
+				if children {
+					break
+				}
 			}
 		}
 	}
-	mediaCache.Store(key, mediaCacheEntry{ok: ok, at: time.Now()})
-	return ok
+	mediaCache.Store(key, mediaCacheEntry{ok: media, hasDirs: children, at: time.Now()})
+	return media, children
+}
+
+func hasMedia(dir string, showHidden bool) bool {
+	media, _ := folderInfo(dir, showHidden)
+	return media
 }
 
 func invalidateMedia(dir string) {
@@ -577,7 +586,13 @@ func (FS) Tree(path string, showHidden bool) []TreeEntry {
 		if !showHidden && (isHidden(full) || strings.HasPrefix(e.Name(), ".")) {
 			continue
 		}
-		out = append(out, TreeEntry{Name: e.Name(), Path: full, HasMedia: hasMedia(full, showHidden)})
+		media, hasChildren := folderInfo(full, showHidden)
+		out = append(out, TreeEntry{
+			Name:        e.Name(),
+			Path:        full,
+			HasMedia:    media,
+			HasChildren: hasChildren,
+		})
 	}
 	sort.SliceStable(out, func(i, j int) bool { return naturalLess(out[i].Name, out[j].Name) })
 	return out

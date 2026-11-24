@@ -14,14 +14,15 @@ func newViewTestApp() *App {
 	s.Sidebar = false
 	s.ShowOther = true
 	a := &App{
-		settings:    s,
-		sidebar:     false,
-		thumbs:      map[string]*thumbEntry{},
-		thumbLoad:   map[string]bool{},
-		treeOpen:    map[string]*bool{},
-		treeLoaded:  map[string]bool{},
-		treeLoading: map[string]bool{},
-		treeKids:    map[string][]TreeEntry{},
+		settings:     s,
+		sidebar:      false,
+		thumbs:       map[string]*thumbEntry{},
+		thumbLoad:    map[string]bool{},
+		treeOpen:     map[string]*bool{},
+		treeRootOpen: map[string]*bool{},
+		treeLoaded:   map[string]bool{},
+		treeLoading:  map[string]bool{},
+		treeKids:     map[string][]TreeEntry{},
 	}
 	tab := newTab(0, `C:\Pictures`)
 	tab.Loaded = true
@@ -510,6 +511,128 @@ func TestWindowMinimumWidthTracksSidebar(t *testing.T) {
 	// workbench below the width its title bar and toolbar need.
 	if got := windowMinWidth(true, 520); got != 1040 {
 		t.Fatalf("wide sidebar min width = %d, want 1040", got)
+	}
+}
+
+func TestNativeFolderTreeRootAndLeaves(t *testing.T) {
+	a := newViewTestApp()
+	a.settings.Sidebar = true
+	a.sidebar = true
+	a.sidebarWidth = defaultSettings().SidebarWidth
+	rootPath := filepath.Clean(a.tab().Path)
+	folderPath := filepath.Join(rootPath, "Folder")
+	emptyPath := filepath.Join(rootPath, "Empty")
+	a.treeLoaded[rootPath] = true
+	a.treeKids[rootPath] = []TreeEntry{
+		{Name: "Folder", Path: folderPath, HasChildren: true},
+		{Name: "Empty", Path: emptyPath, HasChildren: false},
+	}
+	tt := ui.NewTester(a.view, 1280, 800)
+	tt.Frame()
+	root, ok := tt.AccessByRole(ui.RoleTreeItem, "Pictures")
+	if !ok {
+		t.Fatalf("current folder is not the tree root: %q", tt.Texts())
+	}
+	if !root.Expandable || !root.Expanded || !root.Selected || root.Level != 1 {
+		t.Fatalf("root disclosure state = %+v", root)
+	}
+	branch, ok := tt.AccessByRole(ui.RoleTreeItem, "Folder")
+	if !ok || !branch.Expandable || branch.Expanded || branch.Level != 2 {
+		t.Fatalf("branch state = %+v, ok=%v", branch, ok)
+	}
+	leaf, ok := tt.AccessByRole(ui.RoleTreeItem, "Empty")
+	if !ok || leaf.Expandable || leaf.Level != 2 {
+		t.Fatalf("leaf state = %+v, ok=%v", leaf, ok)
+	}
+	if !tt.HasText("2 项") {
+		t.Fatalf("folder child count missing: %q", tt.Texts())
+	}
+
+	open := a.treeRootOpenPtr(rootPath)
+	tt.ClickAt(root.Bounds.X+root.Bounds.W/2, root.Bounds.Y+root.Bounds.H/2)
+	tt.Frame()
+	if *open {
+		t.Fatal("clicking the current folder did not collapse it")
+	}
+	if _, ok := tt.AccessByRole(ui.RoleTreeItem, "Empty"); ok {
+		t.Fatal("collapsed root still exposes child rows")
+	}
+}
+
+func TestTreeRootOpenDefaultsExpanded(t *testing.T) {
+	a := newViewTestApp()
+	open := a.treeRootOpenPtr(`C:\Pictures`)
+	if !*open {
+		t.Fatal("a newly visited folder root starts collapsed")
+	}
+	*open = false
+	if *a.treeRootOpenPtr(`C:\Pictures`) {
+		t.Fatal("root expansion reset to expanded instead of being retained")
+	}
+	open = a.treeRootOpenPtr(`C:\Other`)
+	if !*open {
+		t.Fatal("a separate folder root should start expanded")
+	}
+}
+
+func TestNativeFolderTreeArrowExpandsWithoutNavigating(t *testing.T) {
+	a := newViewTestApp()
+	a.settings.Sidebar = true
+	a.sidebar = true
+	a.sidebarWidth = defaultSettings().SidebarWidth
+	rootPath := filepath.Clean(a.tab().Path)
+	branchPath := filepath.Join(rootPath, "Folder")
+	nestedPath := filepath.Join(branchPath, "Nested")
+	a.treeLoaded[rootPath] = true
+	a.treeKids[rootPath] = []TreeEntry{{Name: "Folder", Path: branchPath, HasChildren: true}}
+	a.treeLoaded[branchPath] = true
+	a.treeKids[branchPath] = []TreeEntry{{Name: "Nested", Path: nestedPath, HasChildren: false}}
+
+	tt := ui.NewTester(a.view, 1280, 800)
+	tt.Frame()
+	branch, ok := tt.AccessByRole(ui.RoleTreeItem, "Folder")
+	if !ok {
+		t.Fatalf("branch row missing: %q", tt.Texts())
+	}
+	before := a.tab().Path
+	// The arrow occupies the first 14 DIP inside the row, after its depth
+	// indentation. Click it, not the label.
+	tt.ClickAt(branch.Bounds.X+27, branch.Bounds.Y+branch.Bounds.H/2)
+	tt.Frame()
+	if a.tab().Path != before {
+		t.Fatalf("clicking the disclosure arrow navigated to %q", a.tab().Path)
+	}
+	if !*a.treeOpenPtr(branchPath) {
+		t.Fatal("clicking the disclosure arrow did not expand the branch")
+	}
+	nested, ok := tt.AccessByRole(ui.RoleTreeItem, "Nested")
+	if !ok || nested.Level != 3 {
+		t.Fatalf("nested row = %+v, ok=%v", nested, ok)
+	}
+}
+
+func TestNativeEmptyFolderTreeRootIsLeaf(t *testing.T) {
+	a := newViewTestApp()
+	a.settings.Sidebar = true
+	a.sidebar = true
+	a.sidebarWidth = defaultSettings().SidebarWidth
+	rootPath := filepath.Clean(a.tab().Path)
+	a.treeLoaded[rootPath] = true
+	a.treeKids[rootPath] = nil
+	tt := ui.NewTester(a.view, 1280, 800)
+	tt.Frame()
+	root, ok := tt.AccessByRole(ui.RoleTreeItem, "Pictures")
+	if !ok {
+		t.Fatalf("empty folders page has no tree root: %q", tt.Texts())
+	}
+	if root.Expandable || root.Expanded || !root.Selected {
+		t.Fatalf("empty root disclosure state = %+v", root)
+	}
+	if !tt.HasText("没有子文件夹") {
+		t.Fatalf("empty tree hint missing: %q", tt.Texts())
+	}
+	if tt.HasText("0 项") {
+		t.Fatalf("zero count should not duplicate the empty hint: %q", tt.Texts())
 	}
 }
 

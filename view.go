@@ -258,29 +258,15 @@ func (a *App) sidebarView(c *ui.Context) {
 				})
 
 				components.SidebarSectionWithActions(c, "文件夹", func(c *ui.Context) {
-					components.IconButton(c, lucide.RefreshCw(), "刷新文件夹树", components.IconButtonCompact).
-						OnClick(func() {
-							if t := a.tab(); t != nil {
-								a.invalidateTree(t.Path)
-							}
-						})
-				}, func() {
 					if t := a.tab(); t != nil {
-						a.ensureTree(t.Path)
-						if !a.treeLoaded[t.Path] {
-							components.Text(c, "正在读取文件夹…").FontSize(10.5).TextColor(th.TextMuted).Padding(2, 6)
-						} else {
-							kids := a.treeKids[t.Path]
-							if len(kids) == 0 {
-								components.Text(c, "没有子文件夹").FontSize(10.5).TextColor(th.TextMuted).Padding(2, 6)
-							}
-							ui.Tree(c, func() {
-								for _, kid := range kids {
-									a.treeFolder(c, kid.Path, kid.Name)
-								}
+						a.folderTreeCount(c, t)
+						components.IconButton(c, lucide.RefreshCw(), "刷新文件夹树", components.IconButtonCompact).
+							OnClick(func() {
+								a.invalidateTree(t.Path)
 							})
-						}
 					}
+				}, func() {
+					a.sidebarFolders(c)
 				})
 			})
 		})
@@ -363,30 +349,169 @@ func placeIcon(kind string) *ui.SVG {
 	return lucide.Folder()
 }
 
-func (a *App) treeFolder(c *ui.Context, path, name string) {
+// sidebarFolders renders the current folder as the root of a real tree. The
+// previous section listed only the root's children, so the folder the section
+// belonged to had no visible row and the first child looked like a stray item.
+func (a *App) sidebarFolders(c *ui.Context) {
+	t := a.tab()
+	if t == nil {
+		a.folderTreeNote(c, "没有打开的文件夹", false, 4)
+		return
+	}
+	p := filepath.Clean(t.Path)
+	a.ensureTree(p)
+	rootName := t.Name
+	if rootName == "" {
+		rootName = displayName(p)
+	}
+	tree := ui.TreeBase(c)
+	tree.Root.FillWidth().MinWidth(0).Gap(1).Children(func() {
+		a.folderTreeRow(c, tree, p, rootName, true, false)
+		if a.treeLoaded[p] && len(a.treeKids[p]) == 0 {
+			a.folderTreeNote(c, "没有子文件夹", false, 39)
+		}
+	})
+}
+
+// folderTreeCount adds the immediate child count to the section heading. A
+// single count is easier to scan than a longer "N subfolders" sentence, so the
+// hover tooltip spells it out.
+func (a *App) folderTreeCount(c *ui.Context, t *Tab) {
+	p := filepath.Clean(t.Path)
+	if !a.treeLoaded[p] {
+		return
+	}
+	n := len(a.treeKids[p])
+	if n == 0 {
+		return
+	}
 	th := c.Theme()
-	open := a.treeOpenPtr(path)
-	item := ui.TreeItem(c.Key(path), name, open, func() {
-		if !a.treeLoaded[path] {
-			a.ensureTree(path)
-			components.Text(c, "正在读取…").FontSize(10.5).TextColor(th.TextMuted)
-			return
-		}
-		for _, kid := range a.treeKids[path] {
-			a.treeFolder(c, kid.Path, kid.Name)
-		}
-	}).FontSize(11.5)
-	active := false
+	chip := components.Text(c, fmt.Sprintf("%d 项", n)).
+		FontSize(9.5).FontWeight(600).TextColor(th.TextMuted.Alpha(.78)).
+		Padding(0, 5).Radius(4).Background(th.Text.Alpha(.04)).Shrink(0)
+	chip.Tooltip(fmt.Sprintf("当前文件夹有 %d 个子文件夹", n))
+}
+
+// folderTreeRow builds one folder row without losing the path key. Onevra's
+// TreeItem derives its key from the visible label, which would collide when two
+// branches contain folders with the same name; TreeBase lets the path remain
+// the identity while the row gets a disclosure arrow, folder icon and selection.
+func (a *App) folderTreeRow(c *ui.Context, tree ui.TreeParts, path, name string, root, hasChildren bool) {
+	th := c.Theme()
+	p := filepath.Clean(path)
+	selected := false
 	if t := a.tab(); t != nil {
-		active = strings.EqualFold(filepath.Clean(path), filepath.Clean(t.Path))
+		selected = strings.EqualFold(p, filepath.Clean(t.Path))
 	}
-	item.Selected(active)
-	if item.Clicked() {
-		a.goTo(path, true)
+
+	branch := root
+	if root && a.treeLoaded[p] && len(a.treeKids[p]) == 0 {
+		// Once the scan proves the current folder empty, do not keep a
+		// disclosure arrow that opens only an empty result.
+		branch = false
 	}
-	if *open {
-		a.ensureTree(path)
+	if !root {
+		if a.treeLoaded[p] {
+			branch = len(a.treeKids[p]) > 0
+		} else {
+			branch = hasChildren
+		}
 	}
+	var open *bool
+	if branch {
+		if root {
+			open = a.treeRootOpenPtr(p)
+		} else {
+			open = a.treeOpenPtr(p)
+		}
+	}
+
+	// The key must precede Item so focus stays on this path while siblings
+	// above it open, close or refresh.
+	c.Key(p)
+	item := tree.Item(open)
+	row := item.Row.FillWidth().MinWidth(0).Height(26).Gap(5).AlignItems(ui.Center).
+		Radius(6).PaddingStart(8 + 12*float32(item.Depth())).PaddingEnd(8).
+		Label(name).Selected(selected).FocusRing(true).TextColor(th.Text)
+	if selected {
+		row.Background(th.Text.Alpha(.1))
+	} else if row.Hovered() {
+		row.Background(th.Text.Alpha(.035))
+	}
+	row.Children(func() {
+		arrow := ui.Box(c).Size(14, 14).Shrink(0).Role(ui.RoleNone)
+		if open != nil {
+			arrow.OnClick(func() { *open = !*open }).Draw(func(p *ui.Painter, r ui.Rect) {
+				drawFolderTreeArrow(p, r, *open, th.TextMuted.Alpha(.85))
+			})
+		}
+		folderColor := th.TextMuted.Alpha(.9)
+		if selected {
+			folderColor = th.Accent.Alpha(.85)
+		}
+		icon := lucide.Folder()
+		if root || (open != nil && *open) {
+			icon = lucide.FolderOpen()
+		}
+		components.Icon(c, icon).Size(14, 14).Shrink(0).TextColor(folderColor)
+		components.Text(c, name).FontSize(11.5).SingleLine().Shrink(1).MinWidth(0).Ellipsis("…")
+	})
+	row.Tooltip(p)
+	if row.Clicked() {
+		if root && open != nil {
+			*open = !*open
+		} else if !root {
+			a.goTo(p, true)
+		}
+	}
+
+	if open != nil {
+		item.Group(func() {
+			if !a.treeLoaded[p] {
+				a.folderTreeNote(c, "正在读取文件夹…", true, 39)
+				a.ensureTree(p)
+				return
+			}
+			kids := a.treeKids[p]
+			if len(kids) == 0 {
+				return
+			}
+			for _, kid := range kids {
+				a.folderTreeRow(c, tree, kid.Path, kid.Name, false, kid.HasChildren)
+			}
+		})
+	}
+}
+
+// folderTreeNote is the quiet loading/empty row inside a tree, aligned under
+// the child folder icons rather than floating at the section edge.
+func (a *App) folderTreeNote(c *ui.Context, text string, loading bool, padStart float32) {
+	th := c.Theme()
+	row := ui.Row(c).FillWidth().MinWidth(0).Height(26).PaddingStart(padStart).PaddingEnd(8).
+		Gap(6).AlignItems(ui.Center)
+	row.Children(func() {
+		if loading {
+			components.Spinner(c, components.SpinnerRing).Size(12, 12).Label(text)
+		} else {
+			components.Icon(c, lucide.Folder()).Size(13, 13).TextColor(th.TextMuted.Alpha(.62))
+		}
+		components.Text(c, text).FontSize(10.5).TextColor(th.TextMuted.Alpha(.88)).
+			SingleLine().Shrink(1).MinWidth(0).Ellipsis("…")
+	})
+}
+
+func drawFolderTreeArrow(p *ui.Painter, r ui.Rect, open bool, color ui.Color) {
+	var path ui.Path
+	if open {
+		path.MoveTo(r.X+r.W*.32, r.Y+r.H*.4).
+			LineTo(r.X+r.W*.5, r.Y+r.H*.6).
+			LineTo(r.X+r.W*.68, r.Y+r.H*.4)
+	} else {
+		path.MoveTo(r.X+r.W*.4, r.Y+r.H*.32).
+			LineTo(r.X+r.W*.6, r.Y+r.H*.5).
+			LineTo(r.X+r.W*.4, r.Y+r.H*.68)
+	}
+	p.StrokePath(&path, 1.2, color)
 }
 
 func (a *App) tabStrip(c *ui.Context) {

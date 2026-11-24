@@ -69,6 +69,39 @@ func TestBrowseRecursiveTruncated(t *testing.T) {
 	}
 }
 
+func TestTreeReportsChildFoldersAndMedia(t *testing.T) {
+	root := t.TempDir()
+	branch := filepath.Join(root, "branch")
+	empty := filepath.Join(root, "empty")
+	if err := os.Mkdir(branch, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(empty, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(branch, "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writePNG(t, filepath.Join(branch, "cover.png"), 20, 20)
+
+	entries := (FS{}).Tree(root, false)
+	if len(entries) != 2 {
+		t.Fatalf("tree entries = %+v", entries)
+	}
+	for _, e := range entries {
+		switch e.Name {
+		case "branch":
+			if !e.HasChildren || !e.HasMedia {
+				t.Fatalf("branch = %+v", e)
+			}
+		case "empty":
+			if e.HasChildren || e.HasMedia {
+				t.Fatalf("empty = %+v", e)
+			}
+		}
+	}
+}
+
 func TestParentOfDriveRoot(t *testing.T) {
 	res := (FS{}).Parent(`C:\`)
 	if res.Found {

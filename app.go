@@ -255,11 +255,12 @@ type App struct {
 	thumbLoad  map[string]bool
 	thumbOrder []string
 
-	treeOpen    map[string]*bool
-	treeLoaded  map[string]bool
-	treeLoading map[string]bool
-	treeKids    map[string][]TreeEntry
-	treeGen     int
+	treeOpen     map[string]*bool
+	treeRootOpen map[string]*bool
+	treeLoaded   map[string]bool
+	treeLoading  map[string]bool
+	treeKids     map[string][]TreeEntry
+	treeGen      int
 
 	statusMu sync.Mutex
 }
@@ -273,14 +274,15 @@ const thumbCacheMax = 420
 
 func newApp() *App {
 	a := &App{
-		settings:    getSettings(),
-		sidebar:     getSettings().Sidebar,
-		thumbs:      map[string]*thumbEntry{},
-		thumbLoad:   map[string]bool{},
-		treeOpen:    map[string]*bool{},
-		treeLoaded:  map[string]bool{},
-		treeLoading: map[string]bool{},
-		treeKids:    map[string][]TreeEntry{},
+		settings:     getSettings(),
+		sidebar:      getSettings().Sidebar,
+		thumbs:       map[string]*thumbEntry{},
+		thumbLoad:    map[string]bool{},
+		treeOpen:     map[string]*bool{},
+		treeRootOpen: map[string]*bool{},
+		treeLoaded:   map[string]bool{},
+		treeLoading:  map[string]bool{},
+		treeKids:     map[string][]TreeEntry{},
 	}
 	a.sidebarWidth = a.settings.SidebarWidth
 	a.places = (FS{}).Places()
@@ -1661,6 +1663,23 @@ func (a *App) pruneThumbs() {
 			delete(a.thumbs, key)
 		}
 	}
+}
+
+// treeRootOpenPtr returns the stable expansion flag of the current folder at
+// the top of the sidebar folder tree. A newly visited root starts expanded so
+// its children are visible without an extra click; collapsing it is remembered
+// for that folder until the app exits.
+func (a *App) treeRootOpenPtr(path string) *bool {
+	p := filepath.Clean(path)
+	if a.treeRootOpen == nil {
+		a.treeRootOpen = map[string]*bool{}
+	}
+	if v, ok := a.treeRootOpen[p]; ok {
+		return v
+	}
+	v := true
+	a.treeRootOpen[p] = &v
+	return &v
 }
 
 // treeOpenPtr returns the stable open flag of a folder in the sidebar tree.
