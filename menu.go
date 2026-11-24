@@ -66,7 +66,7 @@ func installMenu(a *App) {
 		{
 			Label: "帮助",
 			Submenu: []*mygo.MenuItem{
-				item("快捷键与手势", "F1", func() { a.showHelp = true; a.refresh() }),
+				item("快捷键与手势", "F1", a.openHelp),
 				item("检查更新…", "", func() { a.checkForUpdates() }),
 				mygo.Separator(),
 				item("关于 FlowVision", "", func() { a.showAbout = true; a.refresh() }),

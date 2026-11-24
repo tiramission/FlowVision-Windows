@@ -3,6 +3,7 @@ package main
 import (
 	"image"
 	"image/color"
+	"image/gif"
 	"image/png"
 	"os"
 	"path/filepath"
@@ -176,6 +177,107 @@ func TestViewerPointerMoveRestoresHiddenCursor(t *testing.T) {
 	}
 	if a.viewer.ChromeVisible {
 		t.Fatal("pointer move over the middle of the canvas showed the floating bars")
+	}
+}
+
+func TestViewerPhysicalPointerMovementRestoresCursor(t *testing.T) {
+	if !viewerCursorMoved(true, 10, 20, 11, 20) {
+		t.Fatal("physical pointer movement not detected")
+	}
+	if viewerCursorMoved(true, 10, 20, 10, 20) {
+		t.Fatal("unchanged physical pointer reported as movement")
+	}
+	if viewerCursorMoved(false, 10, 20, 11, 20) {
+		t.Fatal("first tracked sample should only establish the baseline")
+	}
+	a := newViewerGestureApp(t)
+	defer a.closeViewer()
+	a.viewer.CursorVisible = false
+	if !a.wakeViewerCursor() {
+		t.Fatal("wakeViewerCursor did not report a hidden cursor restored")
+	}
+	if !a.viewer.CursorVisible {
+		t.Fatal("wakeViewerCursor left the cursor hidden")
+	}
+	if !a.viewer.CursorUntil.After(time.Now()) {
+		t.Fatal("wakeViewerCursor did not extend the cursor deadline")
+	}
+}
+
+func TestVideoViewerPointerMoveRestoresHiddenCursor(t *testing.T) {
+	a := newViewTestApp()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "clip.gif")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	palette := color.Palette{color.RGBA{20, 20, 20, 255}, color.RGBA{230, 80, 70, 255}}
+	frames := make([]*image.Paletted, 0, 2)
+	for _, c := range []color.Color{palette[0], palette[1]} {
+		frame := image.NewPaletted(image.Rect(0, 0, 2, 2), palette)
+		for i := range frame.Pix {
+			if c == palette[1] {
+				frame.Pix[i] = 1
+			}
+		}
+		frames = append(frames, frame)
+	}
+	if err := gif.EncodeAll(f, &gif.GIF{Image: frames, Delay: []int{10, 10}, LoopCount: 0}); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoder, err := ui.NewGIFDecoder(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	player, err := ui.NewVideoPlayer(decoder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := &Item{ID: "v", Name: "clip.gif", Kind: "video", Path: path, Size: int64(len(data)), W: 2, H: 2}
+	tab := a.tab()
+	tab.All = []*Item{item}
+	tab.Items = tab.All
+	a.viewer = Viewer{
+		Open:          true,
+		Item:          item,
+		Index:         0,
+		Immersive:     true,
+		CursorVisible: false,
+		CursorUntil:   time.Time{},
+		Player:        player,
+	}
+	defer a.closeViewer()
+	tt := ui.NewTester(a.view, 900, 700)
+	tt.Move(450, 350)
+	tt.Frame()
+	if !a.viewer.CursorVisible {
+		t.Fatal("viewer cursor did not start visible")
+	}
+	if tt.Cursor() != ui.CursorDefault {
+		t.Fatalf("visible viewer cursor style = %v, want CursorDefault", tt.Cursor())
+	}
+	a.viewer.CursorVisible = false
+	a.viewer.CursorUntil = time.Time{}
+	tt.Frame()
+	if tt.Cursor() != ui.CursorNone {
+		t.Fatalf("hidden viewer cursor style = %v, want CursorNone", tt.Cursor())
+	}
+	tt.Move(452, 352)
+	tt.Frame()
+	if !a.viewer.CursorVisible {
+		t.Fatal("pointer movement over the video did not restore the cursor")
+	}
+	if tt.Cursor() != ui.CursorDefault {
+		t.Fatalf("restored viewer cursor style = %v, want CursorDefault", tt.Cursor())
 	}
 }
 

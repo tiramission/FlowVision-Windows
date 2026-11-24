@@ -21,6 +21,11 @@ var (
 	procCloseClipboard   = user32.NewProc("CloseClipboard")
 	procGetCursorPos     = user32.NewProc("GetCursorPos")
 	procGetWindowRect    = user32.NewProc("GetWindowRect")
+	procGetClientRect    = user32.NewProc("GetClientRect")
+	procScreenToClient   = user32.NewProc("ScreenToClient")
+	procGetCursorInfo    = user32.NewProc("GetCursorInfo")
+	procSetCursor        = user32.NewProc("SetCursor")
+	procLoadCursorW      = user32.NewProc("LoadCursorW")
 	procGetDpiForWindow  = user32.NewProc("GetDpiForWindow")
 	kernel32             = syscall.NewLazyDLL("kernel32.dll")
 	procGlobalAlloc      = kernel32.NewProc("GlobalAlloc")
@@ -49,11 +54,51 @@ type win32Rect struct {
 	Bottom int32
 }
 
+type win32CursorInfo struct {
+	Size   uint32
+	Flags  uint32
+	Cursor uintptr
+	Pos    win32Point
+}
+
 // cursorPosition reads the global mouse position in physical screen pixels.
 func cursorPosition() (int32, int32, bool) {
 	var p win32Point
 	r, _, _ := procGetCursorPos.Call(uintptr(unsafe.Pointer(&p)))
 	return p.X, p.Y, r != 0
+}
+
+// restoreCursorOverWindow re-asserts the standard arrow while the pointer is
+// inside hwnd and Windows currently reports it hidden. MyGo sets the pointer
+// from the element under it, but a hidden cursor can outlive the state change
+// when the video picture sits over the canvas. Restoring here is a native
+// safety net for that case, and it leaves visible custom cursors untouched.
+func restoreCursorOverWindow(hwnd uintptr) {
+	if hwnd == 0 {
+		return
+	}
+	var p win32Point
+	if r, _, _ := procGetCursorPos.Call(uintptr(unsafe.Pointer(&p))); r == 0 {
+		return
+	}
+	procScreenToClient.Call(hwnd, uintptr(unsafe.Pointer(&p)))
+	var client win32Rect
+	if r, _, _ := procGetClientRect.Call(hwnd, uintptr(unsafe.Pointer(&client))); r == 0 {
+		return
+	}
+	if p.X < client.Left || p.Y < client.Top || p.X >= client.Right || p.Y >= client.Bottom {
+		return
+	}
+	var ci win32CursorInfo
+	ci.Size = uint32(unsafe.Sizeof(ci))
+	if r, _, _ := procGetCursorInfo.Call(uintptr(unsafe.Pointer(&ci))); r == 0 {
+		return
+	}
+	if ci.Flags&1 != 0 { // CURSOR_SHOWING
+		return
+	}
+	arrow, _, _ := procLoadCursorW.Call(0, 32512) // IDC_ARROW
+	procSetCursor.Call(arrow)
 }
 
 // cursorAtWindowVerticalEdge tells whether the physical cursor is within

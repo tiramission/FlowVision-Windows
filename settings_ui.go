@@ -6,6 +6,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 	"github.com/oneo-me/onevra/source/components"
+	"github.com/oneo-me/onevra/source/icons/lucide"
 )
 
 // settingsModal presents the full settings catalog in Onevra's searchable
@@ -16,8 +17,8 @@ func (a *App) settingsModal(c *ui.Context) {
 		return
 	}
 	winW, winH := c.Size()
-	w := min(float32(860), winW-64)
-	h := min(float32(680), winH-96)
+	w := min(float32(880), winW-64)
+	h := min(float32(700), winH-96)
 	if w < 520 {
 		w = min(winW, 520)
 	}
@@ -58,6 +59,7 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 		{
 			ID: "appearance", Title: "外观", Section: "常规",
 			Description: "主题、缩略图与窗口布局",
+			Icon:        lucide.Palette(),
 			Groups: []components.SettingsGroup{
 				{
 					ID: "theme", Title: "主题与布局",
@@ -66,12 +68,15 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 							ID: "theme", Title: "主题",
 							Description: "跟随系统，或固定为浅色 / 深色",
 							Keywords:    []string{"theme", "dark", "light", "主题", "深色", "浅色"},
+							Leading:     settingsIcon(lucide.Monitor()),
 							Build:       a.themeSetting,
 						},
 						{
 							ID: "thumbs", Title: "缩略图宽度",
 							Description: "网格视图里的缩略图尺寸",
 							Keywords:    []string{"thumbnail", "thumb", "缩略图"},
+							Leading:     settingsIcon(lucide.Image()),
+							Stacked:     true,
 							Build: func(c *ui.Context) {
 								a.settingsSlider(c, &a.draftThumbSize, 96, 480, 8, "缩略图宽度", "px")
 							},
@@ -80,6 +85,8 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 							ID: "grid-gap", Title: "网格间距",
 							Description: "缩略图之间的空隙",
 							Keywords:    []string{"grid", "gap", "间距"},
+							Leading:     settingsIcon(lucide.Grid3x3()),
+							Stacked:     true,
 							Build: func(c *ui.Context) {
 								a.settingsSlider(c, &a.draftGridGap, 0, 24, 2, "网格间距", "px")
 							},
@@ -88,32 +95,24 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 							ID: "card-names", Title: "显示卡片文件名",
 							Description: "关闭后卡片只保留画面，瀑布流更沉浸",
 							Keywords:    []string{"caption", "filename", "name", "文件名", "卡片"},
+							Leading:     settingsIcon(lucide.Type()),
 							Build: func(c *ui.Context) {
 								components.Switch(c, &a.draft.ShowCardNames, "显示卡片文件名", components.SwitchOptions{HideLabel: true, Compact: true})
 							},
 						},
 						{
-							ID: "sidebar-width", Title: "侧边栏宽度",
-							Description: "侧边栏展开时占用的宽度",
+							ID: "sidebar", Title: "侧边栏",
+							Description: "显示左侧收藏、位置和目录树；滑块调整展开宽度",
 							Keywords:    []string{"sidebar", "width", "侧边栏", "宽度"},
+							Leading:     settingsIcon(lucide.PanelLeft()),
+							Stacked:     true,
 							Build: func(c *ui.Context) {
-								a.settingsSlider(c, &a.draftSidebarW, 160, 520, 4, "侧边栏宽度", "px")
-							},
-						},
-						{
-							ID: "sidebar", Title: "显示侧边栏",
-							Description: "左侧收藏、位置和目录树",
-							Keywords:    []string{"sidebar", "侧边栏"},
-							Build: func(c *ui.Context) {
-								components.Switch(c, &a.draft.Sidebar, "显示侧边栏", components.SwitchOptions{HideLabel: true, Compact: true})
-							},
-						},
-						{
-							ID: "info-panel", Title: "查看器默认显示信息面板",
-							Description: "窗口化查看器显示尺寸、路径和元数据；沉浸时隐藏",
-							Keywords:    []string{"info", "metadata", "信息", "元数据"},
-							Build: func(c *ui.Context) {
-								components.Switch(c, &a.draft.InfoPanel, "查看器默认显示信息面板", components.SwitchOptions{HideLabel: true, Compact: true})
+								ui.Row(c).FillWidth().Gap(16).AlignItems(ui.Center).Children(func() {
+									ui.Column(c).Grow(1).MinWidth(0).Children(func() {
+										a.settingsSlider(c, &a.draftSidebarW, 160, 520, 4, "侧边栏宽度", "px")
+									})
+									components.Switch(c, &a.draft.Sidebar, "显示侧边栏", components.SwitchOptions{HideLabel: true, Compact: true})
+								})
 							},
 						},
 					},
@@ -123,6 +122,7 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 		{
 			ID: "browsing", Title: "浏览", Section: "常规",
 			Description: "文件过滤、递归扫描和视频播放",
+			Icon:        lucide.FolderOpen(),
 			Groups: []components.SettingsGroup{
 				{
 					ID: "filter", Title: "文件显示",
@@ -131,6 +131,7 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 							ID: "hidden", Title: "显示隐藏文件",
 							Description: "包含以点开头或带隐藏属性的文件",
 							Keywords:    []string{"hidden", "隐藏"},
+							Leading:     settingsIcon(lucide.EyeOff()),
 							Build: func(c *ui.Context) {
 								components.Switch(c, &a.draft.ShowHidden, "显示隐藏文件", components.SwitchOptions{HideLabel: true, Compact: true})
 							},
@@ -139,6 +140,7 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 							ID: "other", Title: "显示非图片文件",
 							Description: "在图片网格里同时列出文档、压缩包等文件",
 							Keywords:    []string{"files", "other", "非图片"},
+							Leading:     settingsIcon(lucide.FileText()),
 							Build: func(c *ui.Context) {
 								components.Switch(c, &a.draft.ShowOther, "显示非图片文件", components.SwitchOptions{HideLabel: true, Compact: true})
 							},
@@ -147,6 +149,7 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 							ID: "recursive", Title: "递归扫描子文件夹",
 							Description: "最多向下扫描 5 层，适合整理照片库",
 							Keywords:    []string{"recursive", "folder", "递归", "子文件夹"},
+							Leading:     settingsIcon(lucide.FolderTree()),
 							Build: func(c *ui.Context) {
 								components.Switch(c, &a.draft.Recursive, "递归扫描子文件夹", components.SwitchOptions{HideLabel: true, Compact: true})
 							},
@@ -160,6 +163,7 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 							ID: "autoplay", Title: "打开视频时自动播放",
 							Description: "关闭后，查看器会停在视频第一帧",
 							Keywords:    []string{"video", "play", "视频", "播放"},
+							Leading:     settingsIcon(lucide.Play()),
 							Build: func(c *ui.Context) {
 								components.Switch(c, &a.draft.PlayVideo, "打开视频时自动播放", components.SwitchOptions{HideLabel: true, Compact: true})
 							},
@@ -168,6 +172,7 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 							ID: "loop", Title: "循环播放视频",
 							Description: "播放到结尾后从头继续",
 							Keywords:    []string{"video", "loop", "视频", "循环"},
+							Leading:     settingsIcon(lucide.Repeat()),
 							Build: func(c *ui.Context) {
 								components.Switch(c, &a.draft.LoopVideo, "循环播放视频", components.SwitchOptions{HideLabel: true, Compact: true})
 							},
@@ -181,12 +186,14 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 							ID: "sort", Title: "排序方式",
 							Description: "应用到当前标签页，并作为新标签页的默认值",
 							Keywords:    []string{"sort", "order", "排序"},
+							Leading:     settingsIcon(lucide.ArrowUpDown()),
 							Build:       a.sortSetting,
 						},
 						{
 							ID: "desc", Title: "降序排列",
 							Description: "名称从 Z 到 A，日期从新到旧",
 							Keywords:    []string{"descending", "降序"},
+							Leading:     settingsIcon(lucide.ArrowDownWideNarrow()),
 							Build: func(c *ui.Context) {
 								components.Switch(c, &a.draft.Desc, "降序排列", components.SwitchOptions{HideLabel: true, Compact: true})
 							},
@@ -196,8 +203,60 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 			},
 		},
 		{
+			ID: "control", Title: "控制", Section: "常规",
+			Description: "鼠标侧键、查看器信息与快捷键参考",
+			Icon:        lucide.MousePointerClick(),
+			Groups: []components.SettingsGroup{
+				{
+					ID: "side-buttons", Title: "鼠标侧键",
+					Items: []components.SettingsItem{
+						{
+							ID: "side-map", Title: "查看器侧键",
+							Description: "侧键在查看器里切换上一张 / 下一张；可按下实体侧键校准方向",
+							Keywords:    []string{"mouse", "side", "button", "back", "forward", "侧键", "鼠标", "校准"},
+							Leading:     settingsIcon(lucide.MousePointer2()),
+							Stacked:     true,
+							Build:       a.sideButtonSetting,
+						},
+					},
+				},
+				{
+					ID: "viewer-info", Title: "查看器",
+					Items: []components.SettingsItem{
+						{
+							ID: "info-panel", Title: "默认显示信息面板",
+							Description: "窗口化查看器显示尺寸、路径和元数据；沉浸时隐藏",
+							Keywords:    []string{"info", "metadata", "信息", "元数据"},
+							Leading:     settingsIcon(lucide.Info()),
+							Build: func(c *ui.Context) {
+								components.Switch(c, &a.draft.InfoPanel, "默认显示信息面板", components.SwitchOptions{HideLabel: true, Compact: true})
+							},
+						},
+					},
+				},
+				{
+					ID: "shortcut-help", Title: "帮助",
+					Items: []components.SettingsItem{
+						{
+							ID: "shortcuts", Title: "快捷键参考",
+							Description: "按场景查看浏览、网格、图片和视频查看器的全部快捷键",
+							Keywords:    []string{"shortcut", "help", "keyboard", "快捷键", "帮助"},
+							Leading:     settingsIcon(lucide.Keyboard()),
+							Build: func(c *ui.Context) {
+								if components.Button(c, "打开快捷键参考", components.ButtonSecondary).Clicked() {
+									a.showSettings = false
+									a.later(a.openHelp)
+								}
+							},
+						},
+					},
+				},
+			},
+		},
+		{
 			ID: "storage", Title: "缓存", Section: "维护",
 			Description: "缩略图磁盘缓存与占用",
+			Icon:        lucide.Database(),
 			Groups: []components.SettingsGroup{
 				{
 					ID: "cache", Title: "缩略图缓存",
@@ -206,16 +265,37 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 							ID: "cache-limit", Title: "缓存上限",
 							Description: fmt.Sprintf("当前占用 %s；超出上限后按最近使用清理", (MediaSvc{}).FormatSize(a.cacheInfo.Bytes)),
 							Keywords:    []string{"cache", "disk", "缓存", "磁盘"},
+							Leading:     settingsIcon(lucide.HardDrive()),
+							Stacked:     true,
 							Build: func(c *ui.Context) {
-								components.NumberInput(c.Key("settings-cache-limit"), &a.draftCacheLimit, 200, 20000, 100).
-									Label("缓存上限（MB）").Width(150)
-								components.Text(c, "MB").FontSize(10.5).TextColor(c.Theme().TextMuted)
+								th := c.Theme()
+								limit := float64(a.draft.CacheLimitMB) * 1024 * 1024
+								ratio := 0.0
+								if limit > 0 {
+									ratio = float64(a.cacheInfo.Bytes) / limit
+								}
+								ui.Column(c).Width(340).Gap(6).Children(func() {
+									ui.Row(c).Gap(8).Children(func() {
+										components.NumberInput(c.Key("settings-cache-limit"), &a.draftCacheLimit, 200, 20000, 100).
+											Label("缓存上限（MB）").Width(150)
+										components.Text(c, "MB").FontSize(10.5).TextColor(th.TextMuted)
+										ui.Spacer(c)
+										components.Text(c, fmt.Sprintf("已用 %d%%", int(math.Round(min(ratio, 1)*100)))).
+											FontSize(10.5).TextColor(th.TextMuted)
+									})
+									components.Progress(c, ratio).Label("缓存占用率").Height(3)
+									if ratio > 1 {
+										components.Text(c, "已超过上限，下次启动或浏览时会清理旧缩略图。").
+											FontSize(10).TextColor(th.Danger)
+									}
+								})
 							},
 						},
 						{
 							ID: "cache-clear", Title: "清理缩略图",
 							Description: fmt.Sprintf("%d 个缓存文件；清理后会在浏览时重新生成", a.cacheInfo.Files),
 							Keywords:    []string{"clear", "cache", "清理", "缓存"},
+							Leading:     settingsIcon(lucide.BrushCleaning()),
 							Stacked:     true,
 							Build: func(c *ui.Context) {
 								ui.Row(c).Gap(8).Children(func() {
@@ -235,6 +315,7 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 		{
 			ID: "updates", Title: "更新", Section: "维护",
 			Description: "版本与签名更新",
+			Icon:        lucide.RefreshCw(),
 			Groups: []components.SettingsGroup{
 				{
 					ID: "version", Title: "FlowVision",
@@ -243,6 +324,7 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 							ID: "version", Title: "当前版本",
 							Description: fmt.Sprintf("v%s · 从 GitHub Release 获取签名更新", appVersion()),
 							Keywords:    []string{"version", "update", "版本", "更新"},
+							Leading:     settingsIcon(lucide.CloudDownload()),
 							Build: func(c *ui.Context) {
 								if components.Button(c, "检查更新", components.ButtonSecondary).Clicked() {
 									a.checkForUpdates()
@@ -253,6 +335,7 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 							ID: "about", Title: "关于 FlowVision",
 							Description: "GPL-3.0 · Go / MyGo / Onevra 原生界面",
 							Keywords:    []string{"about", "关于", "license"},
+							Leading:     settingsIcon(lucide.Info()),
 							Build: func(c *ui.Context) {
 								if components.Button(c, "查看关于", components.ButtonGhost).Clicked() {
 									a.showSettings = false

@@ -146,6 +146,12 @@ type Viewer struct {
 	ChromeUntil   time.Time
 	CursorVisible bool
 	CursorUntil   time.Time
+	// CursorX and CursorY track the physical pointer between frames, so a
+	// pointer moving over the video layer wakes the cursor even when the
+	// video element, rather than the canvas, receives the motion.
+	CursorX       int32
+	CursorY       int32
+	CursorTracked bool
 	Info          MediaInfo
 	InfoReady     bool
 	Video         VideoMeta
@@ -195,9 +201,16 @@ type App struct {
 	places          []Place
 	drives          []Place
 
-	showHelp  bool
-	showAbout bool
-	errorMsg  string
+	showHelp   bool
+	helpFilter int
+	showAbout  bool
+	errorMsg   string
+
+	sideCalibrationOpen   bool
+	sideCalibrationTarget string
+	sideCalibrationGen    int
+	sideCaptureBinding    SideBinding
+	sideCaptureNote       string
 
 	updateOpen        bool
 	updatePhase       UpdatePhase
@@ -1098,6 +1111,11 @@ func (a *App) openViewer(it *Item) {
 		CursorUntil:   now.Add(viewerCursorIdle),
 	}
 	a.viewer.Index = t.indexOf(it.ID)
+	if x, y, ok := cursorPosition(); ok {
+		// Establish the baseline at open, so the first pointer movement after
+		// opening is recognized instead of being consumed as the initial sample.
+		a.viewer.CursorX, a.viewer.CursorY, a.viewer.CursorTracked = x, y, true
+	}
 	a.loadViewerMedia(it)
 	a.refresh()
 }
@@ -1221,15 +1239,36 @@ func (a *App) startViewerChromeTicker(gen int) {
 				if a.win == nil || !a.viewer.Immersive {
 					return
 				}
-				inTop, inBottom, ok := cursorAtWindowVerticalEdge(a.win.NativeHandle(), viewerChromeEdgeBandDIP)
-				if !ok {
-					return
+				x, y, pointerOK := cursorPosition()
+				pointerMoved := false
+				needRefresh := false
+				if pointerOK {
+					// A pointer moving over the video layer may never deliver a
+					// canvas input event. Watching the physical position keeps the
+					// cursor's own idle clock working there as over image content.
+					pointerMoved = viewerCursorMoved(a.viewer.CursorTracked, a.viewer.CursorX, a.viewer.CursorY, x, y)
+					a.viewer.CursorX, a.viewer.CursorY = x, y
+					a.viewer.CursorTracked = true
+					if pointerMoved {
+						if a.wakeViewerCursor() {
+							needRefresh = true
+						}
+						// Keep the native pointer in step even when the app already
+						// believes it is visible: a video surface can hide it out of
+						// band, and only physical movement tells us to restore it.
+						if a.viewer.CursorVisible && a.win != nil {
+							restoreCursorOverWindow(a.win.NativeHandle())
+						}
+					}
 				}
 				now := time.Now()
-				needRefresh := false
-				if inTop || inBottom {
-					// Keep the bars alive while the pointer rests at either
-					// edge. Leaving the edge starts the normal fade timer.
+				inTop, inBottom, edgeOK := false, false, false
+				if pointerOK {
+					inTop, inBottom, edgeOK = cursorAtWindowVerticalEdge(a.win.NativeHandle(), viewerChromeEdgeBandDIP)
+				}
+				if edgeOK && (inTop || inBottom) {
+					// Keep the bars alive while the pointer rests at either edge.
+					// Leaving the edge starts the normal fade timer.
 					a.viewer.ChromeUntil = now.Add(viewerChromeLinger)
 					if !a.viewer.ChromeVisible {
 						a.viewer.ChromeVisible = true

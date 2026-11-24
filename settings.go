@@ -19,25 +19,27 @@ type TabState struct {
 
 // Settings is the app's preferences, stored as settings.json in user data.
 type Settings struct {
-	Theme         string     `json:"theme"` // system | dark | light
-	ThumbSize     int        `json:"thumbSize"`
-	GridGap       int        `json:"gridGap"`
-	ShowCardNames bool       `json:"showCardNames"`
-	Sort          string     `json:"sort"` // name | date | size | type
-	Desc          bool       `json:"desc"`
-	ShowHidden    bool       `json:"showHidden"`
-	ShowOther     bool       `json:"showOther"`
-	Recursive     bool       `json:"recursive"`
-	Sidebar       bool       `json:"sidebar"`
-	SidebarWidth  int        `json:"sidebarWidth"`
-	InfoPanel     bool       `json:"infoPanel"`
-	PlayVideo     bool       `json:"playVideo"`
-	LoopVideo     bool       `json:"loopVideo"`
-	LastPath      string     `json:"lastPath"`
-	Favorites     []string   `json:"favorites"`
-	Tabs          []TabState `json:"tabs"`
-	ActiveTab     int        `json:"activeTab"`
-	CacheLimitMB  int        `json:"cacheLimitMB"`
+	Theme         string      `json:"theme"` // system | dark | light
+	ThumbSize     int         `json:"thumbSize"`
+	GridGap       int         `json:"gridGap"`
+	ShowCardNames bool        `json:"showCardNames"`
+	Sort          string      `json:"sort"` // name | date | size | type
+	Desc          bool        `json:"desc"`
+	ShowHidden    bool        `json:"showHidden"`
+	ShowOther     bool        `json:"showOther"`
+	Recursive     bool        `json:"recursive"`
+	Sidebar       bool        `json:"sidebar"`
+	SidebarWidth  int         `json:"sidebarWidth"`
+	InfoPanel     bool        `json:"infoPanel"`
+	PlayVideo     bool        `json:"playVideo"`
+	LoopVideo     bool        `json:"loopVideo"`
+	LastPath      string      `json:"lastPath"`
+	Favorites     []string    `json:"favorites"`
+	Tabs          []TabState  `json:"tabs"`
+	ActiveTab     int         `json:"activeTab"`
+	CacheLimitMB  int         `json:"cacheLimitMB"`
+	SidePrev      SideBinding `json:"sidePrev"`
+	SideNext      SideBinding `json:"sideNext"`
 }
 
 func defaultSettings() Settings {
@@ -57,6 +59,8 @@ func defaultSettings() Settings {
 		PlayVideo:     true,
 		LoopVideo:     false,
 		CacheLimitMB:  1500,
+		SidePrev:      defaultSidePrev(),
+		SideNext:      defaultSideNext(),
 	}
 }
 
@@ -126,6 +130,7 @@ func mergeSettings(def, s Settings) Settings {
 	if s.Tabs == nil {
 		s.Tabs = []TabState{}
 	}
+	s.SidePrev, s.SideNext = mergeSideBindings(s.SidePrev, s.SideNext, def.SidePrev, def.SideNext)
 	return s
 }
 

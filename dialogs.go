@@ -11,6 +11,7 @@ import (
 
 func (a *App) overlays(c *ui.Context) {
 	a.settingsModal(c)
+	a.sideCalibrationModal(c)
 	a.renameModal(c)
 	a.newFolderModal(c)
 	a.deleteModal(c)
@@ -167,65 +168,6 @@ func (a *App) errorModal(c *ui.Context) {
 	if !open {
 		a.errorMsg = ""
 	}
-}
-
-func (a *App) helpModal(c *ui.Context) {
-	if !a.showHelp {
-		return
-	}
-	th := c.Theme()
-	ui.Modal(c, &a.showHelp, func() {
-		ui.Column(c).Width(580).Gap(11).Children(func() {
-			dialogHeader(c, lucide.Keyboard(), "快捷键与手势", "原生控件，所有操作都在窗口内完成")
-			ui.Scroll(c).Height(340).Children(func() {
-				ui.Column(c).Gap(5).Children(func() {
-					shortcutRow(c, "Ctrl+O", "打开文件夹")
-					shortcutRow(c, "Ctrl+T", "新建标签页")
-					shortcutRow(c, "Ctrl+W", "关闭标签页")
-					shortcutRow(c, "Ctrl+[", "返回上一个位置")
-					shortcutRow(c, "Ctrl+↑", "上一级文件夹")
-					shortcutRow(c, "Ctrl+← / →", "上一个 / 下一个文件夹")
-					shortcutRow(c, "Ctrl+B", "显示 / 隐藏侧边栏")
-					shortcutRow(c, "Ctrl+R", "递归扫描")
-					shortcutRow(c, "Ctrl+= / -", "放大 / 缩小缩略图")
-					shortcutRow(c, "Ctrl+,", "设置")
-					shortcutRow(c, "双击文件夹 / 图片", "打开文件夹或查看器")
-					shortcutRow(c, "Enter / Space", "打开选中的文件夹或图片")
-					shortcutRow(c, "← ↑ → ↓", "在网格中选择")
-					shortcutRow(c, "F2", "重命名")
-					shortcutRow(c, "Delete", "移到回收站")
-					shortcutRow(c, "Ctrl+A", "全选")
-					shortcutRow(c, "Esc", "取消选择 / 关闭查看器")
-					shortcutRow(c, "F11", "主窗口全屏；查看器内切换沉浸")
-					shortcutRow(c, "查看器：+ / -", "缩放")
-					shortcutRow(c, "查看器：R / Shift+R", "顺时针 / 逆时针旋转")
-					shortcutRow(c, "查看器：0", "适合窗口")
-					shortcutRow(c, "查看器：1", "100% 原始像素")
-					shortcutRow(c, "查看器：C", "图片居中")
-					shortcutRow(c, "查看器：← / →", "上一张 / 下一张")
-					shortcutRow(c, "查看器：鼠标侧键", "上一张 / 下一张")
-					shortcutRow(c, "查看器：长按左键 / 右键", "100% / 适应窗口")
-					shortcutRow(c, "查看器：I", "显示 / 隐藏信息")
-					components.Text(c, "网格支持拖入文件或文件夹；拖动查看器中的图片可平移；查看器沉浸在主窗口内，顶部/底部浮层只在鼠标到达边缘时出现，光标则按独立空闲计时隐藏并在移动时恢复。").FontSize(10.5).TextColor(th.TextMuted)
-				})
-			})
-			ui.Row(c).Justify(ui.End).Children(func() {
-				if components.Button(c, "关闭", components.ButtonPrimary).Clicked() {
-					a.showHelp = false
-				}
-			})
-		})
-	})
-}
-
-func shortcutRow(c *ui.Context, key, what string) {
-	th := c.Theme()
-	ui.Row(c).Gap(12).Children(func() {
-		ui.Box(c).Width(158).Padding(4, 8).Radius(6).Background(th.SurfaceHover).Children(func() {
-			components.Text(c, key).FontSize(11.5).FontWeight(600).SingleLine()
-		})
-		components.Text(c, what).FontSize(11.5).TextColor(th.TextMuted).Grow(1)
-	})
 }
 
 func (a *App) aboutModal(c *ui.Context) {

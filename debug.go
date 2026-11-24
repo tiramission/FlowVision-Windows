@@ -51,6 +51,12 @@ type debugState struct {
 	ShowHidden      bool     `json:"showHidden"`
 	ShowCardNames   bool     `json:"showCardNames"`
 	ShowSettings    bool     `json:"showSettings"`
+	SettingsCat     string   `json:"settingsCategory"`
+	SideCalOpen     bool     `json:"sideCalibrationOpen"`
+	SideCalTarget   string   `json:"sideCalibrationTarget"`
+	SideCalCapture  string   `json:"sideCalibrationCapture"`
+	SidePrev        string   `json:"sidePrev"`
+	SideNext        string   `json:"sideNext"`
 	ShowHelp        bool     `json:"showHelp"`
 	ShowAbout       bool     `json:"showAbout"`
 	UpdateOpen      bool     `json:"updateOpen"`
@@ -81,6 +87,12 @@ func debugSnapshot() debugState {
 	st.ShowHidden = app.settings.ShowHidden
 	st.ShowCardNames = app.settings.ShowCardNames
 	st.ShowSettings = app.showSettings
+	st.SettingsCat = app.settingsUI.Category
+	st.SideCalOpen = app.sideCalibrationOpen
+	st.SideCalTarget = app.sideCalibrationTarget
+	st.SideCalCapture = sideBindingLabel(app.sideCaptureBinding)
+	st.SidePrev = sideBindingLabel(app.settings.SidePrev)
+	st.SideNext = sideBindingLabel(app.settings.SideNext)
 	st.ShowHelp = app.showHelp
 	st.ShowAbout = app.showAbout
 	st.UpdateOpen = app.updateOpen
@@ -394,11 +406,27 @@ func debugCommand(name, arg string) {
 		app.sibling(i)
 	case "settings":
 		app.openSettings()
+		if arg != "" {
+			app.settingsUI.Category = arg
+			app.refresh()
+		}
+	case "sidecalib":
+		if arg == "" {
+			arg = "prev"
+		}
+		app.beginSideCalibration(arg)
+	case "closeui":
+		app.closeViewer()
+		app.showSettings = false
+		app.showHelp = false
+		app.showAbout = false
+		app.updateOpen = false
+		app.sideCalibrationOpen = false
+		app.refresh()
 	case "applysettings":
 		app.applySettings()
 	case "help":
-		app.showHelp = true
-		app.refresh()
+		app.openHelp()
 	case "about":
 		app.showAbout = true
 		app.refresh()

@@ -256,9 +256,10 @@ func (a *App) viewerHeader(c *ui.Context, it *Item, th *ui.Theme, floating bool)
 func (a *App) viewerShortcuts(c *ui.Context, it *Item) {
 	c.OnWindowShortcut(0, ui.KeyLeft, func() { a.viewerStep(-1) })
 	c.OnWindowShortcut(0, ui.KeyRight, func() { a.viewerStep(1) })
-	// Windows mouse side buttons arrive as back/forward keys.
-	c.OnWindowShortcut(0, ui.KeyBack, func() { a.viewerStep(-1) })
-	c.OnWindowShortcut(0, ui.KeyForward, func() { a.viewerStep(1) })
+	// Windows mouse side buttons arrive as back/forward keys. Their mapping is
+	// calibrated in settings because vendors can swap the two physical buttons
+	// or send a different named key.
+	a.viewerSideShortcuts(c)
 	if !a.viewerImmersive() {
 		// The info panel is deliberately absent in immersive viewer mode; F11
 		// returns to the windowed layout where it can be shown again.
@@ -484,18 +485,36 @@ func (a *App) finishViewerHold(c *ui.Context) {
 // canvas wakes it even when the floating bars are hidden, so the two
 // visibility states cannot strand a hidden cursor.
 func (a *App) showViewerCursor() {
-	if !a.viewer.Open || !a.viewer.Immersive {
-		return
-	}
-	a.viewer.CursorUntil = time.Now().Add(viewerCursorIdle)
-	if !a.viewer.CursorVisible {
-		a.viewer.CursorVisible = true
+	if a.wakeViewerCursor() {
 		a.refresh()
 	}
 }
 
+// wakeViewerCursor extends the cursor's idle clock and reports whether it
+// changed from hidden to visible. Input handlers and the chrome ticker both use
+// it, so the cursor wakes whether a pointer event reaches the canvas or only
+// the physical pointer moved.
+func (a *App) wakeViewerCursor() bool {
+	if !a.viewer.Open || !a.viewer.Immersive {
+		return false
+	}
+	a.viewer.CursorUntil = time.Now().Add(viewerCursorIdle)
+	if !a.viewer.CursorVisible {
+		a.viewer.CursorVisible = true
+		if a.win != nil {
+			restoreCursorOverWindow(a.win.NativeHandle())
+		}
+		return true
+	}
+	return false
+}
+
 func viewerCursorShouldHide(immersive, visible bool, now, until time.Time) bool {
 	return immersive && visible && !now.Before(until)
+}
+
+func viewerCursorMoved(tracked bool, x0, y0, x, y int32) bool {
+	return tracked && (x != x0 || y != y0)
 }
 
 func (a *App) viewerCanvas(c *ui.Context, it *Item, th *ui.Theme) {
@@ -546,6 +565,15 @@ func (a *App) viewerCanvas(c *ui.Context, it *Item, th *ui.Theme) {
 			ui.Video(c, a.viewer.Player).Absolute().Fill().Fit(ui.Contain).IgnoreInput(true)
 		}
 		if it.Kind == "video" {
+			// The video branch returns before the image canvas handler below.
+			// Without its own handler, moving over the video never woke the
+			// independently timed cursor, leaving the pointer hidden over a
+			// playing video. The physical-pointer ticker is a second net for
+			// events the video layer consumes.
+			box.HandleInput(func(ev ui.InputEvent) bool {
+				a.showViewerCursor()
+				return false
+			})
 			if box.DoubleClicked() {
 				a.viewerToggleImmersive()
 			} else if box.Clicked() {

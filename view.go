@@ -166,6 +166,7 @@ func (a *App) viewShortcuts(c *ui.Context) {
 	c.OnWindowShortcut(0, ui.KeyA, func() { a.sibling(-1) })
 	c.OnWindowShortcut(0, ui.KeyD, func() { a.sibling(1) })
 	c.OnWindowShortcut(0, ui.KeyF5, func() { a.loadTab(a.tab(), false) })
+	c.OnWindowShortcut(0, ui.KeyF1, a.openHelp)
 	c.OnWindowShortcut(0, ui.KeyF11, func() { a.toggleWindowFullscreen() })
 	c.OnWindowShortcut(ui.Ctrl, ui.KeyF, func() {
 		a.focusSearch = true
@@ -240,7 +241,7 @@ func (a *App) sidebarView(c *ui.Context) {
 			components.IconButton(c, lucide.SlidersHorizontal(), "设置", components.IconButtonPlain).
 				OnClick(a.openSettings)
 			components.IconButton(c, lucide.Keyboard(), "快捷键帮助", components.IconButtonPlain).
-				OnClick(func() { a.showHelp = true })
+				OnClick(a.openHelp)
 			ui.Spacer(c)
 			components.Text(c, "v"+appVersion()).FontSize(10).TextColor(th.TextMuted).Padding(0, 4)
 		})
@@ -377,14 +378,19 @@ func (a *App) tabStrip(c *ui.Context) {
 		// The native menu is keyboard-only once the app draws its own title
 		// bar, so keep the update command visible in the title bar. A newer
 		// version tints the icon until the user opens or dismisses the panel.
+		// The new-tab action stays next to the tab strip; both use the same
+		// plain 30×30 face, so the old raised capsule no longer dominates the
+		// title bar.
+		components.IconButton(c, lucide.Plus(), "新建标签页 (Ctrl+T)", components.IconButtonPlain).
+			Size(30, 30).Tooltip("新建标签页 (Ctrl+T)").
+			OnClick(func() { a.later(func() { a.newTab("") }) })
+		ui.Box(c).Width(1).Height(18).Background(th.Border.Alpha(.65)).Margin(0, 6)
 		updateBtn := components.IconButton(c, lucide.CloudDownload(), "检查更新", components.IconButtonPlain).
 			Size(30, 30).Tooltip("从 GitHub Release 检查签名更新")
 		if a.updateAvailable != nil {
 			updateBtn.TextColor(th.Accent)
 		}
 		updateBtn.OnClick(a.checkForUpdates)
-		components.IconButton(c, lucide.Plus(), "新建标签页 (Ctrl+T)", components.IconButtonToolbar).
-			OnClick(func() { a.later(func() { a.newTab("") }) })
 	})
 }
 
@@ -404,6 +410,10 @@ func (a *App) toolbar(c *ui.Context) {
 				OnClick(func() { a.sibling(-1) })
 			components.IconButton(c, lucide.ChevronRight(), "下一文件夹", components.IconButtonPlain).
 				OnClick(func() { a.sibling(1) })
+			ui.Box(c).Width(1).Height(20).Background(th.Border.Alpha(.55)).Margin(2, 6)
+			components.IconButton(c, lucide.RefreshCw(), "刷新当前文件夹 (F5)", components.IconButtonPlain).
+				Disabled(tab.Loading).
+				OnClick(func() { a.loadTab(tab, false) })
 
 			ui.Column(c).Grow(1).MinWidth(0).PaddingX(8).Clip().Children(func() {
 				components.Text(c, tab.Name).FontSize(17).FontWeight(600).SingleLine().Ellipsis("…")
