@@ -13,6 +13,7 @@ import (
 func (a *App) view(c *ui.Context) {
 	c.SetTheme(a.uiTheme(c))
 	th := c.Theme()
+	_, winH := c.Size()
 	if a.viewer.Open {
 		// The viewer owns the whole window while it is open. Building the
 		// normal chrome underneath would keep native hit targets alive — most
@@ -23,17 +24,27 @@ func (a *App) view(c *ui.Context) {
 	}
 	a.viewShortcuts(c)
 	ui.Column(c).Fill().Background(th.Background).Children(func() {
-		a.titleBar(c)
+		// The sidebar is a genuine left column, not a strip below the title bar.
+		// Its surface and right hairline run the full height of the window, while
+		// the workbench owns the title bar, toolbar, content and status bar.
 		ui.Row(c).Grow(1).FillWidth().Children(func() {
 			if a.sidebar {
 				a.sidebarView(c)
 			}
 			ui.Column(c).Grow(1).FillHeight().Children(func() {
+				a.titleBar(c)
 				a.toolbar(c)
 				a.content(c)
 				a.statusBar(c)
 			})
 		})
+
+		// Draw the shell's internal grid at one level. Letting each panel paint
+		// its own edge made the vertical sidebar rule change width where the
+		// header, navigation and footer met it, and put the footer/status
+		// dividers on two different y positions. These overlays join at exact
+		// coordinates and sit above every surface.
+		a.shellHairlines(c, winH, th)
 	})
 
 	a.overlays(c)
@@ -42,31 +53,68 @@ func (a *App) view(c *ui.Context) {
 
 const titleBarHeight float32 = 48
 
-// titleBar is the window's own title bar. The system's caption and buttons are
-// gone (WindowOptions.HideWindowButtons), so the brand, tabs and window controls
-// live in one row that drags the window like a caption; the content below
-// starts at the same y the old tab strip did.
+// The sidebar footer and the workbench status bar share one height so their
+// top hairlines form a single full-width line, not two steps.
+const bottomBarHeight float32 = 40
+
+// shellHairlines paints the frame's internal joints after all panels. A
+// 1 DIP line at the sidebar edge runs continuously through the brand header,
+// navigation, footer and status bar; the title-bar and bottom dividers run the
+// full width. Painting these here avoids child borders fighting over the same
+// corner pixels.
+func (a *App) shellHairlines(c *ui.Context, winH float32, th *ui.Theme) {
+	// Resolve the hairline against the panel surface once. Drawing a translucent
+	// rule twice at a T-junction darkened the joint by another alpha step; an
+	// opaque pre-blended color keeps every segment the same weight.
+	hair := th.Border.Alpha(.55).Over(th.Surface)
+	ui.Box(c).Absolute().Left(0).Right(0).Top(titleBarHeight).Height(1).
+		Background(hair).PassThrough()
+	ui.Box(c).Absolute().Left(0).Right(0).Top(winH - bottomBarHeight).Height(1).
+		Background(hair).PassThrough()
+	if a.sidebar {
+		ui.Box(c).Absolute().Left(float32(a.sidebarWidth) - 1).Top(0).Width(1).Height(winH).
+			Background(hair).PassThrough()
+	}
+}
+
+// brandContent draws the app mark and wordmark. It is shared by the sidebar
+// header and the collapsed-sidebar title bar so the identity stays in the same
+// visual language in both layouts.
+func (a *App) brandContent(c *ui.Context) {
+	th := c.Theme()
+	ui.Box(c).Size(28, 28).Radius(9).Background(th.Accent.Alpha(.13)).Center().Children(func() {
+		components.Icon(c, lucide.Images).Size(16, 16).TextColor(th.Accent)
+	})
+	components.Text(c, "FlowVision").FontSize(13).FontWeight(600).SingleLine()
+}
+
+// brandHeader is the 48 DIP header at the top of the full-height sidebar. The
+// shared shell divider below it continues into the workbench title bar; its
+// right edge meets the sidebar's full-height vertical hairline.
+func (a *App) brandHeader(c *ui.Context) {
+	th := c.Theme()
+	ui.Row(c).Height(titleBarHeight).FillWidth().Background(th.Surface).
+		Padding(0, 0, 0, 16).Gap(9).AlignItems(ui.Center).DragWindow().
+		Children(func() { a.brandContent(c) })
+}
+
+// titleBar is the workbench's title bar. With the sidebar open, the brand lives
+// in the sidebar header and this row starts at the sidebar's right hairline; with
+// the sidebar collapsed the brand returns here and the row spans the window.
 func (a *App) titleBar(c *ui.Context) {
 	th := c.Theme()
 	bar := ui.Row(c).Height(titleBarHeight).FillWidth().Background(th.Surface).
-		Padding(0, 0, 0, 12).Gap(8).AlignItems(ui.Center).DragWindow()
-	bar.BorderWidth(0, 0, 1, 0).BorderColor(th.Border.Alpha(.55))
+		Gap(8).AlignItems(ui.Center).DragWindow()
+	if !a.sidebar {
+		bar.Padding(0, 0, 0, 12)
+	}
 	bar.Children(func() {
-		brand := ui.Row(c).Height(titleBarHeight).Gap(9).Padding(0, 6, 0, 0).AlignItems(ui.Center).DragWindow()
-		if a.sidebar {
-			// Keep the brand aligned over the sidebar, so the tab row begins at
-			// the content column's left edge.
-			brand.Width(float32(a.sidebarWidth) - 12)
+		if !a.sidebar {
+			brand := ui.Row(c).Height(titleBarHeight).Gap(9).
+				Padding(0, 6, 0, 0).AlignItems(ui.Center).DragWindow()
+			brand.Children(func() { a.brandContent(c) })
+			ui.Box(c).Width(1).Height(22).Background(th.Border).Margin(0, 4)
 		}
-		brand.Children(func() {
-			ui.Box(c).Size(28, 28).Radius(9).Background(th.Accent.Alpha(.13)).Center().Children(func() {
-				components.Icon(c, lucide.Images).Size(16, 16).TextColor(th.Accent)
-			})
-			components.Text(c, "FlowVision").FontSize(13).FontWeight(600).SingleLine()
-		})
-
-		ui.Box(c).Width(1).Height(22).Background(th.Border).Margin(0, 4)
-
 		a.tabStrip(c)
 		a.windowControls(c)
 	})
@@ -177,11 +225,11 @@ func (a *App) viewShortcuts(c *ui.Context) {
 func (a *App) sidebarView(c *ui.Context) {
 	th := c.Theme()
 	side := ui.Column(c).Width(float32(a.sidebarWidth)).FillHeight().Background(th.Surface)
-	side.BorderEndWidth(1).BorderColor(th.Border.Alpha(.55))
 	side.Children(func() {
-		// The brand and window controls live in the custom title bar above;
-		// the sidebar starts directly with navigation so the window does not
-		// spend a second row on identity.
+		// The sidebar owns the app mark at the top of its full-height column.
+		// The workbench title bar starts to its right, so the tab row and its
+		// left hairline share one continuous boundary instead of two offsets.
+		a.brandHeader(c)
 		ui.Scroll(c).Grow(1).Padding(8, 6, 8, 8).Children(func() {
 			components.Sidebar(c).Children(func() {
 				components.SidebarSection(c, "收藏", func() {
@@ -237,15 +285,15 @@ func (a *App) sidebarView(c *ui.Context) {
 			})
 		})
 
-		ui.Row(c).Height(40).Padding(7, 8, 7, 8).Gap(2).Background(th.Surface).
-			BorderWidth(1, 0, 0, 0).BorderColor(th.Border.Alpha(.55)).Children(func() {
-			components.IconButton(c, lucide.SlidersHorizontal(), "设置", components.IconButtonPlain).
-				OnClick(a.openSettings)
-			components.IconButton(c, lucide.Keyboard(), "快捷键帮助", components.IconButtonPlain).
-				OnClick(a.openHelp)
-			ui.Spacer(c)
-			components.Text(c, "v"+appVersion()).FontSize(9.5).TextColor(th.TextMuted.Alpha(.75)).Padding(0, 4)
-		})
+		ui.Row(c).Height(bottomBarHeight).Padding(7, 8, 7, 8).Gap(2).Background(th.Surface).
+			Children(func() {
+				components.IconButton(c, lucide.SlidersHorizontal(), "设置", components.IconButtonPlain).
+					OnClick(a.openSettings)
+				components.IconButton(c, lucide.Keyboard(), "快捷键帮助", components.IconButtonPlain).
+					OnClick(a.openHelp)
+				ui.Spacer(c)
+				components.Text(c, "v"+appVersion()).FontSize(9.5).TextColor(th.TextMuted.Alpha(.75)).Padding(0, 4)
+			})
 	})
 }
 
@@ -343,7 +391,13 @@ func (a *App) treeFolder(c *ui.Context, path, name string) {
 
 func (a *App) tabStrip(c *ui.Context) {
 	th := c.Theme()
-	ui.Row(c).Grow(1).MinWidth(0).Height(titleBarHeight).AlignItems(ui.Center).Children(func() {
+	strip := ui.Row(c).Grow(1).MinWidth(0).Height(titleBarHeight).AlignItems(ui.Center)
+	if a.sidebar {
+		// In the split layout the first tab card starts at the same inset as the
+		// content column, instead of floating away from the sidebar hairline.
+		strip.Padding(0, 0, 0, 16)
+	}
+	strip.Children(func() {
 		ui.Box(c).Grow(1).MinWidth(0).Height(titleBarHeight).Children(func() {
 			ui.ScrollHorizontal(c).FillWidth().FillHeight().Scrollbars(false).DragWindow().
 				TrackScroll(&a.tabScroll).Children(func() {
@@ -462,7 +516,13 @@ func (a *App) toolbar(c *ui.Context) {
 		return
 	}
 	colW, _ := c.Size()
-	compact := colW < 900
+	if a.sidebar {
+		colW -= float32(a.sidebarWidth)
+	}
+	// Use the workbench's own width, not the whole window: with the split
+	// sidebar open the search/sort row has substantially less room than the
+	// title bar. Below this width the switches move to a second row.
+	compact := colW < 840
 
 	buildSearch := func() {
 		ui.Box(c.Key(fmt.Sprintf("search-%d", tab.ID))).Grow(1).MinWidth(0).MaxWidth(420).Children(func() {
@@ -674,42 +734,42 @@ func (a *App) statusBar(c *ui.Context) {
 	if tab == nil {
 		return
 	}
-	ui.Row(c).Height(32).Padding(0, 14).Gap(10).AlignItems(ui.Center).Background(th.Surface).
-		BorderWidth(1, 0, 0, 0).BorderColor(th.Border.Alpha(.55)).Children(func() {
-		components.Text(c, fmt.Sprintf("%d 项", len(tab.Items))).FontSize(11).TextColor(th.TextMuted).
-			AlignSelf(ui.Center)
-		if tab.Query != "" && len(tab.Items) != len(tab.All) {
-			components.Text(c, fmt.Sprintf("（共 %d 项）", len(tab.All))).FontSize(11).TextColor(th.TextMuted).
+	ui.Row(c).Height(bottomBarHeight).Padding(0, 14).Gap(10).AlignItems(ui.Center).Background(th.Surface).
+		Children(func() {
+			components.Text(c, fmt.Sprintf("%d 项", len(tab.Items))).FontSize(11).TextColor(th.TextMuted).
 				AlignSelf(ui.Center)
-		}
-		counts := fmt.Sprintf("%d 图片 · %d 视频", countKind(tab.Items, "image"), countKind(tab.Items, "video"))
-		if n := countKind(tab.Items, "folder"); n > 0 {
-			counts += fmt.Sprintf(" · %d 文件夹", n)
-		}
-		components.Text(c, counts).FontSize(11).TextColor(th.TextMuted).AlignSelf(ui.Center)
-		if n := len(tab.Selected); n > 0 {
-			components.Text(c, fmt.Sprintf("已选 %d 项", n)).FontSize(11).TextColor(th.Accent).
+			if tab.Query != "" && len(tab.Items) != len(tab.All) {
+				components.Text(c, fmt.Sprintf("（共 %d 项）", len(tab.All))).FontSize(11).TextColor(th.TextMuted).
+					AlignSelf(ui.Center)
+			}
+			counts := fmt.Sprintf("%d 图片 · %d 视频", countKind(tab.Items, "image"), countKind(tab.Items, "video"))
+			if n := countKind(tab.Items, "folder"); n > 0 {
+				counts += fmt.Sprintf(" · %d 文件夹", n)
+			}
+			components.Text(c, counts).FontSize(11).TextColor(th.TextMuted).AlignSelf(ui.Center)
+			if n := len(tab.Selected); n > 0 {
+				components.Text(c, fmt.Sprintf("已选 %d 项", n)).FontSize(11).TextColor(th.Accent).
+					AlignSelf(ui.Center)
+			}
+			if tab.Result.Truncated {
+				components.Text(c, "已截断").FontSize(11).TextColor(th.TextMuted).AlignSelf(ui.Center)
+			}
+			ui.Spacer(c)
+			if a.settings.Recursive {
+				components.Badge(c, "递归", components.BadgeOptions{Tone: components.BadgeWarning}).
+					AlignSelf(ui.Center)
+			}
+			if a.settings.ShowHidden {
+				components.Badge(c, "隐藏", components.BadgeOptions{Tone: components.BadgeNeutral}).
+					AlignSelf(ui.Center)
+			}
+			if !a.settings.ShowCardNames {
+				components.Badge(c, "文件名已隐藏", components.BadgeOptions{Tone: components.BadgeNeutral}).
+					AlignSelf(ui.Center)
+			}
+			components.Text(c, "F1 快捷键").FontSize(10).TextColor(th.TextMuted.Alpha(.88)).
 				AlignSelf(ui.Center)
-		}
-		if tab.Result.Truncated {
-			components.Text(c, "已截断").FontSize(11).TextColor(th.TextMuted).AlignSelf(ui.Center)
-		}
-		ui.Spacer(c)
-		if a.settings.Recursive {
-			components.Badge(c, "递归", components.BadgeOptions{Tone: components.BadgeWarning}).
-				AlignSelf(ui.Center)
-		}
-		if a.settings.ShowHidden {
-			components.Badge(c, "隐藏", components.BadgeOptions{Tone: components.BadgeNeutral}).
-				AlignSelf(ui.Center)
-		}
-		if !a.settings.ShowCardNames {
-			components.Badge(c, "文件名已隐藏", components.BadgeOptions{Tone: components.BadgeNeutral}).
-				AlignSelf(ui.Center)
-		}
-		components.Text(c, "F1 快捷键").FontSize(10).TextColor(th.TextMuted.Alpha(.88)).
-			AlignSelf(ui.Center)
-	})
+		})
 }
 
 func countKind(items []*Item, kind string) int {

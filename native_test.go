@@ -499,6 +499,35 @@ func TestThumbKeyIncludesVersion(t *testing.T) {
 	}
 }
 
+func TestWindowMinimumWidthTracksSidebar(t *testing.T) {
+	if got := windowMinWidth(false, 248); got != minWindowWidth {
+		t.Fatalf("collapsed sidebar min width = %d, want %d", got, minWindowWidth)
+	}
+	if got := windowMinWidth(true, 248); got != minWindowWidth {
+		t.Fatalf("default sidebar min width = %d, want %d", got, minWindowWidth)
+	}
+	// A wide sidebar must push the native floor out instead of squeezing the
+	// workbench below the width its title bar and toolbar need.
+	if got := windowMinWidth(true, 520); got != 1040 {
+		t.Fatalf("wide sidebar min width = %d, want 1040", got)
+	}
+}
+
+func TestNativeViewBuildsAtMinimumContentSize(t *testing.T) {
+	a := newViewTestApp()
+	a.settings.Sidebar = true
+	a.sidebar = true
+	a.sidebarWidth = defaultSettings().SidebarWidth
+	// The native outer floor is 900×600; the page area is a few DIP smaller.
+	tt := ui.NewTester(a.view, minWindowWidth-15, minWindowHeight-8)
+	for _, want := range []string{"FlowVision", "收藏", "3 项", "F1 快捷键"} {
+		if !tt.HasText(want) {
+			t.Fatalf("minimum-size split layout missing %q: %q", want, tt.Texts())
+		}
+	}
+	tt.Frame()
+}
+
 func itemNames(items []*Item) []string {
 	out := []string{}
 	for _, it := range items {

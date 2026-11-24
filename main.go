@@ -110,14 +110,30 @@ func initLog() {
 	logger = log.New(f, "", log.LstdFlags|log.Lshortfile)
 }
 
+// The window has a hard floor so the split workbench never collapses into a
+// clipped tab row or a sub-pixel-wide content pane. The width grows with a wide
+// sidebar, keeping at least minWorkbenchWidth for the right column.
+const (
+	minWindowWidth    = 900
+	minWindowHeight   = 600
+	minWorkbenchWidth = 520
+)
+
+func windowMinWidth(sidebar bool, sidebarWidth int) int {
+	if !sidebar {
+		return minWindowWidth
+	}
+	return max(minWindowWidth, sidebarWidth+minWorkbenchWidth)
+}
+
 func openMainWindow() {
 	win := mygo.NewWindow(mygo.WindowOptions{
 		Title:             "FlowVision",
 		Content:           ui.View(app.view),
 		Width:             1320,
 		Height:            850,
-		MinWidth:          720,
-		MinHeight:         460,
+		MinWidth:          windowMinWidth(app.sidebar, app.sidebarWidth),
+		MinHeight:         minWindowHeight,
 		TitleBarStyle:     mygo.TitleBarHidden,
 		TitleBarHeight:    48,
 		HideWindowButtons: true,
@@ -155,6 +171,7 @@ func openMainWindow() {
 		win.Focus()
 		app.maximized = win.IsMaximized()
 		app.fullscreen = win.IsFullScreen()
+		app.syncWindowMinimum()
 		app.refresh()
 		app.startUpdateAutoCheck()
 		pendingMu.Lock()

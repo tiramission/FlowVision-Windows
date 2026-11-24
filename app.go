@@ -688,7 +688,27 @@ func (a *App) toggleSidebar() {
 	a.sidebar = !a.sidebar
 	a.settings.Sidebar = a.sidebar
 	_ = saveSettings(a.settings)
+	a.syncWindowMinimum()
 	a.refresh()
+}
+
+// syncWindowMinimum keeps the native resize floor in step with a visible
+// sidebar. Changing the sidebar width must not leave the right workbench below
+// the width its tab row needs, and restoring an older window state should not
+// resurrect the pre-split 720×460 floor.
+func (a *App) syncWindowMinimum() {
+	if a.win == nil {
+		return
+	}
+	minW := windowMinWidth(a.sidebar, a.sidebarWidth)
+	a.win.SetMinimumSize(minW, minWindowHeight)
+	if a.maximized || a.fullscreen {
+		return
+	}
+	b := a.win.Bounds()
+	if b.Width > 0 && (b.Width < minW || b.Height < minWindowHeight) {
+		a.win.SetSize(max(b.Width, minW), max(b.Height, minWindowHeight))
+	}
 }
 
 func (a *App) toggleRecursive() {
@@ -776,6 +796,7 @@ func (a *App) applySettings() {
 	a.sidebar = s.Sidebar
 	a.sidebarWidth = s.SidebarWidth
 	_ = saveSettings(s)
+	a.syncWindowMinimum()
 	a.showSettings = false
 	a.applyTheme()
 	if t := a.tab(); t != nil {
