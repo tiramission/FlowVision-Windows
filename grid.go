@@ -411,16 +411,24 @@ func (a *App) drawGrid(p *ui.Painter, r ui.Rect, layout gridLayout, th *ui.Theme
 		// a caption that stays inside the card rather than floating on the page.
 		cardFace := th.Surface
 		cardBorder := th.Border.Alpha(.75)
+		borderWidth := float32(1)
+		if selected {
+			// A two-pixel ring around the whole card plus a check mark reads
+			// cleaner than the old heavy stroke around the thumbnail alone.
+			cardBorder = th.Accent.Alpha(.9)
+			borderWidth = 2
+		}
 		if i == hover {
 			cardFace = th.SurfaceHover
-			cardBorder = th.Accent.Alpha(.55)
+			if !selected {
+				cardBorder = th.Accent.Alpha(.55)
+			}
 			p.Shadow(card, 10, 0, 3, 10, 0, ui.RGBA(0, 0, 0, .10))
 		}
 		p.Fill(card, cardFace, 10)
-		p.Stroke(card, cardBorder, 10, 1)
 
 		if it.Kind == "folder" {
-			p.Fill(imgR, th.Accent.Alpha(.08), 9)
+			p.Fill(imgR, th.SurfaceHover, 9)
 			side := float32(34)
 			p.Icon(lucide.Folder(), ui.Rect{X: imgR.X + (imgR.W-side)/2, Y: imgR.Y + (imgR.H-side)/2 - 8, W: side, H: side}, th.Accent)
 			label := "文件夹"
@@ -459,10 +467,6 @@ func (a *App) drawGrid(p *ui.Painter, r ui.Rect, layout gridLayout, th *ui.Theme
 			w, _ := p.MeasureText(0, ui.Span{Text: ext, Size: 12, Weight: 600})
 			p.Text(imgR.X+(imgR.W-w)/2, imgR.Y+imgR.H/2+10, ext, 12, th.TextMuted)
 		}
-		if selected {
-			p.Stroke(imgR, th.Accent, 9, 3)
-		}
-
 		captionY := imgR.Y + imgR.H + 8
 		if layout.Captions || it.Kind == "folder" {
 			p.Clip(ui.Rect{X: imgR.X + 9, Y: captionY, W: max(0, imgR.W-18), H: 18}, 0, func() {
@@ -484,6 +488,12 @@ func (a *App) drawGrid(p *ui.Painter, r ui.Rect, layout gridLayout, th *ui.Theme
 				p.Text(pill.X+10, pill.Y+5, label, 11, ui.RGBA(255, 255, 255, 240))
 			})
 		}
+		if selected {
+			badge := ui.Rect{X: card.X + card.W - 28, Y: card.Y + 8, W: 22, H: 22}
+			p.Fill(badge, th.Accent, 11)
+			p.Icon(lucide.Check(), ui.Rect{X: badge.X + 6, Y: badge.Y + 6, W: 10, H: 10}, ui.RGBA(255, 255, 255, 255))
+		}
+		p.Stroke(card, cardBorder, 10, borderWidth)
 	}
 }
 

@@ -187,6 +187,6 @@ func (a *App) swapSideBindings() {
 
 func settingsIcon(icon *ui.SVG) func(*ui.Context) {
 	return func(c *ui.Context) {
-		components.Icon(c, icon).Size(16, 16).TextColor(c.Theme().TextMuted.Alpha(.8))
+		components.Icon(c, icon).Size(16, 16).TextColor(c.Theme().TextMuted)
 	}
 }

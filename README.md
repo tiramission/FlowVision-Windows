@@ -6,7 +6,7 @@
 
 把本地图片和视频变成可浏览、可沉浸查看的瀑布流。FlowVision for Windows 是 [netdcy/FlowVision](https://github.com/netdcy/FlowVision)（macOS，Swift/AppKit）的 Windows 重写版：**Go + MyGo 原生 `ui` + Onevra**，不使用 WebView2、HTML 或 JavaScript，也不需要 cgo、Swift 或 Xcode。
 
-当前版本 **1.2.11**：修复视频查看器里隐藏光标后移动鼠标不恢复；鼠标侧键可在设置里校准；快捷键帮助改为分类筛选与分组卡片；主窗口加入刷新按钮。
+当前版本 **1.2.12**：主窗口侧栏、状态栏、工具栏与网格选中态重新整理层级；设置滑块与导航图标更克制；快捷键帮助支持窄窗口单列并重做卡片层级；查看器窗口化补充分隔线。
 
 ## 下载与安装
 

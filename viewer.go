@@ -199,7 +199,7 @@ func (a *App) viewerHeader(c *ui.Context, it *Item, th *ui.Theme, floating bool)
 		bar.Absolute().Left(0).Right(0).Top(0).
 			Background(th.Surface.Alpha(.94)).BorderWidth(0, 0, 1, 0).BorderColor(th.Border.Alpha(.6))
 	} else {
-		bar.Background(th.Surface)
+		bar.Background(th.Surface).BorderWidth(0, 0, 1, 0).BorderColor(th.Border.Alpha(.55))
 	}
 	bar.Children(func() {
 		icon := lucide.Image()
@@ -292,7 +292,7 @@ func (a *App) viewerFooter(c *ui.Context, it *Item, th *ui.Theme, floating bool)
 		bar.Absolute().Left(0).Right(0).Bottom(0).
 			Background(th.Surface.Alpha(.94)).BorderWidth(1, 0, 0, 0).BorderColor(th.Border.Alpha(.6))
 	} else {
-		bar.Background(th.Surface)
+		bar.Background(th.Surface).BorderWidth(1, 0, 0, 0).BorderColor(th.Border.Alpha(.55))
 	}
 	bar.Children(func() {
 		if it.Kind == "video" {

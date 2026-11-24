@@ -59,7 +59,7 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 		{
 			ID: "appearance", Title: "外观", Section: "常规",
 			Description: "主题、缩略图与窗口布局",
-			Icon:        lucide.Palette(),
+			Leading:     a.settingsCategoryIcon("appearance", lucide.Palette()),
 			Groups: []components.SettingsGroup{
 				{
 					ID: "theme", Title: "主题与布局",
@@ -122,7 +122,7 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 		{
 			ID: "browsing", Title: "浏览", Section: "常规",
 			Description: "文件过滤、递归扫描和视频播放",
-			Icon:        lucide.FolderOpen(),
+			Leading:     a.settingsCategoryIcon("browsing", lucide.FolderOpen()),
 			Groups: []components.SettingsGroup{
 				{
 					ID: "filter", Title: "文件显示",
@@ -205,7 +205,7 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 		{
 			ID: "control", Title: "控制", Section: "常规",
 			Description: "鼠标侧键、查看器信息与快捷键参考",
-			Icon:        lucide.MousePointerClick(),
+			Leading:     a.settingsCategoryIcon("control", lucide.MousePointerClick()),
 			Groups: []components.SettingsGroup{
 				{
 					ID: "side-buttons", Title: "鼠标侧键",
@@ -256,7 +256,7 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 		{
 			ID: "storage", Title: "缓存", Section: "维护",
 			Description: "缩略图磁盘缓存与占用",
-			Icon:        lucide.Database(),
+			Leading:     a.settingsCategoryIcon("storage", lucide.Database()),
 			Groups: []components.SettingsGroup{
 				{
 					ID: "cache", Title: "缩略图缓存",
@@ -315,7 +315,7 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 		{
 			ID: "updates", Title: "更新", Section: "维护",
 			Description: "版本与签名更新",
-			Icon:        lucide.RefreshCw(),
+			Leading:     a.settingsCategoryIcon("updates", lucide.RefreshCw()),
 			Groups: []components.SettingsGroup{
 				{
 					ID: "version", Title: "FlowVision",
@@ -385,9 +385,27 @@ func (a *App) sortSetting(c *ui.Context) {
 }
 
 func (a *App) settingsSlider(c *ui.Context, value *float64, lo, hi, step float64, label, unit string) {
-	ui.Column(c).Width(260).Gap(4).Children(func() {
-		components.Slider(c, value, lo, hi, components.SliderOptions{Step: step}).Label(label).FillWidth()
-		components.Text(c, fmt.Sprintf("%d %s", int(math.Round(*value)), unit)).
-			FontSize(10.5).TextColor(c.Theme().TextMuted)
+	th := c.Theme()
+	ui.Row(c).Width(340).Gap(8).AlignItems(ui.Center).Children(func() {
+		components.Slider(c, value, lo, hi, components.SliderOptions{Step: step}).Label(label).
+			Grow(1).MinWidth(0)
+		ui.Box(c).Width(58).Height(22).Radius(7).Background(th.Background.Alpha(.55)).
+			BorderWidth(1).BorderColor(th.Border.Alpha(.4)).Center().Children(func() {
+			components.Text(c, fmt.Sprintf("%d %s", int(math.Round(*value)), unit)).
+				FontSize(10.5).FontWeight(500).TextColor(th.TextMuted)
+		})
 	})
+}
+
+// settingsCategoryIcon keeps the settings navigation consistent with the main
+// sidebar: active categories carry the accent, while inactive ones stay muted.
+func (a *App) settingsCategoryIcon(id string, icon *ui.SVG) func(*ui.Context, float32) {
+	return func(c *ui.Context, size float32) {
+		th := c.Theme()
+		color := th.TextMuted.Alpha(.9)
+		if a.settingsUI.Category == id {
+			color = th.Accent
+		}
+		components.Icon(c, icon).Size(size, size).TextColor(color)
+	}
 }

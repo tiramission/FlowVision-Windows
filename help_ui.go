@@ -33,6 +33,21 @@ func (a *App) openHelp() {
 	a.refresh()
 }
 
+// helpViewportHeight uses the available window height instead of locking the
+// shortcut cards to a short fixed viewport, while keeping enough room for the
+// dialog header, filters and footer on smaller windows.
+func helpViewportHeight(c *ui.Context) float32 {
+	_, winH := c.Size()
+	h := winH - 260
+	if h < 340 {
+		h = 340
+	}
+	if h > 500 {
+		h = 500
+	}
+	return h
+}
+
 func (a *App) helpSections() []helpSection {
 	return []helpSection{
 		{
@@ -102,9 +117,22 @@ func (a *App) helpModal(c *ui.Context) {
 		return
 	}
 	th := c.Theme()
+	winW, _ := c.Size()
+	width := min(float32(820), winW-48)
+	if width < 560 {
+		width = min(winW, 560)
+	}
+	total := 0
+	for _, section := range a.helpSections() {
+		total += len(section.items)
+	}
+	subtitle := fmt.Sprintf("共 %d 项 · 按场景分组 · F1 可随时打开", total)
+	if a.helpFilter == helpFilterAll || a.helpFilter == helpFilterBrowse {
+		subtitle += " · 可滚动"
+	}
 	ui.Modal(c, &a.showHelp, func() {
-		ui.Column(c).Width(820).Gap(11).Children(func() {
-			dialogHeader(c, lucide.Keyboard(), "快捷键与手势", "按场景分组；F1 可在应用内随时打开这一页")
+		ui.Column(c).Width(width).Gap(11).Children(func() {
+			dialogHeader(c, lucide.Keyboard(), "快捷键与手势", subtitle)
 			ui.Row(c).Gap(6).Wrap().Children(func() {
 				for _, f := range []struct {
 					label  string
@@ -126,33 +154,31 @@ func (a *App) helpModal(c *ui.Context) {
 						a.refresh()
 					}
 				}
-				ui.Spacer(c)
-				count := 0
-				for _, section := range a.helpSections() {
-					if a.helpFilter == helpFilterAll || section.filter == a.helpFilter {
-						count += len(section.items)
-					}
-				}
-				countLabel := fmt.Sprintf("%d 项", count)
-				if a.helpFilter == helpFilterAll || a.helpFilter == helpFilterBrowse {
-					countLabel += " · 可滚动"
-				}
-				components.Text(c, countLabel).FontSize(10.5).TextColor(th.TextMuted)
 			})
 			ui.Divider(c)
-			ui.Box(c).FillWidth().Height(430).Children(func() {
+			ui.Box(c).FillWidth().Height(helpViewportHeight(c)).Children(func() {
 				ui.Scroll(c).Fill().Children(func() {
 					if a.helpFilter == helpFilterAll {
-						ui.Row(c).Gap(12).AlignItems(ui.Start).Children(func() {
-							ui.Column(c).Grow(1).MinWidth(0).Gap(12).Children(func() {
-								a.helpSectionCard(c, a.helpSections()[0])
-								a.helpSectionCard(c, a.helpSections()[1])
+						if width < 700 {
+							// At narrow widths the two shortcut columns would leave
+							// keycaps too little room, so stack the cards instead.
+							ui.Column(c).Gap(12).Children(func() {
+								for _, section := range a.helpSections() {
+									a.helpSectionCard(c, section)
+								}
 							})
-							ui.Column(c).Grow(1).MinWidth(0).Gap(12).Children(func() {
-								a.helpSectionCard(c, a.helpSections()[2])
-								a.helpSectionCard(c, a.helpSections()[3])
+						} else {
+							ui.Row(c).Gap(12).AlignItems(ui.Start).Children(func() {
+								ui.Column(c).Grow(1).MinWidth(0).Gap(12).Children(func() {
+									a.helpSectionCard(c, a.helpSections()[0])
+									a.helpSectionCard(c, a.helpSections()[1])
+								})
+								ui.Column(c).Grow(1).MinWidth(0).Gap(12).Children(func() {
+									a.helpSectionCard(c, a.helpSections()[2])
+									a.helpSectionCard(c, a.helpSections()[3])
+								})
 							})
-						})
+						}
 					} else {
 						ui.Column(c).Gap(12).Children(func() {
 							for _, section := range a.helpSections() {
@@ -164,9 +190,9 @@ func (a *App) helpModal(c *ui.Context) {
 					}
 				})
 				if a.helpFilter == helpFilterAll || a.helpFilter == helpFilterBrowse {
-					// The all and browse views can overflow their 430 DIP viewport.
-					// MyGo only shows scrollbars on hover, so fade the last rows into
-					// the dialog background as a quiet cue that there is more below.
+					// The all and browse views can overflow the viewport. MyGo only
+					// shows scrollbars on hover, so fade the last rows into the
+					// dialog background as a quiet cue that there is more below.
 					ui.Box(c).Absolute().Left(0).Right(0).Bottom(0).Height(18).IgnoreInput(true).
 						Gradient(th.Background.Alpha(0), th.Background.Alpha(.9), 180)
 				}
@@ -187,14 +213,14 @@ func (a *App) helpModal(c *ui.Context) {
 func (a *App) helpSectionCard(c *ui.Context, section helpSection) {
 	th := c.Theme()
 	ui.Column(c).FillWidth().Padding(13).Gap(9).Radius(12).
-		Background(th.SurfaceHover.Alpha(.24)).BorderWidth(1).BorderColor(th.Border.Alpha(.55)).Children(func() {
+		Background(th.Surface).BorderWidth(1).BorderColor(th.Border.Alpha(.7)).Children(func() {
 		ui.Row(c).Gap(9).AlignItems(ui.Center).Children(func() {
 			ui.Box(c).Size(25, 25).Radius(7).Background(th.Accent.Alpha(.1)).Center().Children(func() {
 				components.Icon(c, section.icon).Size(14, 14).TextColor(th.Accent)
 			})
 			components.Text(c, section.title).FontSize(12.5).Bold()
 			ui.Spacer(c)
-			components.Text(c, fmt.Sprintf("%d", len(section.items))).FontSize(10).TextColor(th.TextMuted)
+			components.Text(c, fmt.Sprintf("%d 项", len(section.items))).FontSize(10).TextColor(th.TextMuted)
 		})
 		ui.Column(c).Gap(1).Children(func() {
 			for _, item := range section.items {
@@ -207,8 +233,8 @@ func (a *App) helpSectionCard(c *ui.Context, section helpSection) {
 func helpShortcutRow(c *ui.Context, keys, what string) {
 	th := c.Theme()
 	ui.Row(c).FillWidth().MinHeight(25).Gap(10).Children(func() {
-		components.Text(c, what).FontSize(11.5).TextColor(th.TextMuted).Grow(1).Wrap()
-		ui.Box(c).Padding(3, 7).Radius(5).Background(th.Background.Alpha(.55)).
+		components.Text(c, what).FontSize(11.5).TextColor(th.Text.Alpha(.84)).Grow(1).Wrap()
+		ui.Box(c).Padding(3, 7).Radius(5).Background(th.SurfaceHover.Alpha(.65)).
 			BorderWidth(1).BorderColor(th.Border.Alpha(.65)).Children(func() {
 			components.Text(c, keys).FontSize(10.5).FontWeight(600).SingleLine()
 		})
