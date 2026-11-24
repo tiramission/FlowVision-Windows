@@ -316,33 +316,11 @@ func (FS) Browse(req BrowseRequest) DirResult {
 		return len(list) <= req.Limit
 	}
 
-	addDirectFolders := func() error {
-		entries, err := os.ReadDir(path)
-		if err != nil {
-			return err
-		}
-		for _, e := range entries {
-			if !e.IsDir() {
-				continue
-			}
-			p := filepath.Join(path, e.Name())
-			if !req.ShowHidden && (isHidden(p) || strings.HasPrefix(e.Name(), ".")) {
-				continue
-			}
-			if !add(p, true) {
-				return nil
-			}
-		}
-		return nil
-	}
-
 	if req.Recursive {
-		// Keep the direct subfolders as navigation targets, then flatten all
-		// media below them. Deeper folders are represented by their files.
-		if err := addDirectFolders(); err != nil {
-			res.Error = "无法读取此文件夹"
-			return res
-		}
+		// Recursive mode is a flat media wall. The direct subfolders are left
+		// out on purpose: walking into them is a sidebar-tree gesture, and
+		// showing them beside the flattened photos made the wall repeat
+		// navigation instead of showing pictures.
 		_ = filepath.WalkDir(path, func(p string, d os.DirEntry, err error) error {
 			if err != nil {
 				return nil
@@ -676,6 +654,7 @@ func (FS) Places() []Place {
 		pn   mygo.PathName
 		icon string
 	}{
+		{"用户目录", mygo.PathHome, "home"},
 		{"桌面", mygo.PathDesktop, "desktop"},
 		{"图片", mygo.PathPictures, "pictures"},
 		{"下载", mygo.PathDownloads, "downloads"},

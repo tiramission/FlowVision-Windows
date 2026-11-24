@@ -352,7 +352,7 @@ func TestWaterfallLayout(t *testing.T) {
 		{ID: "3", Name: "square", Kind: "image", W: 500, H: 500},
 		{ID: "4", Name: "panorama", Kind: "image", W: 2000, H: 400},
 	}
-	g := buildWaterfall(items, 1000, 240, 10)
+	g := buildWaterfall(items, 1000, 240, 10, true)
 	if g.Cols != 4 {
 		t.Fatalf("cols = %d", g.Cols)
 	}
@@ -361,6 +361,17 @@ func TestWaterfallLayout(t *testing.T) {
 	}
 	if g.TotalH <= 0 {
 		t.Fatal("no layout height")
+	}
+	if !g.Captions {
+		t.Fatal("captions should be part of the layout")
+	}
+	hidden := buildWaterfall(items, 1000, 240, 10, false)
+	if hidden.Captions || hidden.Cells[0].height() >= g.Cells[0].height() {
+		t.Fatalf("hidden captions did not shrink cards: %v vs %v", hidden.Cells[0].height(), g.Cells[0].height())
+	}
+	folders := buildWaterfall([]*Item{{ID: "f", Name: "文件夹", Kind: "folder", W: 1, H: 1}}, 500, 240, 10, false)
+	if got := folders.Cells[0].height() - folders.Cells[0].ImgH; got < 32 {
+		t.Fatalf("folder caption disappeared in immersive mode: %.1f", got)
 	}
 	// The wide image is the shortest; the tall image is the tallest.
 	if g.Cells[0].ImgH >= g.Cells[1].ImgH {
@@ -377,7 +388,7 @@ func TestWaterfallLayout(t *testing.T) {
 }
 
 func TestWaterfallNarrowWindow(t *testing.T) {
-	g := buildWaterfall([]*Item{{ID: "1", Kind: "image", W: 1, H: 1}}, 120, 240, 8)
+	g := buildWaterfall([]*Item{{ID: "1", Kind: "image", W: 1, H: 1}}, 120, 240, 8, true)
 	if g.Cols != 1 {
 		t.Fatalf("cols = %d", g.Cols)
 	}
@@ -393,7 +404,7 @@ func TestGridNavigation(t *testing.T) {
 		{ID: "3", Kind: "image", W: 1, H: 1},
 		{ID: "4", Kind: "image", W: 1, H: 1},
 		{ID: "5", Kind: "image", W: 1, H: 1},
-	}, 1000, 240, 10)
+	}, 1000, 240, 10, true)
 	if g.Cols < 2 {
 		t.Skip("too few columns")
 	}

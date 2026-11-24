@@ -13,6 +13,14 @@ import (
 func (a *App) view(c *ui.Context) {
 	c.SetTheme(a.uiTheme(c))
 	th := c.Theme()
+	if a.viewer.Open {
+		// The viewer owns the whole window while it is open. Building the
+		// normal chrome underneath would keep native hit targets alive — most
+		// notably the maximize button's snap-layout zone under the info icon.
+		a.viewerOverlay(c)
+		a.runPending()
+		return
+	}
 	a.viewShortcuts(c)
 	ui.Column(c).Fill().Background(th.Background).Children(func() {
 		a.titleBar(c)
@@ -176,7 +184,7 @@ func (a *App) sidebarView(c *ui.Context) {
 				components.SidebarSection(c, "位置", func() {
 					for _, p := range a.places {
 						p := p
-						a.sidebarPathRow(c, p.Path, placeIcon(p.Icon), false)
+						a.sidebarPathRow(c, p.Path, placeIcon(p.Icon), false, p.Name)
 					}
 				})
 
@@ -226,14 +234,17 @@ func (a *App) sidebarView(c *ui.Context) {
 	})
 }
 
-func (a *App) sidebarPathRow(c *ui.Context, path string, icon *ui.SVG, favorite bool) {
+func (a *App) sidebarPathRow(c *ui.Context, path string, icon *ui.SVG, favorite bool, label ...string) {
 	active := false
 	if t := a.tab(); t != nil {
 		active = strings.EqualFold(filepath.Clean(path), filepath.Clean(t.Path))
 	}
 	name := displayName(path)
+	if len(label) > 0 && label[0] != "" {
+		name = label[0]
+	}
 	row := components.SidebarItem(c, name, icon, active)
-	row.Key(path)
+	row.Key(path).Tooltip(path)
 	if row.Clicked() {
 		a.goTo(path, true)
 	}
@@ -254,6 +265,8 @@ func (a *App) sidebarPathRow(c *ui.Context, path string, icon *ui.SVG, favorite 
 
 func placeIcon(kind string) *ui.SVG {
 	switch kind {
+	case "home":
+		return lucide.House()
 	case "pictures":
 		return lucide.Images()
 	case "desktop":
@@ -350,9 +363,8 @@ func (a *App) tabStrip(c *ui.Context) {
 		}
 		// The native menu is keyboard-only once the app draws its own title
 		// bar, so keep the update command visible in the title bar.
-		components.Button(c, "检查更新", components.ButtonGhost).
-			Height(28).Padding(0, 9).Radius(7).
-			Tooltip("从 GitHub Release 检查签名更新").
+		components.IconButton(c, lucide.CloudDownload(), "检查更新", components.IconButtonPlain).
+			Size(30, 30).Tooltip("从 GitHub Release 检查签名更新").
 			OnClick(a.checkForUpdates)
 		components.IconButton(c, lucide.Plus(), "新建标签页 (Ctrl+T)", components.IconButtonToolbar).
 			OnClick(func() { a.later(func() { a.newTab("") }) })
@@ -446,6 +458,10 @@ func (a *App) toolbar(c *ui.Context) {
 			if components.Switch(c, &a.settings.Recursive, "递归", components.SwitchOptions{Compact: true}).Changed() {
 				_ = saveSettings(a.settings)
 				a.loadTab(tab, true)
+			}
+			if components.Switch(c, &a.settings.ShowCardNames, "文件名", components.SwitchOptions{Compact: true}).Changed() {
+				_ = saveSettings(a.settings)
+				a.refresh()
 			}
 			if components.Switch(c, &a.settings.ShowHidden, "隐藏", components.SwitchOptions{Compact: true}).Changed() {
 				_ = saveSettings(a.settings)
@@ -557,6 +573,9 @@ func (a *App) statusBar(c *ui.Context) {
 		}
 		if a.settings.ShowHidden {
 			components.Badge(c, "隐藏", components.BadgeOptions{Tone: components.BadgeNeutral})
+		}
+		if !a.settings.ShowCardNames {
+			components.Badge(c, "文件名已隐藏", components.BadgeOptions{Tone: components.BadgeNeutral})
 		}
 		components.Text(c, "Onevra · 纯 Go").FontSize(10).TextColor(th.TextMuted)
 	})

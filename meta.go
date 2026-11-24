@@ -338,17 +338,18 @@ func formatSRational(num, den int32, count int) string {
 
 // MediaInfo is the metadata panel's content.
 type MediaInfo struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	Path    string `json:"path"`
-	Kind    string `json:"kind"`
-	Ext     string `json:"ext"`
-	Size    int64  `json:"size"`
-	Mtime   int64  `json:"mtime"`
-	Width   int    `json:"width"`
-	Height  int    `json:"height"`
-	Exif    []KV   `json:"exif"`
-	Message string `json:"message,omitempty"`
+	ID      string    `json:"id"`
+	Name    string    `json:"name"`
+	Path    string    `json:"path"`
+	Kind    string    `json:"kind"`
+	Ext     string    `json:"ext"`
+	Size    int64     `json:"size"`
+	Mtime   int64     `json:"mtime"`
+	Width   int       `json:"width"`
+	Height  int       `json:"height"`
+	Video   VideoMeta `json:"-"`
+	Exif    []KV      `json:"exif"`
+	Message string    `json:"message,omitempty"`
 }
 
 // MediaSvc serves metadata about one item.
@@ -369,6 +370,12 @@ func (MediaSvc) Info(id string) MediaInfo {
 		out.Width, out.Height = d.W, d.H
 		if isJPEG(it.Path) {
 			out.Exif = readExif(it.Path).Values
+		}
+	}
+	if it.Kind == "video" {
+		out.Video = probeVideoMeta(it.Path)
+		if out.Video.Width > 0 && out.Video.Height > 0 {
+			out.Width, out.Height = out.Video.Width, out.Video.Height
 		}
 	}
 	return out

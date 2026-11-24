@@ -19,42 +19,44 @@ type TabState struct {
 
 // Settings is the app's preferences, stored as settings.json in user data.
 type Settings struct {
-	Theme        string     `json:"theme"` // system | dark | light
-	ThumbSize    int        `json:"thumbSize"`
-	GridGap      int        `json:"gridGap"`
-	Sort         string     `json:"sort"` // name | date | size | type
-	Desc         bool       `json:"desc"`
-	ShowHidden   bool       `json:"showHidden"`
-	ShowOther    bool       `json:"showOther"`
-	Recursive    bool       `json:"recursive"`
-	Sidebar      bool       `json:"sidebar"`
-	SidebarWidth int        `json:"sidebarWidth"`
-	InfoPanel    bool       `json:"infoPanel"`
-	PlayVideo    bool       `json:"playVideo"`
-	LoopVideo    bool       `json:"loopVideo"`
-	LastPath     string     `json:"lastPath"`
-	Favorites    []string   `json:"favorites"`
-	Tabs         []TabState `json:"tabs"`
-	ActiveTab    int        `json:"activeTab"`
-	CacheLimitMB int        `json:"cacheLimitMB"`
+	Theme         string     `json:"theme"` // system | dark | light
+	ThumbSize     int        `json:"thumbSize"`
+	GridGap       int        `json:"gridGap"`
+	ShowCardNames bool       `json:"showCardNames"`
+	Sort          string     `json:"sort"` // name | date | size | type
+	Desc          bool       `json:"desc"`
+	ShowHidden    bool       `json:"showHidden"`
+	ShowOther     bool       `json:"showOther"`
+	Recursive     bool       `json:"recursive"`
+	Sidebar       bool       `json:"sidebar"`
+	SidebarWidth  int        `json:"sidebarWidth"`
+	InfoPanel     bool       `json:"infoPanel"`
+	PlayVideo     bool       `json:"playVideo"`
+	LoopVideo     bool       `json:"loopVideo"`
+	LastPath      string     `json:"lastPath"`
+	Favorites     []string   `json:"favorites"`
+	Tabs          []TabState `json:"tabs"`
+	ActiveTab     int        `json:"activeTab"`
+	CacheLimitMB  int        `json:"cacheLimitMB"`
 }
 
 func defaultSettings() Settings {
 	return Settings{
-		Theme:        "system",
-		ThumbSize:    220,
-		GridGap:      8,
-		Sort:         "name",
-		Desc:         false,
-		ShowHidden:   false,
-		ShowOther:    false,
-		Recursive:    false,
-		Sidebar:      true,
-		SidebarWidth: 248,
-		InfoPanel:    true,
-		PlayVideo:    true,
-		LoopVideo:    false,
-		CacheLimitMB: 1500,
+		Theme:         "system",
+		ThumbSize:     220,
+		GridGap:       8,
+		ShowCardNames: true,
+		Sort:          "name",
+		Desc:          false,
+		ShowHidden:    false,
+		ShowOther:     false,
+		Recursive:     false,
+		Sidebar:       true,
+		SidebarWidth:  248,
+		InfoPanel:     true,
+		PlayVideo:     true,
+		LoopVideo:     false,
+		CacheLimitMB:  1500,
 	}
 }
 

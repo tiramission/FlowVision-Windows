@@ -34,11 +34,11 @@ func TestBrowseListsDirectFolders(t *testing.T) {
 	}
 
 	rec := (FS{}).Browse(BrowseRequest{Path: dir, Recursive: true, Limit: 100, ShowOther: true})
-	if rec.Folders != 1 || rec.Images != 2 {
-		t.Fatalf("recursive folders=%d images=%d", rec.Folders, rec.Images)
+	if rec.Folders != 0 || rec.Images != 2 {
+		t.Fatalf("recursive should be a flat media wall: folders=%d images=%d", rec.Folders, rec.Images)
 	}
-	if rec.Total != 3 {
-		t.Fatalf("recursive total = %d, want folder plus both images", rec.Total)
+	if rec.Total != 2 {
+		t.Fatalf("recursive total = %d, want both images without the navigation folder", rec.Total)
 	}
 }
 

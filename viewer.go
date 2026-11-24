@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/oneo-me/onevra/source/components"
@@ -85,7 +86,7 @@ func (a *App) viewerCanvasSize(c *ui.Context) (float32, float32) {
 	if a.viewer.ShowInfo {
 		w -= 300
 	}
-	h -= 50 + 48
+	h -= 50 + 52
 	return w, h
 }
 
@@ -118,6 +119,7 @@ func (a *App) viewerOverlay(c *ui.Context) {
 	it := a.viewer.Item
 	t := a.tab()
 	wasOpen := a.viewer.Open
+	full := a.win != nil && a.win.IsFullScreen()
 	ui.DialogBase(c, &a.viewer.Open, func(backdrop, panel ui.Element) {
 		backdrop.Background(ui.RGBA(0, 0, 0, 0.82))
 		panel.Fill().Background(th.Background).Clip()
@@ -130,7 +132,7 @@ func (a *App) viewerOverlay(c *ui.Context) {
 				ui.Box(c).Size(30, 30).Radius(8).Background(th.Accent.Alpha(.12)).Center().Children(func() {
 					components.Icon(c, icon).Size(15, 15).TextColor(th.Accent)
 				})
-				ui.Column(c).Grow(1).MinWidth(0).Children(func() {
+				ui.Column(c).Grow(1).MinWidth(0).DragWindow().Children(func() {
 					components.Text(c, it.Name).FontSize(13.5).FontWeight(600).SingleLine().Ellipsis("…")
 					if t != nil {
 						pos, total := viewerMediaPosition(t.Items, a.viewer.Item)
@@ -147,8 +149,22 @@ func (a *App) viewerOverlay(c *ui.Context) {
 				if a.viewer.ShowInfo {
 					infoLabel = "隐藏信息 (I)"
 				}
-				components.IconButton(c, lucide.Info(), infoLabel, components.IconButtonPlain).
-					OnClick(a.viewerToggleInfo)
+				info := components.IconButton(c, lucide.Info(), infoLabel, components.IconButtonPlain)
+				if a.viewer.ShowInfo {
+					info.TextColor(th.Accent)
+				}
+				if info.Clicked() {
+					a.viewerToggleInfo()
+				}
+				fullLabel := "进入全屏 (F11)"
+				fullIcon := lucide.Fullscreen()
+				if full {
+					fullLabel = "退出全屏 (F11)"
+					fullIcon = lucide.Minimize2()
+				}
+				if components.IconButton(c, fullIcon, fullLabel, components.IconButtonPlain).Clicked() {
+					a.viewerToggleFullscreen()
+				}
 				components.IconButton(c, lucide.X(), "关闭查看器 (Esc)", components.IconButtonPlain).
 					OnClick(a.closeViewer)
 			})
@@ -160,71 +176,168 @@ func (a *App) viewerOverlay(c *ui.Context) {
 				}
 			})
 
-			ui.Row(c).Height(48).Padding(8, 14, 8, 14).Gap(4).Background(th.Surface).Children(func() {
-				if it.Kind == "image" {
-					components.Text(c, fmt.Sprintf("%d%%", a.viewerPercent(c))).FontSize(10.5).
-						TextColor(th.TextMuted).Width(52)
-					components.IconButton(c, lucide.ZoomOut(), "缩小 (−)", components.IconButtonPlain).
-						OnClick(func() { a.viewerZoom(0.8) })
-					components.IconButton(c, lucide.ZoomIn(), "放大 (+, =)", components.IconButtonPlain).
-						OnClick(func() { a.viewerZoom(1.25) })
-					components.IconButton(c, lucide.Maximize2(), "适合窗口 (0)", components.IconButtonPlain).
-						OnClick(a.viewerReset)
-					components.IconButton(c, lucide.RotateCw(), "顺时针旋转 (R)", components.IconButtonPlain).
-						OnClick(func() { a.viewerRotate(90) })
-					ui.Box(c).Width(1).Height(20).Background(th.Border).Margin(2, 6)
-				}
-				ui.Spacer(c)
-				if a.viewer.Player != nil {
-					label := "播放"
-					if a.viewer.Player.Playing() {
-						label = "暂停"
-					}
-					if components.Button(c, label, components.ButtonSecondary).Clicked() {
-						if a.viewer.Player.Playing() {
-							a.viewer.Player.Pause()
-						} else {
-							a.viewer.Player.Play()
-						}
-					}
-					if components.Switch(c, &a.settings.LoopVideo, "循环", components.SwitchOptions{Compact: true}).Changed() {
-						_ = saveSettings(a.settings)
-						a.viewer.Player.SetLoop(a.settings.LoopVideo)
-					}
-				}
-				pos, total := 0, 0
-				if t != nil {
-					pos, total = viewerMediaPosition(t.Items, a.viewer.Item)
-				}
-				prev := components.IconButton(c, lucide.ChevronLeft(), "上一张 (←)", components.IconButtonPlain).
-					Disabled(pos <= 1)
-				if prev.Clicked() {
-					a.viewerStep(-1)
-				}
-				next := components.IconButton(c, lucide.ChevronRight(), "下一张 (→)", components.IconButtonPlain).
-					Disabled(total == 0 || pos >= total)
-				if next.Clicked() {
-					a.viewerStep(1)
-				}
-			})
-
-			c.OnWindowShortcut(0, ui.KeyLeft, func() { a.viewerStep(-1) })
-			c.OnWindowShortcut(0, ui.KeyRight, func() { a.viewerStep(1) })
-			c.OnWindowShortcut(0, ui.KeyEqual, func() { a.viewerZoom(1.25) })
-			// "+" is Shift+"=" on a US keyboard; accept both spellings.
-			c.OnWindowShortcut(ui.Shift, ui.KeyEqual, func() { a.viewerZoom(1.25) })
-			c.OnWindowShortcut(0, ui.KeyMinus, func() { a.viewerZoom(0.8) })
-			c.OnWindowShortcut(0, ui.Key0, func() { a.viewerReset() })
-			c.OnWindowShortcut(0, ui.Key1, func() { a.viewerActualSize() })
-			c.OnWindowShortcut(0, ui.KeyR, func() { a.viewerRotate(90) })
-			c.OnWindowShortcut(ui.Shift, ui.KeyR, func() { a.viewerRotate(-90) })
-			c.OnWindowShortcut(0, ui.KeyI, func() { a.viewerToggleInfo() })
+			a.viewerFooter(c, it, th)
+			a.viewerShortcuts(c, it)
 		})
 	})
 
 	if wasOpen && !a.viewer.Open {
 		a.closeViewer()
 	}
+}
+
+func (a *App) viewerShortcuts(c *ui.Context, it *Item) {
+	c.OnWindowShortcut(0, ui.KeyLeft, func() { a.viewerStep(-1) })
+	c.OnWindowShortcut(0, ui.KeyRight, func() { a.viewerStep(1) })
+	c.OnWindowShortcut(0, ui.KeyI, func() { a.viewerToggleInfo() })
+	c.OnWindowShortcut(0, ui.KeyF11, func() { a.viewerToggleFullscreen() })
+	if it.Kind == "video" {
+		c.OnWindowShortcut(0, ui.KeySpace, func() { a.viewerTogglePlay() })
+		c.OnWindowShortcut(0, ui.KeyJ, func() { a.viewerSeekBy(-10 * time.Second) })
+		c.OnWindowShortcut(0, ui.KeyL, func() { a.viewerSeekBy(10 * time.Second) })
+		c.OnWindowShortcut(0, ui.KeyM, func() { a.viewerToggleMute() })
+		c.OnWindowShortcut(ui.Shift, ui.KeyLeft, func() { a.viewerSeekBy(-10 * time.Second) })
+		c.OnWindowShortcut(ui.Shift, ui.KeyRight, func() { a.viewerSeekBy(10 * time.Second) })
+		return
+	}
+	c.OnWindowShortcut(0, ui.KeyEqual, func() { a.viewerZoom(1.25) })
+	// "+" is Shift+"=" on a US keyboard; accept both spellings.
+	c.OnWindowShortcut(ui.Shift, ui.KeyEqual, func() { a.viewerZoom(1.25) })
+	c.OnWindowShortcut(0, ui.KeyMinus, func() { a.viewerZoom(0.8) })
+	c.OnWindowShortcut(0, ui.Key0, func() { a.viewerReset() })
+	c.OnWindowShortcut(0, ui.Key1, func() { a.viewerActualSize() })
+	c.OnWindowShortcut(0, ui.KeyR, func() { a.viewerRotate(90) })
+	c.OnWindowShortcut(ui.Shift, ui.KeyR, func() { a.viewerRotate(-90) })
+}
+
+func (a *App) viewerFooter(c *ui.Context, it *Item, th *ui.Theme) {
+	ui.Row(c).Height(52).Padding(8, 12, 8, 12).Gap(4).Background(th.Surface).Children(func() {
+		if it.Kind == "video" {
+			a.viewerVideoControls(c, it, th)
+		} else {
+			a.viewerImageControls(c, th)
+			ui.Spacer(c)
+		}
+		a.viewerNavControls(c, it, th)
+	})
+}
+
+func (a *App) viewerImageControls(c *ui.Context, th *ui.Theme) {
+	components.Text(c, fmt.Sprintf("%d%%", a.viewerPercent(c))).FontSize(10.5).
+		TextColor(th.TextMuted).Width(52)
+	components.IconButton(c, lucide.ZoomOut(), "缩小 (−)", components.IconButtonPlain).
+		OnClick(func() { a.viewerZoom(0.8) })
+	components.IconButton(c, lucide.ZoomIn(), "放大 (+, =)", components.IconButtonPlain).
+		OnClick(func() { a.viewerZoom(1.25) })
+	components.IconButton(c, lucide.Maximize2(), "适合窗口 (0)", components.IconButtonPlain).
+		OnClick(a.viewerReset)
+	components.IconButton(c, lucide.ScanLine(), "实际大小 1:1 (1)", components.IconButtonPlain).
+		OnClick(a.viewerActualSize)
+	components.IconButton(c, lucide.RotateCw(), "顺时针旋转 (R)", components.IconButtonPlain).
+		OnClick(func() { a.viewerRotate(90) })
+	ui.Box(c).Width(1).Height(20).Background(th.Border).Margin(2, 6)
+}
+
+func (a *App) viewerVideoControls(c *ui.Context, it *Item, th *ui.Theme) {
+	p := a.viewer.Player
+	if p == nil {
+		ui.Spacer(c)
+		return
+	}
+	playing := p.Playing()
+	playIcon, playLabel := lucide.Play(), "播放 (Space)"
+	if playing {
+		playIcon, playLabel = lucide.Pause(), "暂停 (Space)"
+	}
+	if components.IconButton(c, playIcon, playLabel, components.IconButtonPlain).Clicked() {
+		a.viewerTogglePlay()
+	}
+	components.IconButton(c, lucide.Rewind(), "后退 10 秒 (J)", components.IconButtonPlain).
+		OnClick(func() { a.viewerSeekBy(-10 * time.Second) })
+	components.IconButton(c, lucide.FastForward(), "前进 10 秒 (L)", components.IconButtonPlain).
+		OnClick(func() { a.viewerSeekBy(10 * time.Second) })
+
+	pos, dur := p.Position(), p.Duration()
+	if dur > 0 && pos > dur {
+		pos = dur
+	}
+	components.Text(c, fmt.Sprintf("%s / %s", formatClock(pos), formatClock(dur))).
+		FontSize(10.5).TextColor(th.TextMuted).SingleLine().Width(104)
+
+	durSec := dur.Seconds()
+	sliderDisabled := durSec <= 0
+	if durSec <= 0 {
+		durSec = 1
+	}
+	now := time.Now()
+	if !a.viewer.DraggingSeek && now.After(a.viewer.SeekUntil) {
+		a.viewer.SeekSeconds = math.Max(0, math.Min(durSec, pos.Seconds()))
+	}
+	ui.Box(c).Grow(1).MinWidth(70).Height(24).Children(func() {
+		slider := components.Slider(c, &a.viewer.SeekSeconds, 0, durSec)
+		slider.Label("播放进度").FillWidth()
+		if sliderDisabled {
+			slider.Disabled(true)
+		}
+		if slider.Changed() {
+			a.viewer.SeekUntil = time.Now().Add(700 * time.Millisecond)
+			a.viewerSeekTo(a.viewer.SeekSeconds)
+		}
+		_, _, held := slider.Dragged()
+		a.viewer.DraggingSeek = held
+	})
+
+	rateLabel := fmt.Sprintf("%g×", p.Rate())
+	if p.Rate() == 1 {
+		rateLabel = "1×"
+	}
+	speed := components.Button(c, rateLabel, components.ButtonGhost).
+		Size(44, 28).Padding(0, 6).Radius(7).
+		Tooltip("播放速度")
+	if speed.Clicked() {
+		a.viewerCycleRate()
+	}
+
+	muteIcon, muteLabel := lucide.Volume2(), "静音 (M)"
+	if p.Muted() {
+		muteIcon, muteLabel = lucide.VolumeX(), "取消静音 (M)"
+	}
+	if components.IconButton(c, muteIcon, muteLabel, components.IconButtonPlain).Clicked() {
+		a.viewerToggleMute()
+	}
+	loopIcon := lucide.Repeat()
+	if a.settings.LoopVideo {
+		loopIcon = lucide.Repeat1()
+	}
+	loop := components.IconButton(c, loopIcon, "循环播放", components.IconButtonPlain)
+	if a.settings.LoopVideo {
+		loop.TextColor(th.Accent)
+	}
+	if loop.Clicked() {
+		a.settings.LoopVideo = !a.settings.LoopVideo
+		_ = saveSettings(a.settings)
+		p.SetLoop(a.settings.LoopVideo)
+		a.refresh()
+	}
+}
+
+func (a *App) viewerNavControls(c *ui.Context, it *Item, th *ui.Theme) {
+	_ = it
+	pos, total := 0, 0
+	if t := a.tab(); t != nil {
+		pos, total = viewerMediaPosition(t.Items, a.viewer.Item)
+	}
+	prev := components.IconButton(c, lucide.ChevronLeft(), "上一张 (←)", components.IconButtonPlain).
+		Disabled(pos <= 1)
+	if prev.Clicked() {
+		a.viewerStep(-1)
+	}
+	next := components.IconButton(c, lucide.ChevronRight(), "下一张 (→)", components.IconButtonPlain).
+		Disabled(total == 0 || pos >= total)
+	if next.Clicked() {
+		a.viewerStep(1)
+	}
+	_ = th
 }
 
 func (a *App) viewerCanvas(c *ui.Context, it *Item, th *ui.Theme) {
@@ -234,6 +347,14 @@ func (a *App) viewerCanvas(c *ui.Context, it *Item, th *ui.Theme) {
 			switch {
 			case it.Kind == "video" && a.viewer.Player != nil:
 				p.Fill(r, ui.RGBA(0, 0, 0, 245), 0)
+				if !a.viewer.Player.Ready() {
+					msg := "正在载入视频…"
+					if err := a.viewer.Player.Err(); err != nil {
+						msg = err.Error()
+					}
+					w, _ := p.MeasureText(0, ui.Span{Text: msg, Size: 13})
+					p.Text(r.X+(r.W-w)/2, r.Y+r.H/2, msg, 13, ui.RGBA(230, 230, 235, 255))
+				}
 			case a.viewer.Bitmap == nil:
 				p.Fill(r, ui.RGBA(0, 0, 0, 245), 0)
 				msg := "正在载入…"
@@ -260,6 +381,14 @@ func (a *App) viewerCanvas(c *ui.Context, it *Item, th *ui.Theme) {
 		})
 		if a.viewer.Player != nil {
 			ui.Video(c, a.viewer.Player).Absolute().Fill().Fit(ui.Contain).IgnoreInput(true)
+		}
+		if it.Kind == "video" {
+			if box.DoubleClicked() {
+				a.viewerToggleFullscreen()
+			} else if box.Clicked() {
+				a.viewerTogglePlay()
+			}
+			return
 		}
 		if dx, dy, held := box.Dragged(); held {
 			a.viewer.PanX += dx
@@ -300,13 +429,18 @@ func (a *App) viewerInfoPanel(c *ui.Context, it *Item, th *ui.Theme) {
 		})
 		components.Text(c, it.Name).FontSize(11.5).FontWeight(600).SingleLine().Ellipsis("…")
 		components.Text(c, it.Path).FontSize(9.5).TextColor(th.TextMuted).SingleLine().Ellipsis("…")
+		ext := stringsUpper(it.Ext)
+		if ext == "" {
+			ext = "文件"
+		}
+		components.Text(c, ext+" · "+(MediaSvc{}).FormatSize(it.Size)).FontSize(10).TextColor(th.TextMuted).SingleLine().Ellipsis("…")
+		components.Text(c, "修改于 "+(AppSvc{}).FormatTime(it.Mtime)).FontSize(9.5).TextColor(th.TextMuted).SingleLine().Ellipsis("…")
 		ui.Divider(c)
-		ui.Scroll(c).Grow(1).Children(func() {
+		ui.Scroll(c).Grow(1).Scrollbars(true).Children(func() {
 			ui.Column(c).Gap(5).Children(func() {
-				infoRow(c, "类型", stringsUpper(it.Ext))
-				infoRow(c, "大小", (MediaSvc{}).FormatSize(it.Size))
-				infoRow(c, "修改时间", (AppSvc{}).FormatTime(it.Mtime))
-				if a.viewer.InfoReady {
+				if it.Kind == "video" {
+					a.videoInfoRows(c, it)
+				} else if a.viewer.InfoReady {
 					if a.viewer.Info.Width > 0 {
 						infoRow(c, "尺寸", fmt.Sprintf("%d × %d", a.viewer.Info.Width, a.viewer.Info.Height))
 					}
@@ -331,11 +465,77 @@ func (a *App) viewerInfoPanel(c *ui.Context, it *Item, th *ui.Theme) {
 	})
 }
 
+func (a *App) videoInfoRows(c *ui.Context, it *Item) {
+	p := a.viewer.Player
+	meta := a.viewer.Video
+	w, h := 0, 0
+	dur := time.Duration(0)
+	if p != nil {
+		if p.Ready() {
+			w, h = p.Size()
+		}
+		dur = p.Duration()
+	}
+	if w <= 0 || h <= 0 {
+		w, h = meta.Width, meta.Height
+	}
+	if dur <= 0 && meta.DurationMS > 0 {
+		dur = time.Duration(meta.DurationMS) * time.Millisecond
+	}
+	res := "—"
+	if w > 0 && h > 0 {
+		res = fmt.Sprintf("%d × %d", w, h)
+	}
+	infoRow(c, "分辨率", res)
+	if dur > 0 {
+		infoRow(c, "时长", formatClock(dur))
+	}
+	if !a.viewer.VideoReady {
+		components.Text(c, "正在读取视频元数据…").FontSize(10.5).TextColor(c.Theme().TextMuted)
+		return
+	}
+	fps := "—"
+	if meta.FPS > 0 {
+		fps = fmt.Sprintf("%.1f fps", meta.FPS)
+	}
+	infoRow(c, "帧率", fps)
+	label, bitrate := "实时码率", 0
+	if meta.LiveBitrate && p != nil {
+		bitrate = meta.BitrateAtMS(p.Position().Milliseconds(), 2*time.Second)
+	} else {
+		label = "平均码率"
+		bitrate = meta.BitrateKbps
+		if bitrate <= 0 && dur > 0 {
+			bitrate = int(math.Round(float64(it.Size) * 8 / dur.Seconds() / 1000))
+		}
+	}
+	value := "—"
+	if bitrate > 0 {
+		if bitrate >= 1000 {
+			value = fmt.Sprintf("%.2f Mbps", float64(bitrate)/1000)
+		} else {
+			value = fmt.Sprintf("%d kbps", bitrate)
+		}
+	}
+	infoRow(c, label, value)
+}
+
 func infoRow(c *ui.Context, key, value string) {
 	ui.Column(c).Gap(1).Children(func() {
 		components.Text(c, key).FontSize(9.5).TextColor(c.Theme().TextMuted)
 		components.Text(c, value).FontSize(11).TextColor(c.Theme().Text)
 	})
+}
+
+func formatClock(d time.Duration) string {
+	if d <= 0 {
+		return "0:00"
+	}
+	d = d.Round(time.Second)
+	if d >= time.Hour {
+		return fmt.Sprintf("%d:%02d:%02d", int(d.Hours()), int(d.Minutes())%60, int(d.Seconds())%60)
+	}
+	return fmt.Sprintf("%d:%02d", int(d.Minutes()), int(d.Seconds())%60)
 }
 
 func stringsUpper(s string) string {

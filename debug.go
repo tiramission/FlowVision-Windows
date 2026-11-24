@@ -21,37 +21,48 @@ import (
 )
 
 type debugState struct {
-	Version      string   `json:"version"`
-	Active       int      `json:"active"`
-	Path         string   `json:"path"`
-	Name         string   `json:"name"`
-	Loading      bool     `json:"loading"`
-	Err          string   `json:"error,omitempty"`
-	Total        int      `json:"total"`
-	Filtered     int      `json:"filtered"`
-	Query        string   `json:"query"`
-	ScrollY      float32  `json:"scrollY"`
-	Selected     []string `json:"selected"`
-	Tabs         []string `json:"tabs"`
-	ViewerOpen   bool     `json:"viewerOpen"`
-	ViewerIndex  int      `json:"viewerIndex"`
-	ViewerZoom   float32  `json:"viewerZoom"`
-	ViewerAngle  float32  `json:"viewerAngle"`
-	ViewerInfo   bool     `json:"viewerInfo"`
-	ViewerErr    string   `json:"viewerError,omitempty"`
-	HasBitmap    bool     `json:"hasBitmap"`
-	ThumbSize    int      `json:"thumbSize"`
-	Sidebar      bool     `json:"sidebar"`
-	Recursive    bool     `json:"recursive"`
-	ShowHidden   bool     `json:"showHidden"`
-	ShowSettings bool     `json:"showSettings"`
-	ShowHelp     bool     `json:"showHelp"`
-	ShowAbout    bool     `json:"showAbout"`
-	Maximized    bool     `json:"maximized"`
-	ContentW     int      `json:"contentWidth"`
-	ContentH     int      `json:"contentHeight"`
-	ErrorMsg     string   `json:"errorMessage,omitempty"`
-	Items        []string `json:"items"`
+	Version       string   `json:"version"`
+	Active        int      `json:"active"`
+	Path          string   `json:"path"`
+	Name          string   `json:"name"`
+	Loading       bool     `json:"loading"`
+	Err           string   `json:"error,omitempty"`
+	Total         int      `json:"total"`
+	Filtered      int      `json:"filtered"`
+	Query         string   `json:"query"`
+	ScrollY       float32  `json:"scrollY"`
+	Selected      []string `json:"selected"`
+	Tabs          []string `json:"tabs"`
+	ViewerOpen    bool     `json:"viewerOpen"`
+	ViewerIndex   int      `json:"viewerIndex"`
+	ViewerZoom    float32  `json:"viewerZoom"`
+	ViewerAngle   float32  `json:"viewerAngle"`
+	ViewerInfo    bool     `json:"viewerInfo"`
+	ViewerErr     string   `json:"viewerError,omitempty"`
+	HasBitmap     bool     `json:"hasBitmap"`
+	ThumbSize     int      `json:"thumbSize"`
+	Sidebar       bool     `json:"sidebar"`
+	Recursive     bool     `json:"recursive"`
+	ShowHidden    bool     `json:"showHidden"`
+	ShowCardNames bool     `json:"showCardNames"`
+	ShowSettings  bool     `json:"showSettings"`
+	ShowHelp      bool     `json:"showHelp"`
+	ShowAbout     bool     `json:"showAbout"`
+	Maximized     bool     `json:"maximized"`
+	Fullscreen    bool     `json:"fullscreen"`
+	PlayerReady   bool     `json:"playerReady"`
+	PlayerPlaying bool     `json:"playerPlaying"`
+	PlayerPosMS   int64    `json:"playerPositionMs"`
+	PlayerDurMS   int64    `json:"playerDurationMs"`
+	VideoWidth    int      `json:"videoWidth"`
+	VideoHeight   int      `json:"videoHeight"`
+	VideoFPS      float64  `json:"videoFps"`
+	VideoKbps     int      `json:"videoKbps"`
+	VideoLive     bool     `json:"videoLiveBitrate"`
+	ContentW      int      `json:"contentWidth"`
+	ContentH      int      `json:"contentHeight"`
+	ErrorMsg      string   `json:"errorMessage,omitempty"`
+	Items         []string `json:"items"`
 }
 
 func debugSnapshot() debugState {
@@ -60,12 +71,14 @@ func debugSnapshot() debugState {
 	st.ThumbSize = app.settings.ThumbSize
 	st.Recursive = app.settings.Recursive
 	st.ShowHidden = app.settings.ShowHidden
+	st.ShowCardNames = app.settings.ShowCardNames
 	st.ShowSettings = app.showSettings
 	st.ShowHelp = app.showHelp
 	st.ShowAbout = app.showAbout
 	st.Maximized = app.maximized
 	if mainWin != nil {
 		st.ContentW, st.ContentH = mainWin.ContentSize()
+		st.Fullscreen = mainWin.IsFullScreen()
 	}
 	st.ErrorMsg = app.errorMsg
 	for _, t := range app.tabs {
@@ -95,6 +108,27 @@ func debugSnapshot() debugState {
 		st.ViewerInfo = app.viewer.ShowInfo
 		st.ViewerErr = app.viewer.Err
 		st.HasBitmap = app.viewer.Bitmap != nil
+		if p := app.viewer.Player; p != nil {
+			st.PlayerReady = p.Ready()
+			st.PlayerPlaying = p.Playing()
+			st.PlayerPosMS = p.Position().Milliseconds()
+			st.PlayerDurMS = p.Duration().Milliseconds()
+			if p.Ready() {
+				st.VideoWidth, st.VideoHeight = p.Size()
+			}
+		}
+		if app.viewer.VideoReady {
+			meta := app.viewer.Video
+			if st.VideoWidth <= 0 {
+				st.VideoWidth, st.VideoHeight = meta.Width, meta.Height
+			}
+			st.VideoFPS = meta.FPS
+			st.VideoLive = meta.LiveBitrate
+			st.VideoKbps = meta.BitrateKbps
+			if meta.LiveBitrate && app.viewer.Player != nil {
+				st.VideoKbps = meta.BitrateAtMS(app.viewer.Player.Position().Milliseconds(), 2*time.Second)
+			}
+		}
 	}
 	return st
 }
@@ -208,6 +242,19 @@ func debugCommand(name, arg string) {
 		app.closeViewer()
 	case "viewerinfo":
 		app.viewerToggleInfo()
+	case "viewerfullscreen":
+		app.viewerToggleFullscreen()
+	case "viewerplay":
+		app.viewerTogglePlay()
+	case "viewerseek":
+		f, _ := strconv.ParseFloat(arg, 64)
+		app.viewerSeekTo(f)
+	case "viewerrate":
+		app.viewerCycleRate()
+	case "captions":
+		app.settings.ShowCardNames = !app.settings.ShowCardNames
+		_ = saveSettings(app.settings)
+		app.refresh()
 	case "viewerstep":
 		i, _ := strconv.Atoi(arg)
 		app.viewerStep(i)

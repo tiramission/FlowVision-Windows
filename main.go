@@ -15,7 +15,7 @@ import (
 // devVersion is only the fallback for direct `go build` runs. Packaged builds
 // take the version from mygo.json, which `mygo build` injects into
 // mygo.App.Version().
-const devVersion = "1.2.5"
+const devVersion = "1.2.6"
 
 func appVersion() string {
 	if v := mygo.App.Version(); v != "" {

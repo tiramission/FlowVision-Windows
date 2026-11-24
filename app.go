@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -129,22 +130,28 @@ func (t *Tab) selectedOne() *Item {
 
 // Viewer is the full-window media viewer.
 type Viewer struct {
-	Open      bool
-	Item      *Item
-	Index     int
-	Loading   bool
-	Err       string
-	Bitmap    *ui.Bitmap
-	Zoom      float32
-	Angle     float32
-	PanX      float32
-	PanY      float32
-	ShowInfo  bool
-	Info      MediaInfo
-	InfoReady bool
-	Gen       int
-	Player    *ui.VideoPlayer
-	PlayerErr string
+	Open           bool
+	Item           *Item
+	Index          int
+	Loading        bool
+	Err            string
+	Bitmap         *ui.Bitmap
+	Zoom           float32
+	Angle          float32
+	PanX           float32
+	PanY           float32
+	ShowInfo       bool
+	Info           MediaInfo
+	InfoReady      bool
+	Video          VideoMeta
+	VideoReady     bool
+	Gen            int
+	Player         *ui.VideoPlayer
+	PlayerErr      string
+	PrevFullscreen bool
+	SeekSeconds    float64
+	SeekUntil      time.Time
+	DraggingSeek   bool
 }
 
 // App holds the state the native view builds from. It is only changed on the
@@ -193,7 +200,8 @@ type App struct {
 	confirmDeleteOpen bool
 	confirmPermanent  bool
 
-	viewer Viewer
+	viewer    Viewer
+	viewerGen int
 
 	themeDetected bool
 	systemDark    bool
@@ -1054,35 +1062,63 @@ func (a *App) openViewer(it *Item) {
 		return
 	}
 	a.closeViewer()
-	a.viewer = Viewer{Open: true, Item: it, Zoom: 1, ShowInfo: a.settings.InfoPanel}
+	wasFull := a.win != nil && a.win.IsFullScreen()
+	a.viewer = Viewer{Open: true, Item: it, Zoom: 1, ShowInfo: a.settings.InfoPanel, PrevFullscreen: wasFull}
 	a.viewer.Index = t.indexOf(it.ID)
+	if a.win != nil {
+		// A photo viewer that still leaves a title bar and the taskbar on
+		// screen is not an immersive viewer. Enter true fullscreen on open;
+		// closeViewer restores the window's previous state.
+		a.win.SetFullScreen(true)
+	}
 	a.loadViewerMedia(it)
 	a.refresh()
 }
 
 func (a *App) loadViewerMedia(it *Item) {
-	a.viewer.Gen++
+	// Viewer generations must keep increasing across close/open cycles. If
+	// Viewer.Gen restarted at 1, a ticker left over from the previous video
+	// could mistake the next video for its own and keep running.
+	a.viewerGen++
+	a.viewer.Gen = a.viewerGen
 	gen := a.viewer.Gen
 	a.viewer.Loading = true
 	a.viewer.Err = ""
 	a.viewer.Bitmap = nil
+	a.viewer.SeekSeconds = 0
+	a.viewer.SeekUntil = time.Time{}
+	a.viewer.DraggingSeek = false
+	a.viewer.Video = VideoMeta{}
+	a.viewer.VideoReady = false
 	if a.viewer.Player != nil {
 		a.viewer.Player.Close()
 		a.viewer.Player = nil
 	}
+	if it.Kind == "video" {
+		// Read the container before Media Foundation opens the file. Some
+		// decoders keep an exclusive handle while playing, which would make a
+		// later probe fail even though the file itself is valid.
+		a.viewer.Video = probeVideoMeta(it.Path)
+		a.viewer.VideoReady = true
+	}
 	if a.viewer.ShowInfo {
-		a.viewer.InfoReady = false
-		go func() {
-			info := (MediaSvc{}).Info(it.ID)
-			a.update(func() {
-				if a.viewer.Gen != gen || a.viewer.Item != it {
-					return
-				}
-				a.viewer.Info = info
-				a.viewer.InfoReady = true
-				a.refresh()
-			})
-		}()
+		if it.Kind == "video" {
+			a.viewer.Info = MediaInfo{Video: a.viewer.Video}
+			a.viewer.InfoReady = true
+		} else {
+			a.viewer.InfoReady = false
+			go func() {
+				info := (MediaSvc{}).Info(it.ID)
+				a.update(func() {
+					if a.viewer.Gen != gen || a.viewer.Item != it {
+						return
+					}
+					a.viewer.Info = info
+					a.viewer.InfoReady = true
+					a.refresh()
+				})
+			}()
+		}
 	}
 	switch it.Kind {
 	case "video":
@@ -1105,6 +1141,7 @@ func (a *App) loadViewerMedia(it *Item) {
 				} else {
 					player.Pause()
 				}
+				a.startVideoTicker(gen)
 			}
 			a.refresh()
 		})
@@ -1137,11 +1174,125 @@ func (a *App) loadViewerMedia(it *Item) {
 }
 
 func (a *App) closeViewer() {
+	wasOpen := a.viewer.Open
+	prevFull := a.viewer.PrevFullscreen
 	if a.viewer.Player != nil {
 		a.viewer.Player.Close()
 		a.viewer.Player = nil
 	}
 	a.viewer = Viewer{}
+	if wasOpen && a.win != nil && a.win.IsFullScreen() != prevFull {
+		// F11 can leave fullscreen while the viewer is open, so restore the
+		// exact pre-viewer state rather than only exiting fullscreen.
+		a.win.SetFullScreen(prevFull)
+	}
+	a.refresh()
+}
+
+func (a *App) startVideoTicker(gen int) {
+	go func() {
+		ticker := time.NewTicker(250 * time.Millisecond)
+		defer ticker.Stop()
+		for range ticker.C {
+			alive := true
+			a.update(func() {
+				if a.viewer.Gen != gen || !a.viewer.Open || a.viewer.Player == nil {
+					alive = false
+					return
+				}
+				if a.viewer.Player.Playing() {
+					a.refresh()
+				}
+			})
+			if !alive {
+				return
+			}
+		}
+	}()
+}
+
+func (a *App) viewerTogglePlay() {
+	p := a.viewer.Player
+	if p == nil {
+		return
+	}
+	if p.Playing() {
+		p.Pause()
+	} else {
+		p.Play()
+	}
+	a.refresh()
+}
+
+func (a *App) viewerSeekBy(delta time.Duration) {
+	p := a.viewer.Player
+	if p == nil {
+		return
+	}
+	pos := p.Position() + delta
+	dur := p.Duration()
+	if pos < 0 {
+		pos = 0
+	}
+	if dur > 0 && pos > dur {
+		pos = dur
+	}
+	p.Seek(pos)
+	a.viewer.SeekSeconds = pos.Seconds()
+	a.viewer.SeekUntil = time.Now().Add(500 * time.Millisecond)
+	a.refresh()
+}
+
+func (a *App) viewerSeekTo(seconds float64) {
+	p := a.viewer.Player
+	if p == nil {
+		return
+	}
+	dur := p.Duration()
+	if seconds < 0 {
+		seconds = 0
+	}
+	if dur > 0 && seconds > dur.Seconds() {
+		seconds = dur.Seconds()
+	}
+	p.Seek(time.Duration(seconds * float64(time.Second)))
+	a.viewer.SeekSeconds = seconds
+	a.refresh()
+}
+
+func (a *App) viewerToggleFullscreen() {
+	if a.win == nil {
+		return
+	}
+	a.win.SetFullScreen(!a.win.IsFullScreen())
+	a.refresh()
+}
+
+func (a *App) viewerToggleMute() {
+	p := a.viewer.Player
+	if p == nil {
+		return
+	}
+	p.SetMuted(!p.Muted())
+	a.refresh()
+}
+
+var viewerRates = []float64{0.5, 0.75, 1, 1.25, 1.5, 2}
+
+func (a *App) viewerCycleRate() {
+	p := a.viewer.Player
+	if p == nil {
+		return
+	}
+	cur := p.Rate()
+	next := viewerRates[0]
+	for i, r := range viewerRates {
+		if math.Abs(cur-r) < 0.01 {
+			next = viewerRates[(i+1)%len(viewerRates)]
+			break
+		}
+	}
+	p.SetRate(next)
 	a.refresh()
 }
 
@@ -1206,6 +1357,14 @@ func (a *App) viewerSetInfo(show bool) {
 	_ = saveSettings(a.settings)
 	if show && !a.viewer.InfoReady && a.viewer.Item != nil {
 		it := a.viewer.Item
+		if it.Kind == "video" {
+			// Video metadata is cached before the player opens, so opening the
+			// panel later must not try to reopen a file held by the decoder.
+			a.viewer.Info = MediaInfo{Video: a.viewer.Video}
+			a.viewer.InfoReady = true
+			a.refresh()
+			return
+		}
 		gen := a.viewer.Gen
 		a.viewer.InfoReady = false
 		go func() {

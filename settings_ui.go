@@ -85,6 +85,14 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 							},
 						},
 						{
+							ID: "card-names", Title: "显示卡片文件名",
+							Description: "关闭后卡片只保留画面，瀑布流更沉浸",
+							Keywords:    []string{"caption", "filename", "name", "文件名", "卡片"},
+							Build: func(c *ui.Context) {
+								components.Switch(c, &a.draft.ShowCardNames, "显示卡片文件名", components.SwitchOptions{HideLabel: true, Compact: true})
+							},
+						},
+						{
 							ID: "sidebar-width", Title: "侧边栏宽度",
 							Description: "侧边栏展开时占用的宽度",
 							Keywords:    []string{"sidebar", "width", "侧边栏", "宽度"},

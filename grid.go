@@ -13,26 +13,30 @@ import (
 // gridCell is one tile of the waterfall. X/Y are in the content box's
 // coordinates; scrolling moves the viewport, not the cells.
 type gridCell struct {
-	It   *Item
-	X, Y float32
-	W    float32
-	ImgH float32
+	It    *Item
+	X, Y  float32
+	W     float32
+	ImgH  float32
+	CardH float32
 }
 
-func (c gridCell) height() float32 { return c.ImgH + 33 }
+func (c gridCell) height() float32 { return c.CardH }
 
 type gridLayout struct {
-	Cells  []gridCell
-	TotalH float32
-	Width  float32
-	Cols   int
-	Gap    float32
+	Cells    []gridCell
+	TotalH   float32
+	Width    float32
+	Cols     int
+	Gap      float32
+	Captions bool
 }
 
 // buildWaterfall distributes items into the shortest column, using the image
 // headers' aspect ratios. Columns share the width equally, as Photos' grid
 // does; a row of short panoramas therefore leaves the next row higher up.
-func buildWaterfall(items []*Item, width float32, target, gap int) gridLayout {
+// Captions controls whether each tile leaves room for a file name below its
+// picture; hiding them packs the cards together for an edge-to-edge wall.
+func buildWaterfall(items []*Item, width float32, target, gap int, captions bool) gridLayout {
 	if width < 80 {
 		width = 80
 	}
@@ -51,8 +55,12 @@ func buildWaterfall(items []*Item, width float32, target, gap int) gridLayout {
 	if colW < 40 {
 		colW = 40
 	}
+	captionH := float32(2)
+	if captions {
+		captionH = 33
+	}
 	colY := make([]float32, cols)
-	out := gridLayout{Width: width, Cols: cols, Gap: g}
+	out := gridLayout{Width: width, Cols: cols, Gap: g, Captions: captions}
 	out.Cells = make([]gridCell, 0, len(items))
 	for _, it := range items {
 		aspect := itemAspect(it)
@@ -63,6 +71,12 @@ func buildWaterfall(items []*Item, width float32, target, gap int) gridLayout {
 		if imgH > colW*3.2 {
 			imgH = colW * 3.2
 		}
+		cellCaptionH := captionH
+		if it.Kind == "folder" {
+			// A folder has no thumbnail; its name is the only way to tell
+			// two folders apart, so keep that label even in immersive mode.
+			cellCaptionH = 33
+		}
 		col := 0
 		for i := 1; i < cols; i++ {
 			if colY[i] < colY[col]-0.5 {
@@ -70,11 +84,12 @@ func buildWaterfall(items []*Item, width float32, target, gap int) gridLayout {
 			}
 		}
 		cell := gridCell{
-			It:   it,
-			X:    float32(col) * (colW + g),
-			Y:    colY[col],
-			W:    colW,
-			ImgH: imgH,
+			It:    it,
+			X:     float32(col) * (colW + g),
+			Y:     colY[col],
+			W:     colW,
+			ImgH:  imgH,
+			CardH: imgH + cellCaptionH,
 		}
 		out.Cells = append(out.Cells, cell)
 		colY[col] += cell.height() + g
@@ -164,7 +179,7 @@ func (a *App) gridView(c *ui.Context, tab *Tab) {
 	if width < 120 {
 		width = 120
 	}
-	layout := buildWaterfall(tab.Items, width, a.settings.ThumbSize, a.settings.GridGap)
+	layout := buildWaterfall(tab.Items, width, a.settings.ThumbSize, a.settings.GridGap, a.settings.ShowCardNames)
 	viewTop := tab.Scroll.Y
 	viewBottom := viewTop + windowH
 	for _, cell := range layout.Cells {
@@ -449,13 +464,26 @@ func (a *App) drawGrid(p *ui.Painter, r ui.Rect, layout gridLayout, th *ui.Theme
 		}
 
 		captionY := imgR.Y + imgR.H + 8
-		p.Clip(ui.Rect{X: imgR.X + 9, Y: captionY, W: max(0, imgR.W-18), H: 18}, 0, func() {
-			color := th.Text
-			if i == hover {
-				color = th.Accent
-			}
-			p.Text(imgR.X+9, captionY, it.Name, 11.5, color)
-		})
+		if layout.Captions || it.Kind == "folder" {
+			p.Clip(ui.Rect{X: imgR.X + 9, Y: captionY, W: max(0, imgR.W-18), H: 18}, 0, func() {
+				color := th.Text
+				if i == hover {
+					color = th.Accent
+				}
+				p.Text(imgR.X+9, captionY, it.Name, 11.5, color)
+			})
+		} else if i == hover {
+			// With captions hidden the wall stays clean, but a hovered tile
+			// still needs to say which file it is before it is opened.
+			label := it.Name
+			textW, _ := p.MeasureText(0, ui.Span{Text: label, Size: 11, Weight: 500})
+			pillW := min(imgR.W-16, textW+20)
+			pill := ui.Rect{X: imgR.X + 8, Y: imgR.Y + imgR.H - 34, W: max(0, pillW), H: 25}
+			p.Fill(pill, ui.RGBA(0, 0, 0, 168), 8)
+			p.Clip(ui.Rect{X: pill.X + 10, Y: pill.Y + 5, W: max(0, pill.W-20), H: 16}, 0, func() {
+				p.Text(pill.X+10, pill.Y+5, label, 11, ui.RGBA(255, 255, 255, 240))
+			})
+		}
 	}
 }
 
