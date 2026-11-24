@@ -86,11 +86,9 @@ func (a *App) viewerOverlay(c *ui.Context) {
 							a.viewer.Player.Play()
 						}
 					}
-					loop := a.settings.LoopVideo
-					if components.Switch(c, &loop, "循环", components.SwitchOptions{Compact: true}).Changed() {
-						a.settings.LoopVideo = loop
+					if components.Switch(c, &a.settings.LoopVideo, "循环", components.SwitchOptions{Compact: true}).Changed() {
 						_ = saveSettings(a.settings)
-						a.viewer.Player.SetLoop(loop)
+						a.viewer.Player.SetLoop(a.settings.LoopVideo)
 					}
 				}
 				prev := components.IconButton(c, lucide.ChevronLeft(), "上一张 (←)", components.IconButtonPlain).

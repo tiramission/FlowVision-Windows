@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -12,6 +13,7 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 	mvideo "github.com/egoist/mygo/ui/video"
+	"github.com/oneo-me/onevra/source/components"
 	onevra "github.com/oneo-me/onevra/source/theme"
 )
 
@@ -161,6 +163,13 @@ type App struct {
 
 	showSettings    bool
 	draft           Settings
+	settingsUI      components.SettingsState
+	draftThumbSize  float64
+	draftGridGap    float64
+	draftSidebarW   float64
+	draftCacheLimit float64
+	draftTheme      string
+	draftSort       string
 	cacheInfo       CacheInfo
 	focusSearch     bool
 	searchHandle    ui.Handle
@@ -665,16 +674,57 @@ func (a *App) setThumbSize(delta int) {
 }
 
 func (a *App) openSettings() {
-	a.draft = a.settings
-	a.draft.Favorites = append([]string(nil), a.settings.Favorites...)
-	a.draft.Tabs = append([]TabState(nil), a.settings.Tabs...)
+	a.fillSettingsDraft(a.settings)
+	a.settingsUI.Query = ""
 	a.cacheInfo = thumbCacheInfo()
 	a.showSettings = true
 	a.refresh()
 }
 
+// fillSettingsDraft copies persisted settings into the editable draft. Controls
+// bind to these retained fields, not to locals rebuilt every frame: a Changed
+// notice arrives on the following build pass, when a local would already have
+// been reset to the old value.
+func (a *App) fillSettingsDraft(s Settings) {
+	a.draft = s
+	a.draft.Favorites = append([]string(nil), s.Favorites...)
+	a.draft.Tabs = append([]TabState(nil), s.Tabs...)
+	a.draftTheme = s.Theme
+	a.draftSort = s.Sort
+	a.draftThumbSize = float64(s.ThumbSize)
+	a.draftGridGap = float64(s.GridGap)
+	a.draftSidebarW = float64(s.SidebarWidth)
+	a.draftCacheLimit = float64(s.CacheLimitMB)
+}
+
+// commitSettingsDraft writes values owned by controls that need a numeric or
+// keyed model back into the Settings copy before range checks and persistence.
+func (a *App) commitSettingsDraft() Settings {
+	a.draft.Theme = a.draftTheme
+	a.draft.Sort = a.draftSort
+	a.draft.ThumbSize = int(math.Round(a.draftThumbSize))
+	a.draft.GridGap = int(math.Round(a.draftGridGap))
+	a.draft.SidebarWidth = int(math.Round(a.draftSidebarW))
+	a.draft.CacheLimitMB = int(math.Round(a.draftCacheLimit))
+	return a.draft
+}
+
+func (a *App) resetSettingsDraft() {
+	favorites := append([]string(nil), a.draft.Favorites...)
+	tabs := append([]TabState(nil), a.draft.Tabs...)
+	active := a.draft.ActiveTab
+	lastPath := a.draft.LastPath
+	s := defaultSettings()
+	s.Favorites = favorites
+	s.Tabs = tabs
+	s.ActiveTab = active
+	s.LastPath = lastPath
+	a.fillSettingsDraft(s)
+	a.refresh()
+}
+
 func (a *App) applySettings() {
-	s := mergeSettings(defaultSettings(), a.draft)
+	s := mergeSettings(defaultSettings(), a.commitSettingsDraft())
 	a.settings = s
 	a.sidebar = s.Sidebar
 	a.sidebarWidth = s.SidebarWidth
@@ -689,9 +739,17 @@ func (a *App) applySettings() {
 	a.treeLoaded = map[string]bool{}
 	a.treeKids = map[string][]TreeEntry{}
 	a.reloadActive()
+	// The active tab's sort is part of persisted tab state, not only the
+	// defaults in Settings. Write it after the active tab has been updated.
+	a.persist()
 }
 
 func (a *App) applyTheme() {
+	// The headless tester has no application loop for Theme.SetSource to
+	// notify; theme selection is a window concern, not a model concern.
+	if a.win == nil {
+		return
+	}
 	var src mygo.ThemeSource
 	switch a.settings.Theme {
 	case "light":
@@ -996,6 +1054,11 @@ func (a *App) loadViewerMedia(it *Item) {
 			} else {
 				a.viewer.Player = player
 				player.SetLoop(a.settings.LoopVideo)
+				if a.settings.PlayVideo {
+					player.Play()
+				} else {
+					player.Pause()
+				}
 			}
 			a.refresh()
 		})

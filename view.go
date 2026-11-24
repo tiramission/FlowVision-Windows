@@ -413,15 +413,23 @@ func (a *App) toolbar(c *ui.Context) {
 						a.refresh()
 					})
 			}
-			sortValue := sortLabel(tab.Sort)
-			sel := ui.Select(c.Key("sort"), &sortValue, []string{"名称", "日期", "大小", "类型"}).
-				Label("排序").Width(92)
-			if sel.Changed() {
-				if key := sortKey(sortValue); key != tab.Sort {
-					tab.Sort = key
-					a.persist()
-					a.loadTab(tab, true)
+			sortSel := components.Select(c.Key("sort"), &tab.Sort)
+			sortSel.Trigger.Width(92).Label("排序")
+			sortSel.Trigger.Children(func() {
+				components.Text(c, sortLabel(tab.Sort)).SingleLine()
+			})
+			sortSel.Popup(func(panel ui.Element) {
+				for _, key := range []string{"name", "date", "size", "type"} {
+					key := key
+					item := sortSel.Item(key)
+					item.Children(func() {
+						components.Text(c, sortLabel(key)).SingleLine()
+					})
 				}
+			})
+			if sortSel.Trigger.Changed() {
+				a.persist()
+				a.loadTab(tab, true)
 			}
 			dirIcon := lucide.ArrowUp()
 			dirLabel := "升序，点击切换为降序"
@@ -435,15 +443,11 @@ func (a *App) toolbar(c *ui.Context) {
 					a.persist()
 					a.loadTab(tab, true)
 				})
-			recursive := a.settings.Recursive
-			if components.Switch(c, &recursive, "递归", components.SwitchOptions{Compact: true}).Changed() {
-				a.settings.Recursive = recursive
+			if components.Switch(c, &a.settings.Recursive, "递归", components.SwitchOptions{Compact: true}).Changed() {
 				_ = saveSettings(a.settings)
 				a.loadTab(tab, true)
 			}
-			hidden := a.settings.ShowHidden
-			if components.Switch(c, &hidden, "隐藏", components.SwitchOptions{Compact: true}).Changed() {
-				a.settings.ShowHidden = hidden
+			if components.Switch(c, &a.settings.ShowHidden, "隐藏", components.SwitchOptions{Compact: true}).Changed() {
 				_ = saveSettings(a.settings)
 				a.treeGen++
 				a.treeLoaded = map[string]bool{}

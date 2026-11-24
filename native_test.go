@@ -172,8 +172,15 @@ func TestNativeSettingsModal(t *testing.T) {
 	a := newViewTestApp()
 	a.openSettings()
 	tt := ui.NewTester(a.view, 1280, 800)
-	if !tt.HasText("缩略图缓存") {
+	if !tt.HasText("设置") {
 		t.Fatalf("settings modal missing: %q", tt.Texts())
+	}
+	if err := tt.Click("缓存"); err != nil {
+		t.Fatalf("cache category: %v", err)
+	}
+	tt.Frame()
+	if !tt.HasText("缩略图缓存") {
+		t.Fatalf("cache section missing: %q", tt.Texts())
 	}
 	if !tt.HasText("清除缓存") {
 		t.Fatalf("cache controls missing: %q", tt.Texts())
@@ -184,6 +191,156 @@ func TestNativeSettingsModal(t *testing.T) {
 	tt.Frame()
 	if a.showSettings {
 		t.Fatal("settings did not close")
+	}
+}
+
+func TestNativeToolbarSortBinding(t *testing.T) {
+	a := newViewTestApp()
+	tt := ui.NewTester(a.view, 1280, 800)
+	tt.Frame()
+	if a.tab().Sort != "name" {
+		t.Fatalf("initial sort: %q", a.tab().Sort)
+	}
+	trigger, ok := tt.AccessByRole(ui.RolePopUpButton, "排序")
+	if !ok {
+		t.Fatalf("sort trigger missing: %q", tt.Texts())
+	}
+	tt.ClickAt(trigger.Bounds.X+trigger.Bounds.W/2, trigger.Bounds.Y+trigger.Bounds.H/2)
+	tt.Frame()
+	if err := tt.Click("日期"); err != nil {
+		t.Fatalf("sort option: %v", err)
+	}
+	tt.Frame()
+	if a.tab().Sort != "date" {
+		t.Fatalf("toolbar sort did not write the tab: %q", a.tab().Sort)
+	}
+}
+
+func TestNativeToolbarRecursiveSwitch(t *testing.T) {
+	a := newViewTestApp()
+	a.settings.Recursive = false
+	tt := ui.NewTester(a.view, 1280, 800)
+	tt.Frame()
+	info, ok := tt.AccessByRole(ui.RoleSwitch, "递归")
+	if !ok {
+		t.Fatalf("recursive switch missing: %q", tt.Texts())
+	}
+	tt.ClickAt(info.Bounds.X+info.Bounds.W/2, info.Bounds.Y+info.Bounds.H/2)
+	tt.Frame()
+	if !a.settings.Recursive {
+		t.Fatal("toolbar recursive switch did not write settings")
+	}
+}
+
+func TestNativeSettingsSliderBindsDraft(t *testing.T) {
+	a := newViewTestApp()
+	a.openSettings()
+	tt := ui.NewTester(a.view, 1280, 800)
+	tt.Frame()
+	info, ok := tt.AccessByRole(ui.RoleSlider, "缩略图宽度")
+	if !ok {
+		t.Fatalf("thumbnail slider missing: %q", tt.Texts())
+	}
+	y := info.Bounds.Y + info.Bounds.H/2
+	tt.Press(info.Bounds.X+info.Bounds.W*0.2, y)
+	tt.Move(info.Bounds.X+info.Bounds.W*0.8, y)
+	tt.Release(info.Bounds.X+info.Bounds.W*0.8, y)
+	tt.Frame()
+	if a.draftThumbSize <= 300 {
+		t.Fatalf("slider changed a local copy; draft thumb size = %.0f", a.draftThumbSize)
+	}
+	s := a.commitSettingsDraft()
+	if s.ThumbSize <= 300 {
+		t.Fatalf("draft model not updated: %d", s.ThumbSize)
+	}
+}
+
+func TestNativeSettingsThemeSelect(t *testing.T) {
+	a := newViewTestApp()
+	a.openSettings()
+	tt := ui.NewTester(a.view, 1280, 800)
+	tt.Frame()
+	trigger, ok := tt.AccessByRole(ui.RolePopUpButton, "主题")
+	if !ok {
+		t.Fatalf("theme selector missing: %q", tt.Texts())
+	}
+	tt.ClickAt(trigger.Bounds.X+trigger.Bounds.W/2, trigger.Bounds.Y+trigger.Bounds.H/2)
+	tt.Frame()
+	if err := tt.Click("深色"); err != nil {
+		t.Fatalf("theme option: %v", err)
+	}
+	tt.Frame()
+	if a.draftTheme != "dark" {
+		t.Fatalf("theme did not write the draft: %q", a.draftTheme)
+	}
+	if got := a.commitSettingsDraft().Theme; got != "dark" {
+		t.Fatalf("theme did not commit: %q", got)
+	}
+}
+
+func TestNativeSettingsNarrowNavigation(t *testing.T) {
+	a := newViewTestApp()
+	a.openSettings()
+	tt := ui.NewTester(a.view, 760, 500)
+	tt.Frame()
+	trigger, ok := tt.AccessByRole(ui.RolePopUpButton, "设置分类")
+	if !ok {
+		t.Fatalf("narrow category selector missing: %q", tt.Texts())
+	}
+	tt.ClickAt(trigger.Bounds.X+trigger.Bounds.W/2, trigger.Bounds.Y+trigger.Bounds.H/2)
+	tt.Frame()
+	if err := tt.Click("缓存"); err != nil {
+		t.Fatalf("narrow cache category: %v", err)
+	}
+	tt.Frame()
+	if !tt.HasText("缩略图缓存") {
+		t.Fatalf("narrow cache page missing: %q", tt.Texts())
+	}
+}
+
+func TestNativeSettingsSearch(t *testing.T) {
+	a := newViewTestApp()
+	a.openSettings()
+	tt := ui.NewTester(a.view, 1280, 800)
+	tt.Frame()
+	if err := tt.Click("搜索设置"); err != nil {
+		t.Fatalf("settings search: %v", err)
+	}
+	tt.Type("缓存")
+	tt.Frame()
+	if !tt.HasText("缩略图缓存") || !tt.HasText("缓存上限") {
+		t.Fatalf("settings search results missing: %q", tt.Texts())
+	}
+}
+
+func TestNativeSettingsSwitchPersists(t *testing.T) {
+	a := newViewTestApp()
+	a.settings.Sidebar = false
+	a.sidebar = false
+	a.openSettings()
+	tt := ui.NewTester(a.view, 1280, 800)
+	tt.Frame()
+	if a.draft.Sidebar {
+		t.Fatal("draft did not copy the persisted value")
+	}
+	if info, ok := tt.AccessByRole(ui.RoleSwitch, "显示侧边栏"); ok {
+		tt.ClickAt(info.Bounds.X+info.Bounds.W/2, info.Bounds.Y+info.Bounds.H/2)
+	} else {
+		t.Fatal("sidebar switch has no accessible target")
+	}
+	tt.Frame()
+	if !a.draft.Sidebar {
+		t.Fatal("switch changed a local copy instead of the retained draft")
+	}
+	if err := tt.Click("保存"); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	tt.Frame()
+	if a.showSettings {
+		t.Fatal("settings modal stayed open after save")
+	}
+	if !a.settings.Sidebar {
+		t.Fatal("saved settings did not receive the toggled value")
 	}
 }
 

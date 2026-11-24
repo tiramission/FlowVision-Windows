@@ -24,6 +24,7 @@ var (
 	procGlobalLock       = kernel32.NewProc("GlobalLock")
 	procGlobalUnlock     = kernel32.NewProc("GlobalUnlock")
 	procGlobalFree       = kernel32.NewProc("GlobalFree")
+	procRtlMoveMemory    = kernel32.NewProc("RtlMoveMemory")
 )
 
 func procErr(err error) error {
@@ -72,8 +73,10 @@ func setClipboardText(text string) error {
 		procGlobalFree.Call(h)
 		return fmt.Errorf("锁定剪贴板内存失败：%w", procErr(err))
 	}
-	dst := unsafe.Slice((*uint16)(unsafe.Pointer(ptr)), len(w))
-	copy(dst, w)
+	// RtlMoveMemory copies the UTF-16 string into the global block without
+	// converting the kernel pointer back into a Go pointer, keeping the
+	// syscall boundary vet-clean.
+	procRtlMoveMemory.Call(ptr, uintptr(unsafe.Pointer(&w[0])), size)
 	procGlobalUnlock.Call(h)
 	if r, _, err := procSetClipboardData.Call(cfUnicodeText, h); r == 0 {
 		procGlobalFree.Call(h)

@@ -35,106 +35,6 @@ func dialogHeader(c *ui.Context, icon *ui.SVG, title, subtitle string) {
 	})
 }
 
-func (a *App) settingsModal(c *ui.Context) {
-	if !a.showSettings {
-		return
-	}
-	th := c.Theme()
-	_, winH := c.Size()
-	bodyH := winH - 240
-	if bodyH < 220 {
-		bodyH = 220
-	}
-	if bodyH > 540 {
-		bodyH = 540
-	}
-	ui.Modal(c, &a.showSettings, func() {
-		ui.Column(c).Width(540).Gap(11).Children(func() {
-			dialogHeader(c, lucide.SlidersHorizontal(), "设置", "FlowVision · Onevra 原生界面")
-			ui.Divider(c)
-
-			ui.Scroll(c).Height(bodyH).Children(func() {
-				ui.Column(c).Gap(9).Children(func() {
-					components.Text(c, "外观").FontSize(11).Bold().TextColor(th.Text.Alpha(.72))
-					components.Text(c, "主题").FontSize(11).TextColor(th.TextMuted)
-					themeLabel := themeName(a.draft.Theme)
-					if ui.Select(c, &themeLabel, []string{"跟随系统", "浅色", "深色"}).Label("主题").Changed() {
-						a.draft.Theme = themeKey(themeLabel)
-					}
-					components.Text(c, fmt.Sprintf("缩略图宽度：%d px", a.draft.ThumbSize)).FontSize(11).TextColor(th.TextMuted)
-					thumb := float64(a.draft.ThumbSize)
-					if ui.StepSlider(c, &thumb, 96, 480, 8).Label("缩略图宽度").Changed() {
-						a.draft.ThumbSize = int(thumb)
-					}
-					components.Text(c, fmt.Sprintf("网格间距：%d px", a.draft.GridGap)).FontSize(11).TextColor(th.TextMuted)
-					gap := float64(a.draft.GridGap)
-					if ui.StepSlider(c, &gap, 0, 24, 2).Label("网格间距").Changed() {
-						a.draft.GridGap = int(gap)
-					}
-					sidebar := a.draft.Sidebar
-					if components.Switch(c, &sidebar, "显示侧边栏", components.SwitchOptions{Compact: true}).Changed() {
-						a.draft.Sidebar = sidebar
-					}
-					info := a.draft.InfoPanel
-					if components.Switch(c, &info, "查看器默认显示信息面板", components.SwitchOptions{Compact: true}).Changed() {
-						a.draft.InfoPanel = info
-					}
-
-					ui.Divider(c)
-					components.Text(c, "浏览").FontSize(11).Bold().TextColor(th.Text.Alpha(.72))
-					hidden := a.draft.ShowHidden
-					if components.Switch(c, &hidden, "显示隐藏文件", components.SwitchOptions{Compact: true}).Changed() {
-						a.draft.ShowHidden = hidden
-					}
-					other := a.draft.ShowOther
-					if components.Switch(c, &other, "显示非图片文件", components.SwitchOptions{Compact: true}).Changed() {
-						a.draft.ShowOther = other
-					}
-					recursive := a.draft.Recursive
-					if components.Switch(c, &recursive, "递归扫描子文件夹（最多 5 层）", components.SwitchOptions{Compact: true}).Changed() {
-						a.draft.Recursive = recursive
-					}
-					loop := a.draft.LoopVideo
-					if components.Switch(c, &loop, "循环播放视频", components.SwitchOptions{Compact: true}).Changed() {
-						a.draft.LoopVideo = loop
-					}
-
-					ui.Divider(c)
-					components.Text(c, "软件更新").FontSize(11).Bold().TextColor(th.Text.Alpha(.72))
-					components.Text(c, fmt.Sprintf("当前版本 v%s · 从 GitHub Release 获取签名更新", appVersion())).
-						FontSize(11).TextColor(th.TextMuted)
-					if components.Button(c, "检查更新", components.ButtonSecondary).Clicked() {
-						a.checkForUpdates()
-					}
-
-					ui.Divider(c)
-					components.Text(c, "缩略图缓存").FontSize(11).Bold().TextColor(th.Text.Alpha(.72))
-					components.Text(c, fmt.Sprintf("%d 个文件 · %s", a.cacheInfo.Files, (MediaSvc{}).FormatSize(a.cacheInfo.Bytes))).
-						FontSize(11).TextColor(th.TextMuted)
-					ui.Row(c).Gap(8).Children(func() {
-						if components.Button(c, "清除缓存", components.ButtonSecondary).Clicked() {
-							a.clearCache()
-						}
-						if components.Button(c, "打开缓存文件夹", components.ButtonOutline).Clicked() {
-							_ = (AppSvc{}).OpenFolder(a.cacheInfo.Dir)
-						}
-					})
-				})
-			})
-
-			ui.Divider(c)
-			ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
-				if components.Button(c, "取消", components.ButtonSecondary).Clicked() {
-					a.showSettings = false
-				}
-				if components.Button(c, "保存", components.ButtonPrimary).Clicked() {
-					a.later(a.applySettings)
-				}
-			})
-		})
-	})
-}
-
 func themeName(v string) string {
 	switch v {
 	case "light":
@@ -143,16 +43,6 @@ func themeName(v string) string {
 		return "深色"
 	}
 	return "跟随系统"
-}
-
-func themeKey(v string) string {
-	switch v {
-	case "浅色":
-		return "light"
-	case "深色":
-		return "dark"
-	}
-	return "system"
 }
 
 func (a *App) renameModal(c *ui.Context) {

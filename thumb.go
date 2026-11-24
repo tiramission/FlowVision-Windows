@@ -306,6 +306,7 @@ func videoFrame(it *Item, size int) ([]byte, error) {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		cmd := exec.CommandContext(ctx, ff, args...)
+		hideConsoleWindow(cmd)
 		var out bytes.Buffer
 		cmd.Stdout = &out
 		err := cmd.Run()
