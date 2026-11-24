@@ -131,7 +131,7 @@ go build -tags "debug mygo_nowebview" -o fvdebug.exe .
 - **Go 测试全部通过**：`CGO_ENABLED=0 go test ./...` 与 `go test -tags mygo_nowebview .`。覆盖目录扫描/自然排序/递归/隐藏、同级导航、缩略图缓存与并发生成、EXIF、Settings 合并、Windows 保留名、文件操作，以及原生布局、Onevra 侧栏、Ctrl+F 搜索、标签关闭、搜索过滤、网格命中/键盘导航、右键菜单、设置分类/搜索/窄窗口/开关/滑块/保存、工具栏排序/递归开关、查看器浮层、自绘标题栏控件与 ffmpeg 隐藏窗口进程等回归。
 - **真实窗口回归**：debug 构建的本地控制端点 + `CapturePage` 截图 + 真实鼠标点击，验证了 1320×850 与 760×500 布局、深/浅主题、空目录、11 项瀑布流、160 项滚动与滚动恢复、多标签溢出、查看器缩放/旋转/翻页/信息、设置滚动、单实例路径转发、同级/返回导航、搜索过滤、重命名/新建/回收站删除、菜单快捷键（`Ctrl+T/W/B/R/=/−`）与浏览键（`W/S/A/D`、`F5`）。
 - **标题栏回归**：DPI-aware 实际窗口截图确认无系统标题栏；真实点击最小化（`IsIconic=true`）、最大化/还原（`maximized` 状态与客户区尺寸同步）、关闭（进程退出）；双击标题栏空白区最大化；拖动标题栏移动窗口；760×500 下品牌、标签、新建与三枚窗口按钮均可见可点击。
-- **更新/构建回归**：`go tool mygo build -platform windows/amd64` 成功生成 1.2.4 安装包、签名更新归档和 `update-windows-amd64.json`；MyGo 构建的应用可启动，状态栏显示 v1.2.4，自绘标题栏、标题栏“检查更新”按钮与窗口控制保持正常。GitHub Actions 发布后还需检查公开的 `releases/latest/download/update-windows-amd64.json`。
+- **更新/构建回归**：本机 `go tool mygo build -platform windows/amd64` 成功生成 1.2.4 安装包；签名更新归档和 `update-windows-amd64.json` 由 GitHub Actions 使用仓库 secret 生成。MyGo 构建的应用可启动，状态栏显示 v1.2.4，自绘标题栏、标题栏“检查更新”按钮与窗口控制保持正常。GitHub Actions 发布后检查公开的 `releases/latest/download/update-windows-amd64.json`。
 
 ## 八、目录
 
