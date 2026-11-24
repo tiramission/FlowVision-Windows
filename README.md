@@ -6,7 +6,7 @@
 
 把本地图片和视频变成可浏览、可沉浸查看的瀑布流。FlowVision for Windows 是 [netdcy/FlowVision](https://github.com/netdcy/FlowVision)（macOS，Swift/AppKit）的 Windows 重写版：**Go + MyGo 原生 `ui` + Onevra**，不使用 WebView2、HTML 或 JavaScript，也不需要 cgo、Swift 或 Xcode。
 
-当前版本 **1.2.13**：标签栏改为更轻的活动态并在窄窗口溢出时渐隐；状态栏文字、标签和提示统一垂直居中；单列窄窗限制文件夹与普通文件占位卡的预览高度。
+当前版本 **1.2.14**：主窗口改为真正的左右分栏并设置 900×600 起的最小尺寸；侧栏、标题栏、内容区和底部状态区共用连续的根级发丝线；侧栏文件夹区改为当前文件夹为根的树，支持子目录开合、数量、空/加载状态与完整路径提示。
 
 ## 下载与安装
 
