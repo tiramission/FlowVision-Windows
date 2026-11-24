@@ -1,78 +1,73 @@
 package main
 
 import (
-	"strconv"
-
 	"github.com/egoist/mygo"
 )
 
-func jsStr(s string) string { return strconv.Quote(s) }
-
-func evalPage(win *mygo.Window, code string) {
-	if win == nil {
-		win = mainWin
+func installMenu(a *App) {
+	item := func(label, accel string, fn func()) *mygo.MenuItem {
+		return &mygo.MenuItem{Label: label, Accelerator: accel, Click: func(_ *mygo.MenuItem, w *mygo.Window) {
+			w.Update(fn)
+		}}
 	}
-	if win == nil {
-		return
-	}
-	if _, err := win.Page().Eval(code); err != nil {
-		logf("eval: %v", err)
-	}
-}
 
-func menuAction(win *mygo.Window, action string) {
-	code := "window.fv && window.fv.menu(" + jsStr(action) + ")"
-	// Menu accelerators run inside the WebView's key-event callback. Eval
-	// waits for the page to run that script, so calling it there would
-	// deadlock the UI thread until the eval timeout. Dispatch instead.
-	go evalPage(win, code)
-}
-
-func installMenu() {
 	menu := mygo.NewMenu([]*mygo.MenuItem{
 		{
 			Label: "文件",
 			Submenu: []*mygo.MenuItem{
-				{Label: "打开文件夹…", Accelerator: "CmdOrCtrl+O", Click: func(_ *mygo.MenuItem, w *mygo.Window) {
-					// Let the page open the picker so it starts at the active tab.
-					menuAction(w, "openfolder")
-				}},
-				{Label: "新建标签页", Accelerator: "CmdOrCtrl+T", Click: func(_ *mygo.MenuItem, w *mygo.Window) { menuAction(w, "newtab") }},
-				{Label: "关闭标签页", Accelerator: "CmdOrCtrl+W", Click: func(_ *mygo.MenuItem, w *mygo.Window) { menuAction(w, "closetab") }},
+				item("打开文件夹…", "CmdOrCtrl+O", func() { a.pickFolder() }),
+				item("新建标签页", "CmdOrCtrl+T", func() { a.newTab("") }),
+				item("关闭标签页", "CmdOrCtrl+W", func() { a.closeTab(a.active) }),
 				mygo.Separator(),
-				{Label: "在资源管理器中打开", Click: func(_ *mygo.MenuItem, w *mygo.Window) { menuAction(w, "reveal") }},
+				item("在资源管理器中显示", "", func() { a.revealSelected() }),
+				item("刷新", "CmdOrCtrl+Shift+R", func() { a.loadTab(a.tab(), false) }),
 				mygo.Separator(),
 				{Label: "退出", Accelerator: "CmdOrCtrl+Q", Click: func(_ *mygo.MenuItem, _ *mygo.Window) { mygo.App.Quit() }},
 			},
 		},
 		{
+			Label: "编辑",
+			Submenu: []*mygo.MenuItem{
+				item("重命名…", "F2", func() { a.beginRename() }),
+				item("新建文件夹…", "CmdOrCtrl+Shift+N", func() { a.beginNewFolder() }),
+				item("移到回收站", "", func() { a.askDelete(false) }),
+				item("永久删除", "CmdOrCtrl+Delete", func() { a.askDelete(true) }),
+				mygo.Separator(),
+				item("全选", "CmdOrCtrl+A", func() { a.selectAll() }),
+				item("查找", "CmdOrCtrl+F", func() { a.focusSearch = true; a.refresh() }),
+				item("复制路径", "CmdOrCtrl+Shift+C", func() { a.copySelectedPath() }),
+				mygo.Separator(),
+				item("用默认应用打开", "", func() { a.openSelectedExternal() }),
+			},
+		},
+		{
 			Label: "视图",
 			Submenu: []*mygo.MenuItem{
-				{Label: "放大缩略图", Accelerator: "CmdOrCtrl+=", Click: func(_ *mygo.MenuItem, w *mygo.Window) { menuAction(w, "thumb+") }},
-				{Label: "缩小缩略图", Accelerator: "CmdOrCtrl+-", Click: func(_ *mygo.MenuItem, w *mygo.Window) { menuAction(w, "thumb-") }},
+				item("放大缩略图", "CmdOrCtrl+=", func() { a.setThumbSize(32) }),
+				item("缩小缩略图", "CmdOrCtrl+-", func() { a.setThumbSize(-32) }),
 				mygo.Separator(),
-				{Label: "切换侧边栏", Accelerator: "CmdOrCtrl+B", Click: func(_ *mygo.MenuItem, w *mygo.Window) { menuAction(w, "sidebar") }},
-				{Label: "递归模式", Accelerator: "CmdOrCtrl+R", Click: func(_ *mygo.MenuItem, w *mygo.Window) { menuAction(w, "recursive") }},
-				{Label: "显示隐藏文件", Click: func(_ *mygo.MenuItem, w *mygo.Window) { menuAction(w, "hidden") }},
+				item("切换侧边栏", "CmdOrCtrl+B", func() { a.toggleSidebar() }),
+				item("递归模式", "CmdOrCtrl+R", func() { a.toggleRecursive() }),
+				item("显示隐藏文件", "CmdOrCtrl+Shift+H", func() { a.toggleHidden() }),
 				mygo.Separator(),
-				{Label: "设置…", Accelerator: "CmdOrCtrl+,", Click: func(_ *mygo.MenuItem, w *mygo.Window) { menuAction(w, "settings") }},
+				item("设置…", "CmdOrCtrl+,", func() { a.openSettings() }),
 				{Role: mygo.RoleToggleFullScreen},
 			},
 		},
 		{
 			Label: "转到",
 			Submenu: []*mygo.MenuItem{
-				{Label: "上一文件夹", Accelerator: "CmdOrCtrl+Left", Click: func(_ *mygo.MenuItem, w *mygo.Window) { menuAction(w, "prevfolder") }},
-				{Label: "下一文件夹", Accelerator: "CmdOrCtrl+Right", Click: func(_ *mygo.MenuItem, w *mygo.Window) { menuAction(w, "nextfolder") }},
-				{Label: "上一级", Accelerator: "CmdOrCtrl+Up", Click: func(_ *mygo.MenuItem, w *mygo.Window) { menuAction(w, "up") }},
-				{Label: "返回", Accelerator: "CmdOrCtrl+[", Click: func(_ *mygo.MenuItem, w *mygo.Window) { menuAction(w, "back") }},
+				item("上一文件夹", "CmdOrCtrl+Left", func() { a.sibling(-1) }),
+				item("下一文件夹", "CmdOrCtrl+Right", func() { a.sibling(1) }),
+				item("上一级", "CmdOrCtrl+Up", func() { a.up() }),
+				item("返回", "CmdOrCtrl+[", func() { a.goBack() }),
 			},
 		},
 		{
 			Label: "帮助",
 			Submenu: []*mygo.MenuItem{
-				{Label: "快捷键与手势", Click: func(_ *mygo.MenuItem, w *mygo.Window) { menuAction(w, "help") }},
-				{Label: "关于 FlowVision", Click: func(_ *mygo.MenuItem, w *mygo.Window) { menuAction(w, "about") }},
+				item("快捷键与手势", "F1", func() { a.showHelp = true; a.refresh() }),
+				item("关于 FlowVision", "", func() { a.showAbout = true; a.refresh() }),
 			},
 		},
 	})

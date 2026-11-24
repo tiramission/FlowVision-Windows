@@ -14,50 +14,8 @@ import (
 	"github.com/egoist/mygo/transfer"
 )
 
-// StartupInfo is what the page loads once when it starts.
-type StartupInfo struct {
-	Settings   Settings `json:"settings"`
-	Places     []Place  `json:"places"`
-	Drives     []Place  `json:"drives"`
-	Version    string   `json:"version"`
-	MediaBase  string   `json:"mediaBase"`
-	MediaToken string   `json:"mediaToken"`
-	StartPath  string   `json:"startPath"`
-	HomePath   string   `json:"homePath"`
-	ExeDir     string   `json:"exeDir"`
-	FFmpeg     bool     `json:"ffmpeg"`
-	ThumbDir   string   `json:"thumbDir"`
-	Platform   string   `json:"platform"`
-	CLIPath    string   `json:"cliPath"`
-}
-
-// AppSvc exposes app level actions to the page.
+// AppSvc collects the app-level actions the native UI calls.
 type AppSvc struct{}
-
-// Startup returns the initial state of the app.
-func (AppSvc) Startup() StartupInfo {
-	home, _ := mygo.App.Path(mygo.PathHome)
-	exe, _ := mygo.App.Path(mygo.PathExe)
-	exeDir := ""
-	if exe != "" {
-		exeDir = filepath.Dir(exe)
-	}
-	info := StartupInfo{
-		Settings:   getSettings(),
-		Places:     (FS{}).Places(),
-		Drives:     (FS{}).Drives(),
-		Version:    appVersion,
-		MediaBase:  mediaBase,
-		MediaToken: mediaToken,
-		StartPath:  startPath,
-		HomePath:   home,
-		ExeDir:     exeDir,
-		FFmpeg:     findFFmpeg() != "",
-		ThumbDir:   thumbDir,
-		CLIPath:    cliPath,
-	}
-	return info
-}
 
 // PickFolder opens the system folder picker and returns the chosen folder.
 func (AppSvc) PickFolder(start string) (string, error) {

@@ -1,0 +1,235 @@
+package main
+
+import (
+	"fmt"
+	"math"
+	"testing"
+
+	"github.com/egoist/mygo/ui"
+)
+
+func newViewTestApp() *App {
+	s := defaultSettings()
+	s.Sidebar = false
+	s.ShowOther = true
+	a := &App{
+		settings:    s,
+		sidebar:     false,
+		thumbs:      map[string]*thumbEntry{},
+		thumbLoad:   map[string]bool{},
+		treeOpen:    map[string]*bool{},
+		treeLoaded:  map[string]bool{},
+		treeLoading: map[string]bool{},
+		treeKids:    map[string][]TreeEntry{},
+	}
+	tab := newTab(0, `C:\Pictures`)
+	tab.Loaded = true
+	tab.All = []*Item{
+		{ID: "1", Name: "a.txt", Kind: "other", Size: 1, W: 1, H: 1},
+		{ID: "2", Name: "b.txt", Kind: "other", Size: 1, W: 1, H: 1},
+		{ID: "3", Name: "c.txt", Kind: "other", Size: 1, W: 1, H: 1},
+	}
+	tab.Items = tab.All
+	tab.Result = DirResult{Path: tab.Path, Name: "Pictures", Items: tab.All}
+	a.tabs = []*Tab{tab}
+	a.active = 0
+	a.nextID = 1
+	return a
+}
+
+func TestNativeViewBuilds(t *testing.T) {
+	a := newViewTestApp()
+	tt := ui.NewTester(a.view, 1280, 800)
+	if !tt.HasText("Pictures") {
+		t.Fatal("folder title missing")
+	}
+	if !tt.HasText("3 项") {
+		t.Fatalf("status missing: %q", tt.Texts())
+	}
+	if !tt.HasText("a.txt") {
+		// Captions are painted by the grid, not separate text elements; the
+		// toolbar path and status must still be there.
+		t.Log("grid captions are painted, as expected")
+	}
+}
+
+func TestNativeSearchFiltersGrid(t *testing.T) {
+	a := newViewTestApp()
+	tt := ui.NewTester(a.view, 1280, 800)
+	if err := tt.Click("搜索"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Type("b")
+	tt.Frame()
+	if len(a.tab().Items) != 1 || a.tab().Items[0].Name != "b.txt" {
+		t.Fatalf("filter: %+v", itemNames(a.tab().Items))
+	}
+	if !tt.HasText("1 项") {
+		t.Fatalf("filtered status: %q", tt.Texts())
+	}
+}
+
+func TestNativeSelectionAndViewerOverlay(t *testing.T) {
+	a := newViewTestApp()
+	a.selectOnly("2")
+	tt := ui.NewTester(a.view, 1280, 800)
+	if !tt.HasText("已选 1 项") {
+		t.Fatalf("selection status missing: %q", tt.Texts())
+	}
+	a.viewer = Viewer{Open: true, Item: a.tab().Items[1], Zoom: 1, ShowInfo: true}
+	a.viewer.InfoReady = true
+	tt.Frame()
+	if !tt.HasText("信息") {
+		t.Fatalf("viewer info missing: %q", tt.Texts())
+	}
+	if !tt.HasText("1 / 3") {
+		t.Fatalf("viewer counter missing: %q", tt.Texts())
+	}
+}
+
+func TestNativeSettingsModal(t *testing.T) {
+	a := newViewTestApp()
+	a.openSettings()
+	tt := ui.NewTester(a.view, 1280, 800)
+	if !tt.HasText("缩略图缓存") {
+		t.Fatalf("settings modal missing: %q", tt.Texts())
+	}
+	if !tt.HasText("清除缓存") {
+		t.Fatalf("cache controls missing: %q", tt.Texts())
+	}
+	if err := tt.Click("取消"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.showSettings {
+		t.Fatal("settings did not close")
+	}
+}
+
+func TestWaterfallLayout(t *testing.T) {
+	items := []*Item{
+		{ID: "1", Name: "wide", Kind: "image", W: 1000, H: 500},
+		{ID: "2", Name: "tall", Kind: "image", W: 500, H: 1000},
+		{ID: "3", Name: "square", Kind: "image", W: 500, H: 500},
+		{ID: "4", Name: "panorama", Kind: "image", W: 2000, H: 400},
+	}
+	g := buildWaterfall(items, 1000, 240, 10)
+	if g.Cols != 4 {
+		t.Fatalf("cols = %d", g.Cols)
+	}
+	if len(g.Cells) != 4 {
+		t.Fatalf("cells = %d", len(g.Cells))
+	}
+	if g.TotalH <= 0 {
+		t.Fatal("no layout height")
+	}
+	// The wide image is the shortest; the tall image is the tallest.
+	if g.Cells[0].ImgH >= g.Cells[1].ImgH {
+		t.Fatalf("aspect not respected: %v %v", g.Cells[0].ImgH, g.Cells[1].ImgH)
+	}
+	for i, c := range g.Cells {
+		if c.X < 0 || c.X+c.W > 1001 {
+			t.Fatalf("cell %d out of width: x=%v w=%v", i, c.X, c.W)
+		}
+	}
+	if _, ok := g.hit(g.Cells[2].X+4, g.Cells[2].Y+4); !ok {
+		t.Fatal("hit test missed a cell")
+	}
+}
+
+func TestWaterfallNarrowWindow(t *testing.T) {
+	g := buildWaterfall([]*Item{{ID: "1", Kind: "image", W: 1, H: 1}}, 120, 240, 8)
+	if g.Cols != 1 {
+		t.Fatalf("cols = %d", g.Cols)
+	}
+	if math.Abs(float64(g.Cells[0].W-120)) > 0.01 {
+		t.Fatalf("cell width = %v", g.Cells[0].W)
+	}
+}
+
+func TestGridNavigation(t *testing.T) {
+	g := buildWaterfall([]*Item{
+		{ID: "1", Kind: "image", W: 1, H: 1},
+		{ID: "2", Kind: "image", W: 1, H: 1},
+		{ID: "3", Kind: "image", W: 1, H: 1},
+		{ID: "4", Kind: "image", W: 1, H: 1},
+		{ID: "5", Kind: "image", W: 1, H: 1},
+	}, 1000, 240, 10)
+	if g.Cols < 2 {
+		t.Skip("too few columns")
+	}
+	next := g.nearestFrom(0, 1, 0)
+	if next < 0 || next > len(g.Cells) {
+		t.Fatalf("right navigation = %d", next)
+	}
+	if g.nearestFrom(0, -1, 0) != -1 {
+		t.Fatal("left from first should have no target")
+	}
+}
+
+func TestNativeGridContextMenu(t *testing.T) {
+	a := newViewTestApp()
+	tt := ui.NewTester(a.view, 1280, 800)
+	tt.RightClickAt(60, 220)
+	tt.Frame()
+	menu := tt.Menu()
+	if len(menu) == 0 {
+		t.Fatalf("context menu did not open: %q", tt.Texts())
+	}
+	t.Logf("menu: %v", menu)
+	if err := tt.ChooseMenuItem("打开"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	tt.Frame()
+	if !a.viewer.Open {
+		t.Fatalf("open did not open viewer; menu %v", menu)
+	}
+	if a.viewer.Item == nil || a.viewer.Item.Name == "" {
+		t.Fatal("viewer has no item")
+	}
+}
+
+func TestNativeGridKeyboardSelection(t *testing.T) {
+	a := newViewTestApp()
+	tt := ui.NewTester(a.view, 1280, 800)
+	tt.ClickAt(60, 220)
+	tt.Frame()
+	if len(a.tab().Selected) != 1 {
+		t.Fatalf("click selected %d", len(a.tab().Selected))
+	}
+	tt.Key(0, ui.KeyRight)
+	tt.Frame()
+	if len(a.tab().Selected) != 1 {
+		t.Fatalf("right key selected %d", len(a.tab().Selected))
+	}
+	if a.tab().Anchor == "" {
+		t.Fatal("no anchor after keyboard move")
+	}
+}
+
+func TestSortLabelsRoundTrip(t *testing.T) {
+	for _, key := range []string{"name", "date", "size", "type"} {
+		if got := sortKey(sortLabel(key)); got != key {
+			t.Fatalf("%s -> %s -> %s", key, sortLabel(key), got)
+		}
+	}
+}
+
+func TestThumbKeyIncludesVersion(t *testing.T) {
+	it := &Item{ID: "x", Mtime: 10, Size: 100}
+	k1 := thumbKey(it, 220)
+	it.Mtime = 11
+	k2 := thumbKey(it, 220)
+	if k1 == k2 {
+		t.Fatal("cache key ignored mtime")
+	}
+}
+
+func itemNames(items []*Item) []string {
+	out := []string{}
+	for _, it := range items {
+		out = append(out, fmt.Sprintf("%s(%s)", it.Name, it.ID))
+	}
+	return out
+}

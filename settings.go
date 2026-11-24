@@ -170,29 +170,9 @@ func saveSettings(s Settings) error {
 	return nil
 }
 
-// Prefs is the settings service the page calls.
-type Prefs struct{}
-
-// Load returns the current settings.
-func (Prefs) Load() Settings { return getSettings() }
-
-// Save stores the settings.
-func (Prefs) Save(s Settings) (bool, error) {
-	if err := saveSettings(s); err != nil {
-		return false, err
-	}
-	return true, nil
-}
-
 // CacheInfo describes the thumbnail cache.
 type CacheInfo struct {
 	Dir   string `json:"dir"`
 	Files int    `json:"files"`
 	Bytes int64  `json:"bytes"`
 }
-
-// Cache reports how much space the thumbnail cache takes.
-func (Prefs) Cache() CacheInfo { return thumbCacheInfo() }
-
-// ClearCache deletes every cached thumbnail.
-func (Prefs) ClearCache() (bool, error) { return clearThumbCache() }

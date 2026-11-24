@@ -1,9 +1,6 @@
 package main
 
 import (
-	"embed"
-	"fmt"
-	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -11,12 +8,10 @@ import (
 	"sync"
 
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/ui"
 )
 
-//go:embed all:web
-var webEmbed embed.FS
-
-const appVersion = "1.0.0"
+const appVersion = "1.1.0"
 
 var (
 	mainWin     *mygo.Window
@@ -25,6 +20,7 @@ var (
 	pendingMu   sync.Mutex
 	pendingOpen string
 	logger      *log.Logger
+	app         *App
 )
 
 func logf(format string, args ...any) {
@@ -40,9 +36,8 @@ func main() {
 		return
 	}
 	mygo.App.OnSecondInstance(func(args []string, workingDir string) {
-		// A second launch hands its command line to this instance, then exits.
 		p := pathFromArgs(args, workingDir)
-		if mainWin == nil {
+		if mainWin == nil || app == nil {
 			if p != "" {
 				pendingMu.Lock()
 				pendingOpen = p
@@ -53,35 +48,38 @@ func main() {
 		mainWin.Show()
 		mainWin.Focus()
 		if p != "" {
-			// Eval waits for the page; keep the instance callback from
-			// blocking the UI thread while that happens.
-			go evalPage(mainWin, "window.fv && window.fv.openPath("+jsStr(p)+")")
+			mainWin.Update(func() { app.openPathArgument(p) })
 		}
 	})
+
 	initLog()
 	initSettings()
 	cliPath = detectCLIPath()
-
-	web, err := fs.Sub(webEmbed, "web")
-	if err != nil {
-		panic(err)
-	}
-	mygo.SetFrontend(web)
-
-	initThumbs()
-	registerImageProtocol()
-	startMediaServer()
-
-	mygo.Bind(FS{})
-	mygo.Bind(MediaSvc{})
-	mygo.Bind(Prefs{})
-	mygo.Bind(AppSvc{})
-
 	startPath = resolveStartPath()
+	initThumbs()
+
+	app = newApp()
+	if cliPath != "" {
+		// A launch with a path focuses that folder rather than restoring the
+		// previous session's tabs.
+		t := newTab(0, cliPath)
+		t.Sort = app.settings.Sort
+		t.Desc = app.settings.Desc
+		app.tabs = []*Tab{t}
+		app.active = 0
+		app.nextID = 1
+	}
+	app.applyTheme()
 	logf("starting with %s", startPath)
 
+	mygo.App.OnBeforeQuit(func(e *mygo.QuitEvent) {
+		if app != nil {
+			app.persist()
+		}
+	})
+
 	mygo.App.WhenReady(func() {
-		installMenu()
+		installMenu(app)
 		openMainWindow()
 	})
 	if err := mygo.App.Run(); err != nil {
@@ -104,17 +102,17 @@ func initLog() {
 
 func openMainWindow() {
 	win := mygo.NewWindow(mygo.WindowOptions{
-		Title:           "FlowVision",
-		URL:             "/",
-		Width:           1320,
-		Height:          850,
-		MinWidth:        720,
-		MinHeight:       460,
-		StateKey:        "main",
-		Hidden:          true,
-		BackgroundColor: "light-dark(#f6f6f8, #1b1b1e)",
+		Title:     "FlowVision",
+		Content:   ui.View(app.view),
+		Width:     1320,
+		Height:    850,
+		MinWidth:  720,
+		MinHeight: 460,
+		StateKey:  "main",
+		Hidden:    true,
 	})
 	mainWin = win
+	app.attach(win)
 	if data, err := os.ReadFile(iconPath()); err == nil {
 		_ = win.SetIcon(data)
 	}
@@ -126,7 +124,7 @@ func openMainWindow() {
 		pendingOpen = ""
 		pendingMu.Unlock()
 		if p != "" {
-			go evalPage(win, "window.fv && window.fv.openPath("+jsStr(p)+")")
+			win.Update(func() { app.openPathArgument(p) })
 		}
 	})
 }
@@ -201,6 +199,3 @@ func pathFromArgs(args []string, workingDir string) string {
 	}
 	return filepath.Dir(clean)
 }
-
-// describe is used by the log when a path is needed in a message.
-func describe(p string) string { return fmt.Sprintf("%q", p) }

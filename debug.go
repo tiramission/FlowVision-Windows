@@ -2,43 +2,148 @@
 
 package main
 
-// Test-only control endpoint used by the local end-to-end checks. It is
-// compiled only with `go build -tags debug` and is never part of a release
-// build. The server listens on loopback and answers Eval requests so the
-// harness can drive the page and read its DOM back.
+// Test-only control endpoint for the native UI. It is compiled only with
+// `go build -tags "debug mygo_nowebview"` and is never part of a release.
+// It can inspect the app state, issue commands on the main thread, and capture
+// the rendered window as PNG, which is how the headless test harness checks
+// the native layout.
 
 import (
 	"encoding/json"
 	"net"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
 	"time"
+
+	"github.com/egoist/mygo"
 )
+
+type debugState struct {
+	Version      string   `json:"version"`
+	Active       int      `json:"active"`
+	Path         string   `json:"path"`
+	Name         string   `json:"name"`
+	Loading      bool     `json:"loading"`
+	Err          string   `json:"error,omitempty"`
+	Total        int      `json:"total"`
+	Filtered     int      `json:"filtered"`
+	Query        string   `json:"query"`
+	ScrollY      float32  `json:"scrollY"`
+	Selected     []string `json:"selected"`
+	Tabs         []string `json:"tabs"`
+	ViewerOpen   bool     `json:"viewerOpen"`
+	ViewerIndex  int      `json:"viewerIndex"`
+	ViewerZoom   float32  `json:"viewerZoom"`
+	ViewerAngle  float32  `json:"viewerAngle"`
+	ViewerInfo   bool     `json:"viewerInfo"`
+	ViewerErr    string   `json:"viewerError,omitempty"`
+	HasBitmap    bool     `json:"hasBitmap"`
+	ThumbSize    int      `json:"thumbSize"`
+	Sidebar      bool     `json:"sidebar"`
+	Recursive    bool     `json:"recursive"`
+	ShowHidden   bool     `json:"showHidden"`
+	ShowSettings bool     `json:"showSettings"`
+	ShowHelp     bool     `json:"showHelp"`
+	ShowAbout    bool     `json:"showAbout"`
+	ErrorMsg     string   `json:"errorMessage,omitempty"`
+	Items        []string `json:"items"`
+}
+
+func debugSnapshot() debugState {
+	st := debugState{Version: appVersion, Active: app.active}
+	st.Sidebar = app.sidebar
+	st.ThumbSize = app.settings.ThumbSize
+	st.Recursive = app.settings.Recursive
+	st.ShowHidden = app.settings.ShowHidden
+	st.ShowSettings = app.showSettings
+	st.ShowHelp = app.showHelp
+	st.ShowAbout = app.showAbout
+	st.ErrorMsg = app.errorMsg
+	for _, t := range app.tabs {
+		st.Tabs = append(st.Tabs, t.Path)
+	}
+	if t := app.tab(); t != nil {
+		st.Path, st.Name = t.Path, t.Name
+		st.Loading, st.Err = t.Loading, t.Err
+		st.Total, st.Filtered = len(t.All), len(t.Items)
+		st.Query = t.Query
+		st.ScrollY = t.Scroll.Y
+		for _, it := range t.selectedItems() {
+			st.Selected = append(st.Selected, it.Name)
+		}
+		for i, it := range t.Items {
+			if i >= 200 {
+				break
+			}
+			st.Items = append(st.Items, it.Name)
+		}
+	}
+	if app.viewer.Open {
+		st.ViewerOpen = true
+		st.ViewerIndex = app.viewer.Index
+		st.ViewerZoom = app.viewer.Zoom
+		st.ViewerAngle = app.viewer.Angle
+		st.ViewerInfo = app.viewer.ShowInfo
+		st.ViewerErr = app.viewer.Err
+		st.HasBitmap = app.viewer.Bitmap != nil
+	}
+	return st
+}
+
+func debugOnMain(fn func() any) any {
+	if mainWin == nil {
+		return nil
+	}
+	done := make(chan any, 1)
+	mainWin.Update(func() { done <- fn() })
+	return <-done
+}
 
 func init() {
 	go func() {
-		for i := 0; i < 900; i++ {
-			if mainWin != nil {
+		for i := 0; i < 600; i++ {
+			if mainWin != nil && app != nil {
 				break
 			}
 			time.Sleep(100 * time.Millisecond)
 		}
-		if mainWin == nil {
+		if mainWin == nil || app == nil {
 			return
 		}
 		mux := http.NewServeMux()
-		mux.HandleFunc("/eval", func(w http.ResponseWriter, r *http.Request) {
-			code := r.URL.Query().Get("code")
-			v, err := mainWin.Page().Eval(code)
-			w.Header().Set("Content-Type", "application/json")
-			out := map[string]any{"result": v}
-			if err != nil {
-				out["error"] = err.Error()
-			}
-			_ = json.NewEncoder(w).Encode(out)
-		})
 		mux.HandleFunc("/ready", func(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte("ok"))
+		})
+		mux.HandleFunc("/state", func(w http.ResponseWriter, r *http.Request) {
+			v := debugOnMain(func() any { s := debugSnapshot(); return s })
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			_ = json.NewEncoder(w).Encode(v)
+		})
+		mux.HandleFunc("/shot", func(w http.ResponseWriter, r *http.Request) {
+			var data []byte
+			var err error
+			_ = debugOnMain(func() any {
+				data, err = mainWin.CapturePage()
+				return nil
+			})
+			if err != nil {
+				http.Error(w, err.Error(), 500)
+				return
+			}
+			w.Header().Set("Content-Type", "image/png")
+			_, _ = w.Write(data)
+		})
+		mux.HandleFunc("/command", func(w http.ResponseWriter, r *http.Request) {
+			name := strings.TrimSpace(r.URL.Query().Get("name"))
+			arg := r.URL.Query().Get("arg")
+			debugOnMain(func() any {
+				debugCommand(name, arg)
+				return nil
+			})
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			_ = json.NewEncoder(w).Encode(debugSnapshot())
 		})
 		ln, err := net.Listen("tcp", "127.0.0.1:47831")
 		if err != nil {
@@ -47,4 +152,152 @@ func init() {
 		}
 		_ = http.Serve(ln, mux)
 	}()
+}
+
+func debugCommand(name, arg string) {
+	t := app.tab()
+	switch name {
+	case "open":
+		app.goTo(arg, true)
+	case "openpath":
+		app.openPathArgument(arg)
+	case "newtab":
+		app.newTab(arg)
+	case "closetab":
+		i, _ := strconv.Atoi(arg)
+		if arg == "" {
+			i = app.active
+		}
+		app.closeTab(i)
+	case "activate":
+		i, _ := strconv.Atoi(arg)
+		app.activateTab(i)
+	case "select":
+		i, _ := strconv.Atoi(arg)
+		if t != nil && i >= 0 && i < len(t.Items) {
+			app.selectOnly(t.Items[i].ID)
+		}
+	case "selectall":
+		app.selectAll()
+	case "selectmany":
+		parts := strings.Split(arg, ",")
+		if t != nil {
+			t.Selected = map[string]bool{}
+			for _, p := range parts {
+				i, _ := strconv.Atoi(strings.TrimSpace(p))
+				if i >= 0 && i < len(t.Items) {
+					t.Selected[t.Items[i].ID] = true
+					t.Anchor = t.Items[i].ID
+				}
+			}
+			app.refresh()
+		}
+	case "viewer":
+		i, _ := strconv.Atoi(arg)
+		if t != nil && i >= 0 && i < len(t.Items) {
+			app.openViewer(t.Items[i])
+		}
+	case "closeviewer":
+		app.closeViewer()
+	case "viewerinfo":
+		app.viewerToggleInfo()
+	case "viewerstep":
+		i, _ := strconv.Atoi(arg)
+		app.viewerStep(i)
+	case "viewerzoom":
+		f, _ := strconv.ParseFloat(arg, 64)
+		app.viewerZoom(float32(f))
+	case "viewerrotate":
+		f, _ := strconv.ParseFloat(arg, 64)
+		app.viewerRotate(float32(f))
+	case "viewerreset":
+		app.viewerReset()
+	case "search":
+		if t != nil {
+			t.Query = arg
+			t.refilter()
+			app.refresh()
+		}
+	case "find":
+		app.focusSearch = true
+		app.refresh()
+	case "scroll":
+		{
+			f, _ := strconv.ParseFloat(arg, 64)
+			if t != nil {
+				t.Scroll.Y = float32(f)
+				app.refresh()
+			}
+		}
+	case "theme":
+		app.settings.Theme = arg
+		_ = saveSettings(app.settings)
+		app.applyTheme()
+	case "size":
+		{
+			parts := strings.Split(strings.ToLower(arg), "x")
+			if len(parts) == 2 && mainWin != nil {
+				w, _ := strconv.Atoi(parts[0])
+				h, _ := strconv.Atoi(parts[1])
+				mainWin.SetSize(w, h)
+			}
+		}
+	case "sidebar":
+		app.toggleSidebar()
+	case "recursive":
+		app.toggleRecursive()
+	case "hidden":
+		app.toggleHidden()
+	case "thumbup":
+		app.setThumbSize(32)
+	case "thumbdown":
+		app.setThumbSize(-32)
+	case "sort":
+		if t != nil {
+			t.Sort = arg
+			app.loadTab(t, true)
+		}
+	case "order":
+		if t != nil {
+			t.Desc = arg == "desc"
+			app.loadTab(t, true)
+		}
+	case "reload":
+		app.loadTab(t, false)
+	case "back":
+		app.goBack()
+	case "up":
+		app.up()
+	case "sibling":
+		i, _ := strconv.Atoi(arg)
+		app.sibling(i)
+	case "settings":
+		app.openSettings()
+	case "applysettings":
+		app.applySettings()
+	case "help":
+		app.showHelp = true
+		app.refresh()
+	case "about":
+		app.showAbout = true
+		app.refresh()
+	case "error":
+		app.showError(arg)
+	case "favorite":
+		app.toggleFavorite()
+	case "newfolder":
+		app.newFolderDraft = arg
+		app.newFolderOpen = true
+		app.commitNewFolder()
+	case "rename":
+		app.beginRename()
+		app.renameDraft = arg
+		app.commitRename()
+	case "delete":
+		app.doDelete()
+	case "copy":
+		app.copySelectedPath()
+	case "quit":
+		mygo.App.Quit()
+	}
 }

@@ -35,7 +35,18 @@ var (
 	thumbSlots   chan struct{}
 	thumbWrites  int64
 	thumbWaiters int64
+	thumbLocks   sync.Map // cache path -> *sync.Mutex, one writer per thumbnail
 )
+
+// lockThumb serializes the generation of one cache file. Without it, several
+// grid cells asking for the same thumbnail at once all render it and race on
+// the rename, which can leave no cache file on Windows.
+func lockThumb(path string) func() {
+	v, _ := thumbLocks.LoadOrStore(path, &sync.Mutex{})
+	m := v.(*sync.Mutex)
+	m.Lock()
+	return m.Unlock
+}
 
 func initThumbs() {
 	cacheDir, err := mygo.App.Path(mygo.PathCache)
@@ -89,6 +100,11 @@ func thumbPath(it *Item, size int) string {
 func getThumb(ctx context.Context, it *Item, size int) ([]byte, error) {
 	size = thumbBudget(size)
 	p := thumbPath(it, size)
+	if data, ok := readFreshCache(p, it.Mtime); ok {
+		return data, nil
+	}
+	unlock := lockThumb(p)
+	defer unlock()
 	if data, ok := readFreshCache(p, it.Mtime); ok {
 		return data, nil
 	}

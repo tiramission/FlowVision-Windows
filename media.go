@@ -2,25 +2,15 @@ package main
 
 import (
 	"bytes"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"image"
 	"image/jpeg"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/egoist/mygo"
-)
-
-var (
-	mediaBase  string
-	mediaToken string
 )
 
 var contentTypes = map[string]string{
@@ -52,55 +42,6 @@ func browserImage(ext string) bool {
 		return true
 	}
 	return false
-}
-
-func registerImageProtocol() {
-	if err := mygo.Protocol.HandleFunc("img", serveImageRequest); err != nil {
-		logf("protocol img: %v", err)
-	}
-}
-
-// serveImageRequest serves /t/<id> thumbnails, /o/<id> originals and /p/<id>
-// converted previews of formats the webview cannot decode.
-func serveImageRequest(w http.ResponseWriter, r *http.Request) {
-	parts := strings.SplitN(strings.TrimPrefix(r.URL.Path, "/"), "/", 2)
-	if len(parts) != 2 {
-		http.NotFound(w, r)
-		return
-	}
-	it, ok := items.Get(parts[1])
-	if !ok {
-		http.NotFound(w, r)
-		return
-	}
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	switch parts[0] {
-	case "t":
-		size := parseIntDefault(r.URL.Query().Get("s"), 240)
-		data, err := getThumb(r.Context(), it, size)
-		if err != nil {
-			w.Header().Set("X-FlowVision-Error", err.Error())
-			http.Error(w, err.Error(), http.StatusNotFound)
-			return
-		}
-		w.Header().Set("Content-Type", "image/jpeg")
-		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
-		_, _ = w.Write(data)
-	case "o":
-		serveItemContent(w, r, it)
-	case "p":
-		data, err := previewBytes(it)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusNotFound)
-			return
-		}
-		w.Header().Set("Content-Type", "image/jpeg")
-		w.Header().Set("Cache-Control", "public, max-age=604800")
-		_, _ = w.Write(data)
-	default:
-		http.NotFound(w, r)
-	}
 }
 
 func serveItemContent(w http.ResponseWriter, r *http.Request, it *Item) {
@@ -170,46 +111,6 @@ func previewBytes(it *Item) ([]byte, error) {
 		}
 	}
 	return buf.Bytes(), nil
-}
-
-// ------------------------------------------------------------ media streaming
-
-// startMediaServer serves videos over loopback HTTP so that seeking works
-// with range requests on every platform.
-func startMediaServer() {
-	tok := make([]byte, 6)
-	_, _ = rand.Read(tok)
-	mediaToken = hex.EncodeToString(tok)
-
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		logf("media server: %v", err)
-		return
-	}
-	mux := http.NewServeMux()
-	mux.HandleFunc("/m/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("t") != mediaToken {
-			http.NotFound(w, r)
-			return
-		}
-		id := strings.TrimPrefix(r.URL.Path, "/m/")
-		it, ok := items.Get(id)
-		if !ok {
-			http.NotFound(w, r)
-			return
-		}
-		serveItemContent(w, r, it)
-	})
-	go func() {
-		_ = http.Serve(ln, mux)
-	}()
-	mediaBase = "http://" + ln.Addr().String()
-	logf("media server on %s", mediaBase)
-}
-
-// MediaURL builds the loopback URL of an item's bytes.
-func mediaURL(it *Item) string {
-	return fmt.Sprintf("%s/m/%s?t=%s", mediaBase, it.ID, mediaToken)
 }
 
 // nowUnix is a small helper for templates.
