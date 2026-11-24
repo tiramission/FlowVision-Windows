@@ -68,6 +68,15 @@ func buildWaterfall(items []*Item, width float32, target, gap int, captions bool
 		if imgH < 48 {
 			imgH = 48
 		}
+		if it.Kind == "folder" || it.Kind == "other" {
+			// Folders and generic files have no thumbnail to show. Letting them
+			// take a full-width square turns a single-column narrow window into
+			// one giant placeholder card, so keep their preview at the current
+			// thumbnail scale instead.
+			if limit := float32(target); imgH > limit {
+				imgH = limit
+			}
+		}
 		if imgH > colW*3.2 {
 			imgH = colW * 3.2
 		}

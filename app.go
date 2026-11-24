@@ -198,6 +198,7 @@ type App struct {
 	focusSearch     bool
 	searchHandle    ui.Handle
 	scrollActiveTab bool
+	tabScroll       ui.ScrollState
 	places          []Place
 	drives          []Place
 

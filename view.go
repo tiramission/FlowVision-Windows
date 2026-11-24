@@ -344,53 +344,68 @@ func (a *App) treeFolder(c *ui.Context, path, name string) {
 func (a *App) tabStrip(c *ui.Context) {
 	th := c.Theme()
 	ui.Row(c).Grow(1).MinWidth(0).Height(titleBarHeight).AlignItems(ui.Center).Children(func() {
-		ui.ScrollHorizontal(c).Grow(1).Scrollbars(false).DragWindow().Children(func() {
-			ui.Row(c).Gap(3).Children(func() {
-				for i, tab := range a.tabs {
-					tab := tab
-					i := i
-					active := i == a.active
-					box := ui.Row(c.Key(tab.ID)).Focusable().Height(32).Gap(6).Padding(0, 10).
-						PaddingEnd(6).Radius(8)
-					if active {
-						box.Background(th.Background).Border(1, th.Border.Alpha(.7))
-					} else if box.Hovered() {
-						box.Background(th.Text.Alpha(.045))
-					}
-					box.DrawOver(func(p *ui.Painter, r ui.Rect) {
+		ui.Box(c).Grow(1).MinWidth(0).Height(titleBarHeight).Children(func() {
+			ui.ScrollHorizontal(c).FillWidth().FillHeight().Scrollbars(false).DragWindow().
+				TrackScroll(&a.tabScroll).Children(func() {
+				ui.Row(c).Gap(4).Children(func() {
+					for i, tab := range a.tabs {
+						tab := tab
+						i := i
+						active := i == a.active
+						box := ui.Row(c.Key(tab.ID)).Focusable().Height(34).Gap(7).Padding(0, 10).
+							PaddingEnd(6).Radius(9).AlignItems(ui.Center)
 						if active {
-							p.Fill(ui.Rect{X: r.X + 10, Y: r.Y + r.H - 2, W: r.W - 20, H: 2}, th.Accent, 1)
+							box.Background(th.SurfaceHover.Alpha(.55)).Border(1, th.Border.Alpha(.62))
+						} else if box.Hovered() {
+							box.Background(th.Text.Alpha(.035))
 						}
-					})
-					box.Children(func() {
-						fg := th.TextMuted
-						if active {
-							fg = th.Accent
-						}
-						components.Icon(c, lucide.FolderOpen()).Size(13, 13).TextColor(fg)
-						components.Text(c, tab.Name).SingleLine().MaxWidth(168).FontSize(12).
-							TextColor(th.Text).FontWeight(func() int {
+						box.DrawOver(func(p *ui.Painter, r ui.Rect) {
 							if active {
-								return 600
+								p.Fill(ui.Rect{X: r.X + 10, Y: r.Y + r.H - 2, W: r.W - 20, H: 2}, th.Accent, 1)
 							}
-							return 400
-						}())
-						close := ui.Button(c, "").Label("关闭标签页 "+tab.Name).Tooltip("关闭标签页").
-							Size(20, 20).Padding(0).Radius(5).Children(func() {
-							components.Icon(c, lucide.X()).Size(11, 11).TextColor(th.TextMuted)
 						})
-						if close.Clicked() {
-							a.later(func() { a.closeTab(i) })
+						box.Children(func() {
+							fgText := th.TextMuted
+							fgIcon := th.TextMuted.Alpha(.82)
+							if active {
+								fgText = th.Text
+								fgIcon = th.Accent
+							} else if box.Hovered() {
+								fgText = th.Text
+								fgIcon = th.TextMuted
+							}
+							components.Icon(c, lucide.FolderOpen()).Size(13, 13).TextColor(fgIcon)
+							components.Text(c, tab.Name).SingleLine().MaxWidth(168).FontSize(12).
+								TextColor(fgText).FontWeight(func() int {
+								if active {
+									return 600
+								}
+								return 400
+							}())
+							close := a.tabCloseButton(c, tab.Name, active, box.Hovered())
+							if close.Clicked() {
+								a.later(func() { a.closeTab(i) })
+							}
+						})
+						if box.Clicked() {
+							a.activateTab(i)
 						}
-					})
-					if box.Clicked() {
-						a.activateTab(i)
+						if a.scrollActiveTab && i == a.active {
+							box.ScrollIntoView()
+						}
 					}
-					if a.scrollActiveTab && i == a.active {
-						box.ScrollIntoView()
-					}
-				}
+				})
 			})
+			// A clipped tab should fade into the title bar instead of ending in a
+			// hard cut when the tab strip scrolls.
+			if a.tabScroll.X > 1 {
+				ui.Box(c).Absolute().Left(0).Top(0).Width(36).Height(titleBarHeight).
+					Gradient(th.Surface, ui.Transparent, 90).PassThrough()
+			}
+			if a.tabScroll.MaxX-a.tabScroll.X > 1 {
+				ui.Box(c).Absolute().Right(0).Top(0).Width(36).Height(titleBarHeight).
+					Gradient(ui.Transparent, th.Surface, 90).PassThrough()
+			}
 		})
 		if a.scrollActiveTab {
 			a.scrollActiveTab = false
@@ -404,7 +419,6 @@ func (a *App) tabStrip(c *ui.Context) {
 		components.IconButton(c, lucide.Plus(), "新建标签页 (Ctrl+T)", components.IconButtonPlain).
 			Size(30, 30).Tooltip("新建标签页 (Ctrl+T)").
 			OnClick(func() { a.later(func() { a.newTab("") }) })
-		ui.Box(c).Width(1).Height(18).Background(th.Border.Alpha(.65)).Margin(0, 6)
 		updateBtn := components.IconButton(c, lucide.CloudDownload(), "检查更新", components.IconButtonPlain).
 			Size(30, 30).Tooltip("从 GitHub Release 检查签名更新")
 		if a.updateAvailable != nil {
@@ -412,6 +426,33 @@ func (a *App) tabStrip(c *ui.Context) {
 		}
 		updateBtn.OnClick(a.checkForUpdates)
 	})
+}
+
+// tabCloseButton is deliberately quieter than a normal button: a tab row with
+// five bordered close buttons reads as a row of tiny input fields.
+func (a *App) tabCloseButton(c *ui.Context, tabName string, active, tabHovered bool) ui.Element {
+	th := c.Theme()
+	b := ui.ButtonBase(c).Label("关闭标签页 "+tabName).Tooltip("关闭标签页").
+		Size(18, 18).Padding(0).Radius(5)
+	b.Draw(func(p *ui.Painter, r ui.Rect) {
+		switch {
+		case b.Pressed():
+			p.Fill(r, th.Text.Alpha(.13), 5)
+		case b.Hovered():
+			p.Fill(r, th.Text.Alpha(.07), 5)
+		}
+	})
+	b.Children(func() {
+		fg := th.TextMuted.Alpha(.52)
+		if active || tabHovered {
+			fg = th.TextMuted.Alpha(.8)
+		}
+		if b.Hovered() {
+			fg = th.Text
+		}
+		components.Icon(c, lucide.X()).Size(11, 11).TextColor(fg)
+	})
+	return b
 }
 
 func (a *App) toolbar(c *ui.Context) {
@@ -633,34 +674,41 @@ func (a *App) statusBar(c *ui.Context) {
 	if tab == nil {
 		return
 	}
-	ui.Row(c).Height(32).Padding(0, 14).Gap(10).Background(th.Surface).
+	ui.Row(c).Height(32).Padding(0, 14).Gap(10).AlignItems(ui.Center).Background(th.Surface).
 		BorderWidth(1, 0, 0, 0).BorderColor(th.Border.Alpha(.55)).Children(func() {
-		components.Text(c, fmt.Sprintf("%d 项", len(tab.Items))).FontSize(11).TextColor(th.TextMuted)
+		components.Text(c, fmt.Sprintf("%d 项", len(tab.Items))).FontSize(11).TextColor(th.TextMuted).
+			AlignSelf(ui.Center)
 		if tab.Query != "" && len(tab.Items) != len(tab.All) {
-			components.Text(c, fmt.Sprintf("（共 %d 项）", len(tab.All))).FontSize(11).TextColor(th.TextMuted)
+			components.Text(c, fmt.Sprintf("（共 %d 项）", len(tab.All))).FontSize(11).TextColor(th.TextMuted).
+				AlignSelf(ui.Center)
 		}
 		counts := fmt.Sprintf("%d 图片 · %d 视频", countKind(tab.Items, "image"), countKind(tab.Items, "video"))
 		if n := countKind(tab.Items, "folder"); n > 0 {
 			counts += fmt.Sprintf(" · %d 文件夹", n)
 		}
-		components.Text(c, counts).FontSize(11).TextColor(th.TextMuted)
+		components.Text(c, counts).FontSize(11).TextColor(th.TextMuted).AlignSelf(ui.Center)
 		if n := len(tab.Selected); n > 0 {
-			components.Text(c, fmt.Sprintf("已选 %d 项", n)).FontSize(11).TextColor(th.Accent)
+			components.Text(c, fmt.Sprintf("已选 %d 项", n)).FontSize(11).TextColor(th.Accent).
+				AlignSelf(ui.Center)
 		}
 		if tab.Result.Truncated {
-			components.Text(c, "已截断").FontSize(11).TextColor(th.TextMuted)
+			components.Text(c, "已截断").FontSize(11).TextColor(th.TextMuted).AlignSelf(ui.Center)
 		}
 		ui.Spacer(c)
 		if a.settings.Recursive {
-			components.Badge(c, "递归", components.BadgeOptions{Tone: components.BadgeWarning})
+			components.Badge(c, "递归", components.BadgeOptions{Tone: components.BadgeWarning}).
+				AlignSelf(ui.Center)
 		}
 		if a.settings.ShowHidden {
-			components.Badge(c, "隐藏", components.BadgeOptions{Tone: components.BadgeNeutral})
+			components.Badge(c, "隐藏", components.BadgeOptions{Tone: components.BadgeNeutral}).
+				AlignSelf(ui.Center)
 		}
 		if !a.settings.ShowCardNames {
-			components.Badge(c, "文件名已隐藏", components.BadgeOptions{Tone: components.BadgeNeutral})
+			components.Badge(c, "文件名已隐藏", components.BadgeOptions{Tone: components.BadgeNeutral}).
+				AlignSelf(ui.Center)
 		}
-		components.Text(c, "F1 快捷键").FontSize(10).TextColor(th.TextMuted.Alpha(.88))
+		components.Text(c, "F1 快捷键").FontSize(10).TextColor(th.TextMuted.Alpha(.88)).
+			AlignSelf(ui.Center)
 	})
 }
 

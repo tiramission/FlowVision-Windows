@@ -57,6 +57,22 @@ func TestNativeOnevraSidebar(t *testing.T) {
 	tt.Frame()
 }
 
+func TestNativeStatusBarCentered(t *testing.T) {
+	a := newViewTestApp()
+	tt := ui.NewTester(a.view, 1280, 800)
+	var centers []float32
+	for _, label := range []string{"3 项", "F1 快捷键"} {
+		r, ok := tt.Find(label)
+		if !ok {
+			t.Fatalf("status label %q has no bounds: %q", label, tt.Texts())
+		}
+		centers = append(centers, r.Y+r.H/2)
+	}
+	if math.Abs(float64(centers[0]-centers[1])) > 0.5 {
+		t.Fatalf("status labels are not vertically centered: %v", centers)
+	}
+}
+
 func TestNativeSearchShortcut(t *testing.T) {
 	a := newViewTestApp()
 	tt := ui.NewTester(a.view, 1280, 800)
@@ -372,6 +388,9 @@ func TestWaterfallLayout(t *testing.T) {
 	folders := buildWaterfall([]*Item{{ID: "f", Name: "文件夹", Kind: "folder", W: 1, H: 1}}, 500, 240, 10, false)
 	if got := folders.Cells[0].height() - folders.Cells[0].ImgH; got < 32 {
 		t.Fatalf("folder caption disappeared in immersive mode: %.1f", got)
+	}
+	if got := folders.Cells[0].ImgH; got > 240 {
+		t.Fatalf("folder placeholder grew past its thumbnail scale: %.1f", got)
 	}
 	// The wide image is the shortest; the tall image is the tallest.
 	if g.Cells[0].ImgH >= g.Cells[1].ImgH {
