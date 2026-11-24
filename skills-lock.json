@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "skills": {
+    "onevra": {
+      "source": "oneo-me/onevra",
+      "commit": "3af36d2c8d0bc847ab6408e0bfc409b7d8f2486d",
+      "sourceType": "github",
+      "skillPath": "skills/onevra/SKILL.md",
+      "computedHash": "89c74c037ad28a2362628d4ef331b77de4ca0bf484a3f3ace47813b4b46dc024"
+    }
+  }
+}
