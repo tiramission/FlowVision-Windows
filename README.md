@@ -70,6 +70,14 @@
 
 ## 五、运行与构建
 
+**安装 / 更新**：从 [Releases](https://github.com/tiramission/FlowVision-Windows/releases) 下载 `flowvision-setup-<version>-amd64.exe`，或运行 MyGo 生成的一行安装脚本：
+
+```powershell
+irm https://github.com/tiramission/FlowVision-Windows/releases/latest/download/install.ps1 | iex
+```
+
+安装包写入 `%LOCALAPPDATA%\Programs\FlowVision`，不需要管理员权限；安装版会在后台检查签名更新，并在“帮助 → 检查更新…”提供手动检查。
+
 **直接运行**：安装版从开始菜单或 `%LOCALAPPDATA%\Programs\FlowVision\FlowVision.exe` 启动；也可以把文件夹或文件路径作为参数：
 
 ```powershell
