@@ -111,6 +111,18 @@ func TestRenameFolderDoesNotPreserveExtension(t *testing.T) {
 	}
 }
 
+func TestViewerCanvasMetricsFullscreenKeepsInfoClosed(t *testing.T) {
+	if w, h := viewerCanvasMetrics(1000, 800, true, true); w != 1000 || h != 800 {
+		t.Fatalf("immersive canvas = %vx%v, want 1000x800", w, h)
+	}
+	if w, h := viewerCanvasMetrics(1000, 800, false, true); w != 700 || h != 698 {
+		t.Fatalf("windowed info canvas = %vx%v, want 700x698", w, h)
+	}
+	if w, h := viewerCanvasMetrics(1000, 800, false, false); w != 1000 || h != 698 {
+		t.Fatalf("windowed canvas = %vx%v, want 1000x698", w, h)
+	}
+}
+
 func TestViewerPercentIsActualScale(t *testing.T) {
 	// 100 px image in a 300 px viewport at fit is a real 300% scale.
 	if got := viewerPercentValue(100, 100, 0, 1, 300, 300); got != 300 {

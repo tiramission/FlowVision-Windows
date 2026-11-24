@@ -75,6 +75,20 @@ func viewerActualZoom(fit float32) float32 {
 	return 1 / fit
 }
 
+func (a *App) viewerFullscreen() bool {
+	return a.win != nil && a.win.IsFullScreen()
+}
+
+func viewerCanvasMetrics(w, h float32, full, info bool) (float32, float32) {
+	if info && !full {
+		w -= 300
+	}
+	if !full {
+		h -= 50 + 52
+	}
+	return w, h
+}
+
 func (a *App) viewerCanvasSize(c *ui.Context) (float32, float32) {
 	w, h := float32(1280), float32(800)
 	if a.win != nil {
@@ -83,11 +97,7 @@ func (a *App) viewerCanvasSize(c *ui.Context) (float32, float32) {
 	} else if c != nil {
 		w, h = c.Size()
 	}
-	if a.viewer.ShowInfo {
-		w -= 300
-	}
-	h -= 50 + 52
-	return w, h
+	return viewerCanvasMetrics(w, h, a.viewerFullscreen(), a.viewer.ShowInfo)
 }
 
 // viewerPercent reports the real display scale (image pixels to logical
@@ -117,66 +127,31 @@ func (a *App) viewerOverlay(c *ui.Context) {
 	}
 	th := c.Theme()
 	it := a.viewer.Item
-	t := a.tab()
 	wasOpen := a.viewer.Open
-	full := a.win != nil && a.win.IsFullScreen()
+	full := a.viewerFullscreen()
 	ui.DialogBase(c, &a.viewer.Open, func(backdrop, panel ui.Element) {
 		backdrop.Background(ui.RGBA(0, 0, 0, 0.82))
 		panel.Fill().Background(th.Background).Clip()
 		ui.Column(c).Fill().Children(func() {
-			ui.Row(c).Height(50).Padding(8, 14, 8, 14).Gap(8).Background(th.Surface).Children(func() {
-				icon := lucide.Image()
-				if it.Kind == "video" {
-					icon = lucide.Film()
+			if full {
+				// Immersive mode: the canvas owns the whole window. The title,
+				// controls and info panel are built only as transient overlays
+				// while the pointer is active, then disappear again.
+				a.viewerCanvas(c, it, th)
+				if a.viewer.ChromeVisible {
+					a.viewerHeader(c, it, th, true)
+					a.viewerFooter(c, it, th, true)
 				}
-				ui.Box(c).Size(30, 30).Radius(8).Background(th.Accent.Alpha(.12)).Center().Children(func() {
-					components.Icon(c, icon).Size(15, 15).TextColor(th.Accent)
-				})
-				ui.Column(c).Grow(1).MinWidth(0).DragWindow().Children(func() {
-					components.Text(c, it.Name).FontSize(13.5).FontWeight(600).SingleLine().Ellipsis("…")
-					if t != nil {
-						pos, total := viewerMediaPosition(t.Items, a.viewer.Item)
-						if total == 0 {
-							pos, total = a.viewer.Index+1, len(t.Items)
-						}
-						if total > 0 {
-							components.Text(c, fmt.Sprintf("%d / %d", pos, total)).
-								FontSize(10).TextColor(th.TextMuted)
-						}
+			} else {
+				a.viewerHeader(c, it, th, false)
+				ui.Row(c).Grow(1).Children(func() {
+					a.viewerCanvas(c, it, th)
+					if a.viewer.ShowInfo {
+						a.viewerInfoPanel(c, it, th)
 					}
 				})
-				infoLabel := "显示信息 (I)"
-				if a.viewer.ShowInfo {
-					infoLabel = "隐藏信息 (I)"
-				}
-				info := components.IconButton(c, lucide.Info(), infoLabel, components.IconButtonPlain)
-				if a.viewer.ShowInfo {
-					info.TextColor(th.Accent)
-				}
-				if info.Clicked() {
-					a.viewerToggleInfo()
-				}
-				fullLabel := "进入全屏 (F11)"
-				fullIcon := lucide.Fullscreen()
-				if full {
-					fullLabel = "退出全屏 (F11)"
-					fullIcon = lucide.Minimize2()
-				}
-				if components.IconButton(c, fullIcon, fullLabel, components.IconButtonPlain).Clicked() {
-					a.viewerToggleFullscreen()
-				}
-				components.IconButton(c, lucide.X(), "关闭查看器 (Esc)", components.IconButtonPlain).
-					OnClick(a.closeViewer)
-			})
-
-			ui.Row(c).Grow(1).Children(func() {
-				a.viewerCanvas(c, it, th)
-				if a.viewer.ShowInfo {
-					a.viewerInfoPanel(c, it, th)
-				}
-			})
-
-			a.viewerFooter(c, it, th)
+				a.viewerFooter(c, it, th, false)
+			}
 			a.viewerShortcuts(c, it)
 		})
 	})
@@ -186,10 +161,75 @@ func (a *App) viewerOverlay(c *ui.Context) {
 	}
 }
 
+func (a *App) viewerHeader(c *ui.Context, it *Item, th *ui.Theme, floating bool) {
+	t := a.tab()
+	bar := ui.Row(c).Height(50).Padding(8, 14, 8, 14).Gap(8)
+	if floating {
+		bar.Absolute().Left(0).Right(0).Top(0).
+			Background(th.Surface.Alpha(.94)).BorderWidth(0, 0, 1, 0).BorderColor(th.Border.Alpha(.6))
+	} else {
+		bar.Background(th.Surface)
+	}
+	bar.Children(func() {
+		icon := lucide.Image()
+		if it.Kind == "video" {
+			icon = lucide.Film()
+		}
+		ui.Box(c).Size(30, 30).Radius(8).Background(th.Accent.Alpha(.12)).Center().Children(func() {
+			components.Icon(c, icon).Size(15, 15).TextColor(th.Accent)
+		})
+		title := ui.Column(c).Grow(1).MinWidth(0)
+		if !floating {
+			title.DragWindow()
+		}
+		title.Children(func() {
+			components.Text(c, it.Name).FontSize(13.5).FontWeight(600).SingleLine().Ellipsis("…")
+			if t != nil {
+				pos, total := viewerMediaPosition(t.Items, a.viewer.Item)
+				if total == 0 {
+					pos, total = a.viewer.Index+1, len(t.Items)
+				}
+				if total > 0 {
+					components.Text(c, fmt.Sprintf("%d / %d", pos, total)).
+						FontSize(10).TextColor(th.TextMuted)
+				}
+			}
+		})
+		if !floating {
+			infoLabel := "显示信息 (I)"
+			if a.viewer.ShowInfo {
+				infoLabel = "隐藏信息 (I)"
+			}
+			info := components.IconButton(c, lucide.Info(), infoLabel, components.IconButtonPlain)
+			if a.viewer.ShowInfo {
+				info.TextColor(th.Accent)
+			}
+			if info.Clicked() {
+				a.viewerToggleInfo()
+			}
+		}
+		fullLabel := "进入全屏 (F11)"
+		fullIcon := lucide.Fullscreen()
+		if floating {
+			fullLabel = "退出全屏 (F11)"
+			fullIcon = lucide.Minimize2()
+		}
+		if components.IconButton(c, fullIcon, fullLabel, components.IconButtonPlain).Clicked() {
+			a.viewerToggleFullscreen()
+		}
+		components.IconButton(c, lucide.X(), "关闭查看器 (Esc)", components.IconButtonPlain).
+			OnClick(a.closeViewer)
+	})
+}
+
 func (a *App) viewerShortcuts(c *ui.Context, it *Item) {
 	c.OnWindowShortcut(0, ui.KeyLeft, func() { a.viewerStep(-1) })
 	c.OnWindowShortcut(0, ui.KeyRight, func() { a.viewerStep(1) })
-	c.OnWindowShortcut(0, ui.KeyI, func() { a.viewerToggleInfo() })
+	if !a.viewerFullscreen() {
+		// The info panel is deliberately absent in immersive fullscreen; F11
+		// returns to the windowed layout where it can be shown again.
+		c.OnWindowShortcut(0, ui.KeyI, func() { a.viewerToggleInfo() })
+	}
 	c.OnWindowShortcut(0, ui.KeyF11, func() { a.viewerToggleFullscreen() })
 	if it.Kind == "video" {
 		c.OnWindowShortcut(0, ui.KeySpace, func() { a.viewerTogglePlay() })
@@ -210,8 +250,15 @@ func (a *App) viewerShortcuts(c *ui.Context, it *Item) {
 	c.OnWindowShortcut(ui.Shift, ui.KeyR, func() { a.viewerRotate(-90) })
 }
 
-func (a *App) viewerFooter(c *ui.Context, it *Item, th *ui.Theme) {
-	ui.Row(c).Height(52).Padding(8, 12, 8, 12).Gap(4).Background(th.Surface).Children(func() {
+func (a *App) viewerFooter(c *ui.Context, it *Item, th *ui.Theme, floating bool) {
+	bar := ui.Row(c).Height(52).Padding(8, 12, 8, 12).Gap(4)
+	if floating {
+		bar.Absolute().Left(0).Right(0).Bottom(0).
+			Background(th.Surface.Alpha(.94)).BorderWidth(1, 0, 0, 0).BorderColor(th.Border.Alpha(.6))
+	} else {
+		bar.Background(th.Surface)
+	}
+	bar.Children(func() {
 		if it.Kind == "video" {
 			a.viewerVideoControls(c, it, th)
 		} else {
@@ -343,6 +390,9 @@ func (a *App) viewerNavControls(c *ui.Context, it *Item, th *ui.Theme) {
 func (a *App) viewerCanvas(c *ui.Context, it *Item, th *ui.Theme) {
 	ui.Box(c).Grow(1).FillHeight().Clip().Children(func() {
 		box := ui.Box(c).Fill().Focusable().Label("媒体查看器")
+		if a.viewerFullscreen() && !a.viewer.ChromeVisible {
+			box.Cursor(ui.CursorNone)
+		}
 		box.Draw(func(p *ui.Painter, r ui.Rect) {
 			switch {
 			case it.Kind == "video" && a.viewer.Player != nil:

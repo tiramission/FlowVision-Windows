@@ -38,6 +38,7 @@ type debugState struct {
 	ViewerZoom    float32  `json:"viewerZoom"`
 	ViewerAngle   float32  `json:"viewerAngle"`
 	ViewerInfo    bool     `json:"viewerInfo"`
+	ViewerChrome  bool     `json:"viewerChrome"`
 	ViewerErr     string   `json:"viewerError,omitempty"`
 	HasBitmap     bool     `json:"hasBitmap"`
 	ThumbSize     int      `json:"thumbSize"`
@@ -106,6 +107,7 @@ func debugSnapshot() debugState {
 		st.ViewerZoom = app.viewer.Zoom
 		st.ViewerAngle = app.viewer.Angle
 		st.ViewerInfo = app.viewer.ShowInfo
+		st.ViewerChrome = app.viewer.ChromeVisible
 		st.ViewerErr = app.viewer.Err
 		st.HasBitmap = app.viewer.Bitmap != nil
 		if p := app.viewer.Player; p != nil {
@@ -242,6 +244,23 @@ func debugCommand(name, arg string) {
 		app.closeViewer()
 	case "viewerinfo":
 		app.viewerToggleInfo()
+	case "viewerchrome":
+		switch arg {
+		case "auto":
+			app.viewer.ChromeVisible = true
+			app.viewer.ChromeUntil = time.Now().Add(1500 * time.Millisecond)
+		case "hide":
+			app.viewer.ChromeVisible = false
+			app.viewer.ChromeUntil = time.Time{}
+		default:
+			app.viewer.ChromeVisible = !app.viewer.ChromeVisible
+			if app.viewer.ChromeVisible {
+				app.viewer.ChromeUntil = time.Now().Add(time.Hour)
+			} else {
+				app.viewer.ChromeUntil = time.Time{}
+			}
+		}
+		app.refresh()
 	case "viewerfullscreen":
 		app.viewerToggleFullscreen()
 	case "viewerplay":

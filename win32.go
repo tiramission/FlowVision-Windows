@@ -19,6 +19,7 @@ var (
 	procEmptyClipboard   = user32.NewProc("EmptyClipboard")
 	procSetClipboardData = user32.NewProc("SetClipboardData")
 	procCloseClipboard   = user32.NewProc("CloseClipboard")
+	procGetCursorPos     = user32.NewProc("GetCursorPos")
 	kernel32             = syscall.NewLazyDLL("kernel32.dll")
 	procGlobalAlloc      = kernel32.NewProc("GlobalAlloc")
 	procGlobalLock       = kernel32.NewProc("GlobalLock")
@@ -32,6 +33,20 @@ func procErr(err error) error {
 		return e
 	}
 	return nil
+}
+
+type win32Point struct {
+	X int32
+	Y int32
+}
+
+// cursorPosition reads the global mouse position. Viewer chrome auto-hide
+// only needs to know whether the pointer moved; screen coordinates avoid
+// mixing DPI-scaled client coordinates with the physical cursor.
+func cursorPosition() (int32, int32, bool) {
+	var p win32Point
+	r, _, _ := procGetCursorPos.Call(uintptr(unsafe.Pointer(&p)))
+	return p.X, p.Y, r != 0
 }
 
 // setClipboardText puts UTF-16 text on the Windows clipboard. The WebView's

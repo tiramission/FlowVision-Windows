@@ -141,6 +141,8 @@ type Viewer struct {
 	PanX           float32
 	PanY           float32
 	ShowInfo       bool
+	ChromeVisible  bool
+	ChromeUntil    time.Time
 	Info           MediaInfo
 	InfoReady      bool
 	Video          VideoMeta
@@ -1082,6 +1084,7 @@ func (a *App) loadViewerMedia(it *Item) {
 	a.viewerGen++
 	a.viewer.Gen = a.viewerGen
 	gen := a.viewer.Gen
+	a.startViewerChromeTicker(gen)
 	a.viewer.Loading = true
 	a.viewer.Err = ""
 	a.viewer.Bitmap = nil
@@ -1171,6 +1174,53 @@ func (a *App) loadViewerMedia(it *Item) {
 			})
 		}()
 	}
+}
+
+func (a *App) startViewerChromeTicker(gen int) {
+	go func() {
+		ticker := time.NewTicker(120 * time.Millisecond)
+		defer ticker.Stop()
+		var lastX, lastY int32
+		var baseline bool
+		for range ticker.C {
+			alive := true
+			mygo.RunOnMain(func() {
+				if a.viewer.Gen != gen || !a.viewer.Open {
+					alive = false
+					return
+				}
+				if a.win == nil || !a.win.IsFullScreen() {
+					return
+				}
+				x, y, ok := cursorPosition()
+				if !ok {
+					return
+				}
+				if !baseline {
+					lastX, lastY, baseline = x, y, true
+					return
+				}
+				moved := x != lastX || y != lastY
+				lastX, lastY = x, y
+				now := time.Now()
+				if moved {
+					a.viewer.ChromeUntil = now.Add(2500 * time.Millisecond)
+					if !a.viewer.ChromeVisible {
+						a.viewer.ChromeVisible = true
+						a.refresh()
+					}
+					return
+				}
+				if a.viewer.ChromeVisible && !now.Before(a.viewer.ChromeUntil) {
+					a.viewer.ChromeVisible = false
+					a.refresh()
+				}
+			})
+			if !alive {
+				return
+			}
+		}
+	}()
 }
 
 func (a *App) closeViewer() {
@@ -1264,7 +1314,14 @@ func (a *App) viewerToggleFullscreen() {
 	if a.win == nil {
 		return
 	}
-	a.win.SetFullScreen(!a.win.IsFullScreen())
+	full := !a.win.IsFullScreen()
+	a.win.SetFullScreen(full)
+	if a.viewer.Open {
+		// Entering fullscreen drops straight into the clean canvas. Leaving it
+		// restores the normal, always-visible title and control bars.
+		a.viewer.ChromeVisible = !full
+		a.viewer.ChromeUntil = time.Time{}
+	}
 	a.refresh()
 }
 
