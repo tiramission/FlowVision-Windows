@@ -1,7 +1,12 @@
 {
   "name": "FlowVision",
   "identifier": "com.flowvision.windows",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "copyright": "© 2026 FlowVision contributors",
-  "license": "GPL-3.0"
+  "license": "GPL-3.0",
+  "out": "build",
+  "updates": {
+    "publicKey": "cxqzUnziczh5/0Ky3mex0Am+ScaPnkwYldYsV7351yg=",
+    "github": "tiramission/FlowVision-Windows"
+  }
 }

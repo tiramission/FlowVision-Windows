@@ -1,0 +1,65 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check tag against mygo.json
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $version = (Get-Content -Raw mygo.json | ConvertFrom-Json).version
+          if ($tag -ne "v$version") {
+            throw "Tag $tag does not match mygo.json version $version"
+          }
+          "Building FlowVision $version"
+
+      - name: Create draft release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $repo = "${{ github.repository }}"
+          $version = (Get-Content -Raw mygo.json | ConvertFrom-Json).version
+          gh release view $tag --repo $repo --json tagName *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --repo $repo --draft --verify-tag `
+              --title "FlowVision $version" --generate-notes
+          }
+
+      - name: Build, sign updates, and upload
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MYGO_UPDATER_PRIVATE_KEY: ${{ secrets.MYGO_UPDATER_PRIVATE_KEY }}
+          GOFLAGS: "-tags=mygo_nowebview"
+        run: go tool mygo build -platform windows/amd64 -upload
+
+      - name: Publish release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          gh release edit $tag --repo "${{ github.repository }}" --draft=false

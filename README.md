@@ -5,8 +5,8 @@
 - 上游项目：https://github.com/netdcy/FlowVision （GPL-3.0）
 - 本移植版：GPL-3.0，见 `LICENSE`；第三方组件许可见 `THIRD_PARTY_NOTICES.md`
 - 技术栈：Go 1.27+ · [MyGo](https://github.com/egoist/mygo) v0.10.0 · [Onevra](https://oneo-me.github.io/onevra/) v0.2026.18 · `github.com/oneo-me/onevra/source`
-- 当前版本：**1.2.1（Onevra 暖色主题 / 纯 Go 原生 UI / 自绘标题栏）**
-- 历史版本：1.2.0 接入 Onevra；1.1.0 是 MyGo 原生 UI 基线；1.0.0 是 Go + WebView2 的第一阶段移植，仍保留在 Git 历史与 GitHub Release 中
+- 当前版本：**1.2.2（Onevra 原生 UI / 自绘标题栏 / 签名自动更新）**
+- 历史版本：1.2.1 移除系统标题栏；1.2.0 接入 Onevra；1.1.0 是 MyGo 原生 UI 基线；1.0.0 是 Go + WebView2 的第一阶段移植，仍保留在 Git 历史与 GitHub Release 中
 
 ---
 
@@ -19,6 +19,8 @@
 1.2.0 在原生 UI 上接入 [Onevra](https://oneo-me.github.io/onevra/)：使用它温暖中性色 + 陶土色的主题、Sidebar、IconButton、TextBox、Switch、Button、Badge 和 Lucide 图标；网格仍自绘，以保留虚拟化性能。Onevra 也是 MyGo 生态的纯 Go 组件，没有引入新的 WebView、HTML 或浏览器运行时。
 
 1.2.1 去掉系统标题栏和系统窗口按钮，窗口顶部改为 48 DIP 的 Onevra 自绘标题栏：左侧品牌，中部标签页与新建按钮，右侧自绘的最小化、最大化/还原、关闭。标题栏可拖动、双击最大化，最大化按钮保留 Windows 11 snap layouts；窗口仍保留系统缩放边缘。
+
+1.2.2 接入 MyGo 的签名更新链路：`mygo.json` 配置公开的 GitHub 更新源与 Ed25519 公钥，应用使用 `native` updater 在后台检查、展示发布说明、下载和重启；“帮助 → 检查更新…”可手动检查。发布由 GitHub Actions 在 `v*` 标签上构建安装包、更新归档与清单并上传，私钥只存在 GitHub secret 和本机备份中。
 
 构建 tag `mygo_nowebview` 让 MyGo 进入 native-only 模式。**纯 Go 构建必须带这个 tag**，否则 MyGo 会按默认 WebView 模式编译。
 
@@ -39,6 +41,7 @@
 | 文件夹浏览 / 递归 / 排序 / 隐藏文件 | ✅ | 名称（自然排序）、日期、大小、类型；递归最多 5 层、单次最多 6,000 项 |
 | 多标签页 | ✅ | 每标签独立路径、排序、历史、搜索、选中状态与滚动位置；重启恢复 |
 | 自绘标题栏 | ✅ | 无系统标题栏/窗口按钮；Onevra 品牌、标签、新建与窗口控制；拖动/双击最大化/最小化/最大化还原/关闭；保留缩放边缘与 snap layouts |
+| 签名自动更新 | ✅ | MyGo `native` updater；后台每日检查 + 帮助菜单手动检查；Ed25519 校验更新归档/清单；安装到用户目录后下载、安装并重启 |
 | 导航 | ✅ | 返回、上一级、同级上/下一个（只在含媒体文件夹间跳转） |
 | 缩略图 | ✅ | JPEG 磁盘缓存、EXIF 方向校正、透明底合成、CatmullRom 缩放；同一张图并发生成时按缓存路径串行，避免写文件竞争 |
 | 图片查看器 | ✅ | 适应/100%/缩放/旋转/平移、上一张/下一张、信息面板、文件操作；Onevra 图标按钮与信息面板 |
@@ -67,10 +70,10 @@
 
 ## 五、运行与构建
 
-**直接运行**：双击 `FlowVision.exe`。也可以把文件夹或文件路径作为参数：
+**直接运行**：安装版从开始菜单或 `%LOCALAPPDATA%\Programs\FlowVision\FlowVision.exe` 启动；也可以把文件夹或文件路径作为参数：
 
 ```powershell
-.\FlowVision.exe "D:\Photos"
+& "$env:LOCALAPPDATA\Programs\FlowVision\FlowVision.exe" "D:\Photos"
 ```
 
 单实例：第二次启动会把路径交给已运行的窗口并新增标签，不会开第二个进程。
@@ -79,10 +82,17 @@
 
 ```powershell
 $env:GOPROXY = "https://goproxy.cn,direct"
-go build -trimpath -tags mygo_nowebview -ldflags "-H=windowsgui -s -w" -o FlowVision.exe .
+$env:GOFLAGS = "-tags=mygo_nowebview"
+go tool mygo build -platform windows/amd64
 ```
 
-分发时只需 `FlowVision.exe` + `resources\icon.png`（图标可选）。**不需要安装 WebView2 Runtime**。
+产物在 `build\windows-amd64\`：`FlowVision.exe`、`flowvision-setup-<version>-amd64.exe`、更新归档、`update-windows-amd64.json`、`install.ps1`。分发和更新使用安装包；直接运行构建目录里的 exe 不支持自我更新。完整发布流程见 `docs\发布流程.md`。
+
+直接 `go build` 仍可用于本地调试，但不会注入更新公钥，因此更新检查会提示该构建不可更新：
+
+```powershell
+go build -trimpath -tags mygo_nowebview -ldflags "-H=windowsgui -s -w" -o FlowVision-dev.exe .
+```
 
 调试构建（带本地测试端点，release 不含）：
 
@@ -94,6 +104,7 @@ go build -tags "debug mygo_nowebview" -o fvdebug.exe .
 
 - 设置、日志：`%APPDATA%\FlowVision`
 - 缩略图缓存：`%LOCALAPPDATA%\FlowVision\thumbs`
+- 安装目录：`%LOCALAPPDATA%\Programs\FlowVision`
 
 ## 六、快捷键
 
@@ -108,6 +119,7 @@ go build -tags "debug mygo_nowebview" -o fvdebug.exe .
 - **Go 测试 39 个全部通过**：`go test -tags mygo_nowebview .`。覆盖目录扫描/自然排序/递归/隐藏、同级导航、缩略图缓存与并发生成、EXIF、Settings 合并、Windows 保留名、文件操作，以及原生布局、Onevra 侧栏、Ctrl+F 搜索、标签关闭、搜索过滤、网格命中/键盘导航、右键菜单、设置弹窗、查看器浮层、自绘标题栏控件与窄窗口等 UI 测试。
 - **真实窗口回归**：debug 构建的本地控制端点 + `CapturePage` 截图 + 真实鼠标点击，验证了 1320×850 与 760×500 布局、深/浅主题、空目录、11 项瀑布流、160 项滚动与滚动恢复、多标签溢出、查看器缩放/旋转/翻页/信息、设置滚动、单实例路径转发、同级/返回导航、搜索过滤、重命名/新建/回收站删除、菜单快捷键（`Ctrl+T/W/B/R/=/−`）与浏览键（`W/S/A/D`、`F5`）。
 - **标题栏回归**：DPI-aware 实际窗口截图确认无系统标题栏；真实点击最小化（`IsIconic=true`）、最大化/还原（`maximized` 状态与客户区尺寸同步）、关闭（进程退出）；双击标题栏空白区最大化；拖动标题栏移动窗口；760×500 下品牌、标签、新建与三枚窗口按钮均可见可点击。
+- **更新/构建回归**：`go tool mygo build -platform windows/amd64` 成功生成 1.2.2 安装包、签名更新归档和 `update-windows-amd64.json`；MyGo 构建的应用可启动，状态栏显示 v1.2.2，自绘标题栏与窗口控制保持正常。GitHub Actions 发布后还需检查公开的 `releases/latest/download/update-windows-amd64.json`。
 
 ## 八、目录
 
@@ -118,7 +130,7 @@ view.go        侧栏、标签栏、工具栏、内容区、状态栏、浏览�
 grid.go        自绘虚拟瀑布流、卡片、命中测试、选择、右键菜单、拖放
 viewer.go      图片/视频查看器与 Onevra 信息面板
 dialogs.go     设置、重命名、新建、删除确认、帮助、关于（Onevra 对话框）
-menu.go        原生菜单
+menu.go        原生菜单、检查更新入口
 dir.go         目录扫描、排序、导航
 thumb.go       缩略图生成、磁盘缓存、ffmpeg 取帧、缓存淘汰
 meta.go        尺寸、EXIF、MediaSvc
@@ -127,8 +139,10 @@ win32.go       隐藏属性、SHFileOperationW 回收站
 settings.go    设置模型与持久化
 debug.go       仅 debug build 启用的本地控制端点
 native_test.go 原生 UI/布局测试
+CHANGELOG.md   版本发布说明（更新窗口读取对应章节）
+.github/       GitHub Actions 发布工作流
 resources/     icon.png
-docs/          移植说明
+docs/          移植说明、发布流程
 ```
 
 ## 九、来源与许可

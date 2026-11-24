@@ -8,10 +8,21 @@ import (
 	"sync"
 
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/plugins/updater/native"
 	"github.com/egoist/mygo/ui"
 )
 
-const appVersion = "1.2.1"
+// devVersion is only the fallback for direct `go build` runs. Packaged builds
+// take the version from mygo.json, which `mygo build` injects into
+// mygo.App.Version().
+const devVersion = "1.2.2"
+
+func appVersion() string {
+	if v := mygo.App.Version(); v != "" {
+		return v
+	}
+	return devVersion
+}
 
 var (
 	mainWin     *mygo.Window
@@ -31,7 +42,8 @@ func logf(format string, args ...any) {
 
 func main() {
 	mygo.App.SetName("FlowVision")
-	mygo.App.SetVersion(appVersion)
+	mygo.App.SetVersion(appVersion())
+	mygo.Use(native.Plugin)
 	if !mygo.App.RequestSingleInstanceLock() {
 		return
 	}

@@ -221,7 +221,7 @@ func (a *App) sidebarView(c *ui.Context) {
 			components.IconButton(c, lucide.Keyboard(), "快捷键帮助", components.IconButtonPlain).
 				OnClick(func() { a.showHelp = true })
 			ui.Spacer(c)
-			components.Text(c, "v"+appVersion).FontSize(10).TextColor(th.TextMuted).Padding(0, 4)
+			components.Text(c, "v"+appVersion()).FontSize(10).TextColor(th.TextMuted).Padding(0, 4)
 		})
 	})
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/plugins/updater"
 )
 
 func installMenu(a *App) {
@@ -67,6 +68,8 @@ func installMenu(a *App) {
 			Label: "帮助",
 			Submenu: []*mygo.MenuItem{
 				item("快捷键与手势", "F1", func() { a.showHelp = true; a.refresh() }),
+				updater.MenuItem(),
+				mygo.Separator(),
 				item("关于 FlowVision", "", func() { a.showAbout = true; a.refresh() }),
 			},
 		},

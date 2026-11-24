@@ -339,7 +339,7 @@ func (a *App) aboutModal(c *ui.Context) {
 					components.Text(c, "FlowVision").FontSize(21).Bold()
 					components.Text(c, "Windows 版 · 纯 Go / MyGo / Onevra").FontSize(10.5).TextColor(th.TextMuted)
 				})
-				components.Badge(c, "v"+appVersion, components.BadgeOptions{Tone: components.BadgeAccent})
+				components.Badge(c, "v"+appVersion(), components.BadgeOptions{Tone: components.BadgeAccent})
 			})
 			ui.Divider(c)
 			components.Text(c, "原项目：netdcy/FlowVision（macOS，Swift/AppKit）").FontSize(10.5).TextColor(th.TextMuted)

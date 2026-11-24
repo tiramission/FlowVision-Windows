@@ -222,7 +222,7 @@ func (AppSvc) FormatTime(unix int64) string {
 }
 
 // Version returns the app version.
-func (AppSvc) Version() string { return appVersion }
+func (AppSvc) Version() string { return appVersion() }
 
 // Log writes a line to the app's log, for diagnostics from the page.
 func (AppSvc) Log(msg string) { logf("page: %s", msg) }

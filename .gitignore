@@ -1,4 +1,9 @@
 *.exe
 build/
+dist/
 .mygo/
 *.log
+
+# Update signing keys are kept outside the repository.
+mygo-update.key
+mygo-update.pub

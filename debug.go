@@ -55,7 +55,7 @@ type debugState struct {
 }
 
 func debugSnapshot() debugState {
-	st := debugState{Version: appVersion, Active: app.active}
+	st := debugState{Version: appVersion(), Active: app.active}
 	st.Sidebar = app.sidebar
 	st.ThumbSize = app.settings.ThumbSize
 	st.Recursive = app.settings.Recursive
