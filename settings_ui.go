@@ -110,7 +110,7 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 						},
 						{
 							ID: "info-panel", Title: "查看器默认显示信息面板",
-							Description: "窗口化查看器显示尺寸、路径和元数据；全屏沉浸时隐藏",
+							Description: "窗口化查看器显示尺寸、路径和元数据；沉浸时隐藏",
 							Keywords:    []string{"info", "metadata", "信息", "元数据"},
 							Build: func(c *ui.Context) {
 								components.Switch(c, &a.draft.InfoPanel, "查看器默认显示信息面板", components.SwitchOptions{HideLabel: true, Compact: true})

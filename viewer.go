@@ -104,15 +104,18 @@ func viewerZoomAtPoint(zoom, panX, panY, delta, x, y, w, h float32) (newZoom, ne
 	return newZoom, ax - (ax-panX)*ratio, ay - (ay-panY)*ratio
 }
 
-func (a *App) viewerFullscreen() bool {
-	return a.win != nil && a.win.IsFullScreen()
+// viewerImmersive reports whether the viewer is filling the host window. It
+// deliberately does not consult Win32 fullscreen: the viewer never owns that
+// window mode.
+func (a *App) viewerImmersive() bool {
+	return a.viewer.Open && a.viewer.Immersive
 }
 
-func viewerCanvasMetrics(w, h float32, full, info bool) (float32, float32) {
-	if info && !full {
+func viewerCanvasMetrics(w, h float32, immersive, info bool) (float32, float32) {
+	if info && !immersive {
 		w -= 300
 	}
-	if !full {
+	if !immersive {
 		h -= 50 + 52
 	}
 	return w, h
@@ -126,7 +129,7 @@ func (a *App) viewerCanvasSize(c *ui.Context) (float32, float32) {
 	} else if c != nil {
 		w, h = c.Size()
 	}
-	return viewerCanvasMetrics(w, h, a.viewerFullscreen(), a.viewer.ShowInfo)
+	return viewerCanvasMetrics(w, h, a.viewerImmersive(), a.viewer.ShowInfo)
 }
 
 // viewerPercent reports the real display scale (image pixels to logical
@@ -157,15 +160,14 @@ func (a *App) viewerOverlay(c *ui.Context) {
 	th := c.Theme()
 	it := a.viewer.Item
 	wasOpen := a.viewer.Open
-	full := a.viewerFullscreen()
+	immersive := a.viewerImmersive()
 	ui.DialogBase(c, &a.viewer.Open, func(backdrop, panel ui.Element) {
 		backdrop.Background(ui.RGBA(0, 0, 0, 0.82))
 		panel.Fill().Background(th.Background).Clip()
 		ui.Column(c).Fill().Children(func() {
-			if full {
-				// Immersive mode: the canvas owns the whole window. The title,
-				// controls and info panel are built only as transient overlays
-				// while the pointer is active, then disappear again.
+			if immersive {
+				// The viewer fills the host window. Its title and controls are
+				// transient overlays, never a Win32 fullscreen transition.
 				a.viewerCanvas(c, it, th)
 				if a.viewer.ChromeVisible {
 					a.viewerHeader(c, it, th, true)
@@ -237,14 +239,14 @@ func (a *App) viewerHeader(c *ui.Context, it *Item, th *ui.Theme, floating bool)
 				a.viewerToggleInfo()
 			}
 		}
-		fullLabel := "进入全屏 (F11)"
-		fullIcon := lucide.Fullscreen()
-		if floating {
-			fullLabel = "退出全屏 (F11)"
-			fullIcon = lucide.Minimize2()
+		immersiveLabel := "进入沉浸 (F11)"
+		immersiveIcon := lucide.Fullscreen()
+		if a.viewer.Immersive {
+			immersiveLabel = "退出沉浸 (F11)"
+			immersiveIcon = lucide.Minimize2()
 		}
-		if components.IconButton(c, fullIcon, fullLabel, components.IconButtonPlain).Clicked() {
-			a.viewerToggleFullscreen()
+		if components.IconButton(c, immersiveIcon, immersiveLabel, components.IconButtonPlain).Clicked() {
+			a.viewerToggleImmersive()
 		}
 		components.IconButton(c, lucide.X(), "关闭查看器 (Esc)", components.IconButtonPlain).
 			OnClick(a.closeViewer)
@@ -257,12 +259,12 @@ func (a *App) viewerShortcuts(c *ui.Context, it *Item) {
 	// Windows mouse side buttons arrive as back/forward keys.
 	c.OnWindowShortcut(0, ui.KeyBack, func() { a.viewerStep(-1) })
 	c.OnWindowShortcut(0, ui.KeyForward, func() { a.viewerStep(1) })
-	if !a.viewerFullscreen() {
-		// The info panel is deliberately absent in immersive fullscreen; F11
+	if !a.viewerImmersive() {
+		// The info panel is deliberately absent in immersive viewer mode; F11
 		// returns to the windowed layout where it can be shown again.
 		c.OnWindowShortcut(0, ui.KeyI, func() { a.viewerToggleInfo() })
 	}
-	c.OnWindowShortcut(0, ui.KeyF11, func() { a.viewerToggleFullscreen() })
+	c.OnWindowShortcut(0, ui.KeyF11, func() { a.viewerToggleImmersive() })
 	if it.Kind == "video" {
 		c.OnWindowShortcut(0, ui.KeySpace, func() { a.viewerTogglePlay() })
 		c.OnWindowShortcut(0, ui.KeyJ, func() { a.viewerSeekBy(-10 * time.Second) })
@@ -478,12 +480,30 @@ func (a *App) finishViewerHold(c *ui.Context) {
 	}
 }
 
+// showViewerCursor gives the pointer its own idle clock. Moving over the
+// canvas wakes it even when the floating bars are hidden, so the two
+// visibility states cannot strand a hidden cursor.
+func (a *App) showViewerCursor() {
+	if !a.viewer.Open || !a.viewer.Immersive {
+		return
+	}
+	a.viewer.CursorUntil = time.Now().Add(viewerCursorIdle)
+	if !a.viewer.CursorVisible {
+		a.viewer.CursorVisible = true
+		a.refresh()
+	}
+}
+
+func viewerCursorShouldHide(immersive, visible bool, now, until time.Time) bool {
+	return immersive && visible && !now.Before(until)
+}
+
 func (a *App) viewerCanvas(c *ui.Context, it *Item, th *ui.Theme) {
 	ui.Box(c).Grow(1).FillHeight().Clip().Children(func() {
 		canvasW, canvasH := a.viewerCanvasSize(c)
 		box := ui.Box(c).Fill().Focusable().Label("媒体查看器")
 		a.finishViewerHold(c)
-		if a.viewerFullscreen() && !a.viewer.ChromeVisible {
+		if a.viewerImmersive() && !a.viewer.CursorVisible {
 			box.Cursor(ui.CursorNone)
 		}
 		box.Draw(func(p *ui.Painter, r ui.Rect) {
@@ -527,7 +547,7 @@ func (a *App) viewerCanvas(c *ui.Context, it *Item, th *ui.Theme) {
 		}
 		if it.Kind == "video" {
 			if box.DoubleClicked() {
-				a.viewerToggleFullscreen()
+				a.viewerToggleImmersive()
 			} else if box.Clicked() {
 				a.viewerTogglePlay()
 			}
@@ -538,6 +558,7 @@ func (a *App) viewerCanvas(c *ui.Context, it *Item, th *ui.Theme) {
 			a.viewer.PanY += dy
 		}
 		box.HandleInput(func(ev ui.InputEvent) bool {
+			a.showViewerCursor()
 			switch ev.Kind {
 			case ui.InputZoom:
 				if ev.Scale > 0 {

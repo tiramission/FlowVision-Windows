@@ -128,32 +128,34 @@ func (t *Tab) selectedOne() *Item {
 	return nil
 }
 
-// Viewer is the full-window media viewer.
+// Viewer is the media viewer shown inside the host window.
 type Viewer struct {
-	Open           bool
-	Item           *Item
-	Index          int
-	Loading        bool
-	Err            string
-	Bitmap         *ui.Bitmap
-	Zoom           float32
-	Angle          float32
-	PanX           float32
-	PanY           float32
-	ShowInfo       bool
-	ChromeVisible  bool
-	ChromeUntil    time.Time
-	Info           MediaInfo
-	InfoReady      bool
-	Video          VideoMeta
-	VideoReady     bool
-	Gen            int
-	Player         *ui.VideoPlayer
-	PlayerErr      string
-	PrevFullscreen bool
-	SeekSeconds    float64
-	SeekUntil      time.Time
-	DraggingSeek   bool
+	Open          bool
+	Item          *Item
+	Index         int
+	Loading       bool
+	Err           string
+	Bitmap        *ui.Bitmap
+	Zoom          float32
+	Angle         float32
+	PanX          float32
+	PanY          float32
+	ShowInfo      bool
+	Immersive     bool
+	ChromeVisible bool
+	ChromeUntil   time.Time
+	CursorVisible bool
+	CursorUntil   time.Time
+	Info          MediaInfo
+	InfoReady     bool
+	Video         VideoMeta
+	VideoReady    bool
+	Gen           int
+	Player        *ui.VideoPlayer
+	PlayerErr     string
+	SeekSeconds   float64
+	SeekUntil     time.Time
+	DraggingSeek  bool
 
 	HoldActive bool
 	HoldButton int
@@ -175,6 +177,7 @@ type App struct {
 	sidebarWidth    int
 	activeTabHandle ui.Handle
 	maximized       bool
+	fullscreen      bool
 
 	showSettings    bool
 	draft           Settings
@@ -1084,15 +1087,17 @@ func (a *App) openViewer(it *Item) {
 		return
 	}
 	a.closeViewer()
-	wasFull := a.win != nil && a.win.IsFullScreen()
-	a.viewer = Viewer{Open: true, Item: it, Zoom: 1, ShowInfo: a.settings.InfoPanel, PrevFullscreen: wasFull}
-	a.viewer.Index = t.indexOf(it.ID)
-	if a.win != nil {
-		// A photo viewer that still leaves a title bar and the taskbar on
-		// screen is not an immersive viewer. Enter true fullscreen on open;
-		// closeViewer restores the window's previous state.
-		a.win.SetFullScreen(true)
+	now := time.Now()
+	a.viewer = Viewer{
+		Open:          true,
+		Item:          it,
+		Zoom:          1,
+		ShowInfo:      a.settings.InfoPanel,
+		Immersive:     true,
+		CursorVisible: true,
+		CursorUntil:   now.Add(viewerCursorIdle),
 	}
+	a.viewer.Index = t.indexOf(it.ID)
 	a.loadViewerMedia(it)
 	a.refresh()
 }
@@ -1196,7 +1201,11 @@ func (a *App) loadViewerMedia(it *Item) {
 	}
 }
 
-const viewerChromeEdgeBandDIP = 64
+const (
+	viewerChromeEdgeBandDIP = 64
+	viewerChromeLinger      = 2500 * time.Millisecond
+	viewerCursorIdle        = 2500 * time.Millisecond
+)
 
 func (a *App) startViewerChromeTicker(gen int) {
 	go func() {
@@ -1209,7 +1218,7 @@ func (a *App) startViewerChromeTicker(gen int) {
 					alive = false
 					return
 				}
-				if a.win == nil || !a.win.IsFullScreen() {
+				if a.win == nil || !a.viewer.Immersive {
 					return
 				}
 				inTop, inBottom, ok := cursorAtWindowVerticalEdge(a.win.NativeHandle(), viewerChromeEdgeBandDIP)
@@ -1217,18 +1226,26 @@ func (a *App) startViewerChromeTicker(gen int) {
 					return
 				}
 				now := time.Now()
+				needRefresh := false
 				if inTop || inBottom {
 					// Keep the bars alive while the pointer rests at either
-					// edge. Leaving the edge starts the normal 2.5s fade timer.
-					a.viewer.ChromeUntil = now.Add(2500 * time.Millisecond)
+					// edge. Leaving the edge starts the normal fade timer.
+					a.viewer.ChromeUntil = now.Add(viewerChromeLinger)
 					if !a.viewer.ChromeVisible {
 						a.viewer.ChromeVisible = true
-						a.refresh()
+						needRefresh = true
 					}
-					return
-				}
-				if a.viewer.ChromeVisible && !now.Before(a.viewer.ChromeUntil) {
+				} else if a.viewer.ChromeVisible && !now.Before(a.viewer.ChromeUntil) {
 					a.viewer.ChromeVisible = false
+					needRefresh = true
+				}
+				// Cursor visibility has its own idle timer. It never follows
+				// ChromeVisible, so hiding the bars does not hide the pointer.
+				if viewerCursorShouldHide(a.viewer.Immersive, a.viewer.CursorVisible, now, a.viewer.CursorUntil) {
+					a.viewer.CursorVisible = false
+					needRefresh = true
+				}
+				if needRefresh {
 					a.refresh()
 				}
 			})
@@ -1241,18 +1258,14 @@ func (a *App) startViewerChromeTicker(gen int) {
 
 func (a *App) closeViewer() {
 	wasOpen := a.viewer.Open
-	prevFull := a.viewer.PrevFullscreen
 	if a.viewer.Player != nil {
 		a.viewer.Player.Close()
 		a.viewer.Player = nil
 	}
 	a.viewer = Viewer{}
-	if wasOpen && a.win != nil && a.win.IsFullScreen() != prevFull {
-		// F11 can leave fullscreen while the viewer is open, so restore the
-		// exact pre-viewer state rather than only exiting fullscreen.
-		a.win.SetFullScreen(prevFull)
+	if wasOpen {
+		a.refresh()
 	}
-	a.refresh()
 }
 
 func (a *App) startVideoTicker(gen int) {
@@ -1326,18 +1339,29 @@ func (a *App) viewerSeekTo(seconds float64) {
 	a.refresh()
 }
 
-func (a *App) viewerToggleFullscreen() {
+func (a *App) viewerToggleImmersive() {
+	if !a.viewer.Open {
+		return
+	}
+	a.viewer.Immersive = !a.viewer.Immersive
+	a.viewer.ChromeVisible = false
+	a.viewer.ChromeUntil = time.Time{}
+	a.viewer.CursorVisible = true
+	a.viewer.CursorUntil = time.Now().Add(viewerCursorIdle)
+	a.refresh()
+}
+
+// toggleWindowFullscreen changes only the host window. The media viewer's
+// immersive state is independent, so closing the viewer can never leave the
+// main window in a mode it did not own.
+func (a *App) toggleWindowFullscreen() {
 	if a.win == nil {
 		return
 	}
 	full := !a.win.IsFullScreen()
 	a.win.SetFullScreen(full)
-	if a.viewer.Open {
-		// Entering fullscreen drops straight into the clean canvas. Leaving it
-		// restores the normal, always-visible title and control bars.
-		a.viewer.ChromeVisible = !full
-		a.viewer.ChromeUntil = time.Time{}
-	}
+	a.fullscreen = full
+	a.maximized = a.win.IsMaximized()
 	a.refresh()
 }
 

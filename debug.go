@@ -21,54 +21,56 @@ import (
 )
 
 type debugState struct {
-	Version       string   `json:"version"`
-	Active        int      `json:"active"`
-	Path          string   `json:"path"`
-	Name          string   `json:"name"`
-	Loading       bool     `json:"loading"`
-	Err           string   `json:"error,omitempty"`
-	Total         int      `json:"total"`
-	Filtered      int      `json:"filtered"`
-	Query         string   `json:"query"`
-	ScrollY       float32  `json:"scrollY"`
-	Selected      []string `json:"selected"`
-	Tabs          []string `json:"tabs"`
-	ViewerOpen    bool     `json:"viewerOpen"`
-	ViewerIndex   int      `json:"viewerIndex"`
-	ViewerZoom    float32  `json:"viewerZoom"`
-	ViewerPanX    float32  `json:"viewerPanX"`
-	ViewerPanY    float32  `json:"viewerPanY"`
-	ViewerAngle   float32  `json:"viewerAngle"`
-	ViewerInfo    bool     `json:"viewerInfo"`
-	ViewerChrome  bool     `json:"viewerChrome"`
-	ViewerErr     string   `json:"viewerError,omitempty"`
-	HasBitmap     bool     `json:"hasBitmap"`
-	ThumbSize     int      `json:"thumbSize"`
-	Sidebar       bool     `json:"sidebar"`
-	Recursive     bool     `json:"recursive"`
-	ShowHidden    bool     `json:"showHidden"`
-	ShowCardNames bool     `json:"showCardNames"`
-	ShowSettings  bool     `json:"showSettings"`
-	ShowHelp      bool     `json:"showHelp"`
-	ShowAbout     bool     `json:"showAbout"`
-	UpdateOpen    bool     `json:"updateOpen"`
-	UpdatePhase   string   `json:"updatePhase"`
-	UpdateVersion string   `json:"updateVersion,omitempty"`
-	Maximized     bool     `json:"maximized"`
-	Fullscreen    bool     `json:"fullscreen"`
-	PlayerReady   bool     `json:"playerReady"`
-	PlayerPlaying bool     `json:"playerPlaying"`
-	PlayerPosMS   int64    `json:"playerPositionMs"`
-	PlayerDurMS   int64    `json:"playerDurationMs"`
-	VideoWidth    int      `json:"videoWidth"`
-	VideoHeight   int      `json:"videoHeight"`
-	VideoFPS      float64  `json:"videoFps"`
-	VideoKbps     int      `json:"videoKbps"`
-	VideoLive     bool     `json:"videoLiveBitrate"`
-	ContentW      int      `json:"contentWidth"`
-	ContentH      int      `json:"contentHeight"`
-	ErrorMsg      string   `json:"errorMessage,omitempty"`
-	Items         []string `json:"items"`
+	Version         string   `json:"version"`
+	Active          int      `json:"active"`
+	Path            string   `json:"path"`
+	Name            string   `json:"name"`
+	Loading         bool     `json:"loading"`
+	Err             string   `json:"error,omitempty"`
+	Total           int      `json:"total"`
+	Filtered        int      `json:"filtered"`
+	Query           string   `json:"query"`
+	ScrollY         float32  `json:"scrollY"`
+	Selected        []string `json:"selected"`
+	Tabs            []string `json:"tabs"`
+	ViewerOpen      bool     `json:"viewerOpen"`
+	ViewerIndex     int      `json:"viewerIndex"`
+	ViewerZoom      float32  `json:"viewerZoom"`
+	ViewerPanX      float32  `json:"viewerPanX"`
+	ViewerPanY      float32  `json:"viewerPanY"`
+	ViewerAngle     float32  `json:"viewerAngle"`
+	ViewerInfo      bool     `json:"viewerInfo"`
+	ViewerImmersive bool     `json:"viewerImmersive"`
+	ViewerChrome    bool     `json:"viewerChrome"`
+	ViewerCursor    bool     `json:"viewerCursorVisible"`
+	ViewerErr       string   `json:"viewerError,omitempty"`
+	HasBitmap       bool     `json:"hasBitmap"`
+	ThumbSize       int      `json:"thumbSize"`
+	Sidebar         bool     `json:"sidebar"`
+	Recursive       bool     `json:"recursive"`
+	ShowHidden      bool     `json:"showHidden"`
+	ShowCardNames   bool     `json:"showCardNames"`
+	ShowSettings    bool     `json:"showSettings"`
+	ShowHelp        bool     `json:"showHelp"`
+	ShowAbout       bool     `json:"showAbout"`
+	UpdateOpen      bool     `json:"updateOpen"`
+	UpdatePhase     string   `json:"updatePhase"`
+	UpdateVersion   string   `json:"updateVersion,omitempty"`
+	Maximized       bool     `json:"maximized"`
+	Fullscreen      bool     `json:"fullscreen"`
+	PlayerReady     bool     `json:"playerReady"`
+	PlayerPlaying   bool     `json:"playerPlaying"`
+	PlayerPosMS     int64    `json:"playerPositionMs"`
+	PlayerDurMS     int64    `json:"playerDurationMs"`
+	VideoWidth      int      `json:"videoWidth"`
+	VideoHeight     int      `json:"videoHeight"`
+	VideoFPS        float64  `json:"videoFps"`
+	VideoKbps       int      `json:"videoKbps"`
+	VideoLive       bool     `json:"videoLiveBitrate"`
+	ContentW        int      `json:"contentWidth"`
+	ContentH        int      `json:"contentHeight"`
+	ErrorMsg        string   `json:"errorMessage,omitempty"`
+	Items           []string `json:"items"`
 }
 
 func debugSnapshot() debugState {
@@ -117,7 +119,9 @@ func debugSnapshot() debugState {
 		st.ViewerPanY = app.viewer.PanY
 		st.ViewerAngle = app.viewer.Angle
 		st.ViewerInfo = app.viewer.ShowInfo
+		st.ViewerImmersive = app.viewer.Immersive
 		st.ViewerChrome = app.viewer.ChromeVisible
+		st.ViewerCursor = app.viewer.CursorVisible
 		st.ViewerErr = app.viewer.Err
 		st.HasBitmap = app.viewer.Bitmap != nil
 		if p := app.viewer.Player; p != nil {
@@ -281,8 +285,8 @@ func debugCommand(name, arg string) {
 			}
 		}
 		app.refresh()
-	case "viewerfullscreen":
-		app.viewerToggleFullscreen()
+	case "viewerfullscreen", "viewerimmersive":
+		app.viewerToggleImmersive()
 	case "viewerplay":
 		app.viewerTogglePlay()
 	case "viewerseek":
@@ -337,6 +341,15 @@ func debugCommand(name, arg string) {
 				mainWin.SetSize(w, h)
 			}
 		}
+	case "position":
+		{
+			parts := strings.Split(arg, ",")
+			if len(parts) == 2 && mainWin != nil {
+				x, _ := strconv.Atoi(strings.TrimSpace(parts[0]))
+				y, _ := strconv.Atoi(strings.TrimSpace(parts[1]))
+				mainWin.SetPosition(x, y)
+			}
+		}
 	case "window":
 		if mainWin != nil {
 			switch arg {
@@ -346,6 +359,8 @@ func debugCommand(name, arg string) {
 				mainWin.Maximize()
 			case "restore":
 				mainWin.Unmaximize()
+			case "fullscreen":
+				app.toggleWindowFullscreen()
 			}
 		}
 	case "sidebar":

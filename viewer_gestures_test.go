@@ -36,12 +36,15 @@ func newViewerGestureApp(t *testing.T) *App {
 	tab.All = []*Item{a1, a2}
 	tab.Items = tab.All
 	a.viewer = Viewer{
-		Open:     true,
-		Item:     a1,
-		Index:    0,
-		Bitmap:   ui.NewBitmap(img),
-		Zoom:     1,
-		ShowInfo: false,
+		Open:          true,
+		Item:          a1,
+		Index:         0,
+		Bitmap:        ui.NewBitmap(img),
+		Zoom:          1,
+		ShowInfo:      false,
+		Immersive:     true,
+		CursorVisible: true,
+		CursorUntil:   time.Now().Add(viewerCursorIdle),
 	}
 	return a
 }
@@ -137,6 +140,75 @@ func TestViewerSideButtonsStepImages(t *testing.T) {
 	tt.Frame()
 	if a.viewer.Index != 1 || a.viewer.Item.ID != "2" {
 		t.Fatalf("forward side button went to index %d item %v", a.viewer.Index, a.viewer.Item)
+	}
+}
+
+func TestViewerCursorShowsWithoutChrome(t *testing.T) {
+	a := newViewerGestureApp(t)
+	defer a.closeViewer()
+	a.viewer.ChromeVisible = false
+	a.viewer.CursorVisible = false
+	a.showViewerCursor()
+	if !a.viewer.CursorVisible {
+		t.Fatal("pointer move did not restore the cursor")
+	}
+	if a.viewer.ChromeVisible {
+		t.Fatal("restoring the cursor also brought back the floating bars")
+	}
+	if !a.viewer.CursorUntil.After(time.Now()) {
+		t.Fatal("pointer move did not extend the cursor idle deadline")
+	}
+}
+
+func TestViewerPointerMoveRestoresHiddenCursor(t *testing.T) {
+	a := newViewerGestureApp(t)
+	defer a.closeViewer()
+	tt := ui.NewTester(a.view, 900, 700)
+	tt.Frame()
+	x, y := canvasPoint(t, tt)
+	a.viewer.ChromeVisible = false
+	a.viewer.CursorVisible = false
+	a.viewer.CursorUntil = time.Time{}
+	tt.Move(x+1, y)
+	tt.Frame()
+	if !a.viewer.CursorVisible {
+		t.Fatal("moving the pointer over the canvas did not restore the cursor")
+	}
+	if a.viewer.ChromeVisible {
+		t.Fatal("pointer move over the middle of the canvas showed the floating bars")
+	}
+}
+
+func TestViewerCursorIdleIsIndependentFromChrome(t *testing.T) {
+	now := time.Now()
+	if viewerCursorShouldHide(true, true, now, now.Add(time.Second)) {
+		t.Fatal("cursor hid before its own deadline")
+	}
+	if !viewerCursorShouldHide(true, true, now, now) {
+		t.Fatal("cursor did not hide at its own deadline")
+	}
+	if viewerCursorShouldHide(false, true, now, now) {
+		t.Fatal("windowed viewer should keep the cursor visible")
+	}
+}
+
+func TestViewerImmersiveToggleKeepsChromeIndependent(t *testing.T) {
+	a := newViewerGestureApp(t)
+	defer a.closeViewer()
+	a.viewer.Immersive = true
+	a.viewerToggleImmersive()
+	if a.viewer.Immersive {
+		t.Fatal("immersive toggle did not leave immersive mode")
+	}
+	if !a.viewer.CursorVisible {
+		t.Fatal("leaving immersive mode hid the cursor")
+	}
+	a.viewerToggleImmersive()
+	if !a.viewer.Immersive {
+		t.Fatal("immersive toggle did not re-enter immersive mode")
+	}
+	if a.viewer.ChromeVisible {
+		t.Fatal("immersive mode should start with hidden floating bars")
 	}
 }
 

@@ -111,7 +111,7 @@ func TestRenameFolderDoesNotPreserveExtension(t *testing.T) {
 	}
 }
 
-func TestViewerCanvasMetricsFullscreenKeepsInfoClosed(t *testing.T) {
+func TestViewerCanvasMetricsImmersiveKeepsInfoClosed(t *testing.T) {
 	if w, h := viewerCanvasMetrics(1000, 800, true, true); w != 1000 || h != 800 {
 		t.Fatalf("immersive canvas = %vx%v, want 1000x800", w, h)
 	}

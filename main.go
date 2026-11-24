@@ -14,7 +14,7 @@ import (
 // devVersion is only the fallback for direct `go build` runs. Packaged builds
 // take the version from mygo.json, which `mygo build` injects into
 // mygo.App.Version().
-const devVersion = "1.2.9"
+const devVersion = "1.2.10"
 
 func appVersion() string {
 	if v := mygo.App.Version(); v != "" {
@@ -134,6 +134,16 @@ func openMainWindow() {
 		app.maximized = false
 		app.refresh()
 	})
+	win.OnEnterFullScreen(func() {
+		app.fullscreen = true
+		app.maximized = win.IsMaximized()
+		app.refresh()
+	})
+	win.OnLeaveFullScreen(func() {
+		app.fullscreen = false
+		app.maximized = win.IsMaximized()
+		app.refresh()
+	})
 	win.OnResize(func() {
 		app.refresh()
 	})
@@ -144,6 +154,7 @@ func openMainWindow() {
 		win.Show()
 		win.Focus()
 		app.maximized = win.IsMaximized()
+		app.fullscreen = win.IsFullScreen()
 		app.refresh()
 		app.startUpdateAutoCheck()
 		pendingMu.Lock()

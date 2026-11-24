@@ -196,6 +196,7 @@ func (a *App) helpModal(c *ui.Context) {
 					shortcutRow(c, "Delete", "移到回收站")
 					shortcutRow(c, "Ctrl+A", "全选")
 					shortcutRow(c, "Esc", "取消选择 / 关闭查看器")
+					shortcutRow(c, "F11", "主窗口全屏；查看器内切换沉浸")
 					shortcutRow(c, "查看器：+ / -", "缩放")
 					shortcutRow(c, "查看器：R / Shift+R", "顺时针 / 逆时针旋转")
 					shortcutRow(c, "查看器：0", "适合窗口")
@@ -205,7 +206,7 @@ func (a *App) helpModal(c *ui.Context) {
 					shortcutRow(c, "查看器：鼠标侧键", "上一张 / 下一张")
 					shortcutRow(c, "查看器：长按左键 / 右键", "100% / 适应窗口")
 					shortcutRow(c, "查看器：I", "显示 / 隐藏信息")
-					components.Text(c, "网格支持拖入文件或文件夹；拖动查看器中的图片可平移；全屏浮层只在鼠标到达顶部或底部边缘时出现。").FontSize(10.5).TextColor(th.TextMuted)
+					components.Text(c, "网格支持拖入文件或文件夹；拖动查看器中的图片可平移；查看器沉浸在主窗口内，顶部/底部浮层只在鼠标到达边缘时出现，光标则按独立空闲计时隐藏并在移动时恢复。").FontSize(10.5).TextColor(th.TextMuted)
 				})
 			})
 			ui.Row(c).Justify(ui.End).Children(func() {

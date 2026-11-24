@@ -72,9 +72,9 @@ func (a *App) titleBar(c *ui.Context) {
 	})
 }
 
-// windowControls draws the minimize, maximize/restore and close buttons that
-// replace the hidden system buttons. They sit at the far right of the title
-// bar, full height, as native caption buttons do.
+// windowControls draws the minimize, maximize/restore, fullscreen/exit and
+// close buttons that replace the hidden system buttons. They sit at the far
+// right of the title bar, full height, as native caption buttons do.
 func (a *App) windowControls(c *ui.Context) {
 	ui.Row(c).Height(titleBarHeight).Gap(0).Children(func() {
 		a.windowControl(c, lucide.Minus(), "最小化", false, false, func() {
@@ -83,22 +83,34 @@ func (a *App) windowControls(c *ui.Context) {
 			}
 		})
 		// Maximize and restore share one button; the app tracks the state
-		// through OnMaximize/OnUnmaximize to draw the correct glyph.
-		icon := lucide.Square()
-		label := "最大化"
-		if a.maximized {
-			icon = lucide.Copy()
-			label = "还原"
-		}
-		a.windowControl(c, icon, label, false, true, func() {
-			if a.win == nil {
-				return
-			}
+		// through OnMaximize/OnUnmaximize to draw the correct glyph. Fullscreen
+		// is a separate mode, so its transition is not folded into maximize.
+		if !a.fullscreen {
+			icon := lucide.Square()
+			label := "最大化"
 			if a.maximized {
-				a.win.Unmaximize()
-			} else {
-				a.win.Maximize()
+				icon = lucide.Copy()
+				label = "还原"
 			}
+			a.windowControl(c, icon, label, false, true, func() {
+				if a.win == nil {
+					return
+				}
+				if a.maximized {
+					a.win.Unmaximize()
+				} else {
+					a.win.Maximize()
+				}
+			})
+		}
+		fullIcon := lucide.Fullscreen()
+		fullLabel := "全屏 (F11)"
+		if a.fullscreen {
+			fullIcon = lucide.Minimize2()
+			fullLabel = "退出全屏 (F11)"
+		}
+		a.windowControl(c, fullIcon, fullLabel, false, false, func() {
+			a.toggleWindowFullscreen()
 		})
 		a.windowControl(c, lucide.X(), "关闭", true, false, func() {
 			if a.win != nil {
@@ -154,6 +166,7 @@ func (a *App) viewShortcuts(c *ui.Context) {
 	c.OnWindowShortcut(0, ui.KeyA, func() { a.sibling(-1) })
 	c.OnWindowShortcut(0, ui.KeyD, func() { a.sibling(1) })
 	c.OnWindowShortcut(0, ui.KeyF5, func() { a.loadTab(a.tab(), false) })
+	c.OnWindowShortcut(0, ui.KeyF11, func() { a.toggleWindowFullscreen() })
 	c.OnWindowShortcut(ui.Ctrl, ui.KeyF, func() {
 		a.focusSearch = true
 		a.refresh()
