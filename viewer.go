@@ -10,6 +10,99 @@ import (
 	"github.com/oneo-me/onevra/source/icons/lucide"
 )
 
+// nextViewerIndex walks past folders and other files so the arrow buttons
+// only land on something the viewer can actually decode.
+func nextViewerIndex(items []*Item, from, delta int) int {
+	if delta == 0 {
+		return -1
+	}
+	step := 1
+	if delta < 0 {
+		step = -1
+	}
+	for i := from + step; i >= 0 && i < len(items); i += step {
+		if isMediaKind(items[i].Kind) {
+			return i
+		}
+	}
+	return -1
+}
+
+func viewerMediaPosition(items []*Item, target *Item) (position, total int) {
+	for _, it := range items {
+		if !isMediaKind(it.Kind) {
+			continue
+		}
+		total++
+		if target != nil && it.ID == target.ID {
+			position = total
+		}
+	}
+	return position, total
+}
+
+// viewerFitScale is the scale that makes the rotated image fit its viewport.
+// Rotating a wide image used to keep the unrotated fit, which let the rotated
+// image overflow the bottom or side of the canvas.
+func viewerFitScale(bw, bh int, angle, availW, availH float32) float32 {
+	if bw <= 0 || bh <= 0 || availW <= 0 || availH <= 0 {
+		return 0
+	}
+	rad := float64(angle) * math.Pi / 180
+	boundsW := math.Abs(float64(bw)*math.Cos(rad)) + math.Abs(float64(bh)*math.Sin(rad))
+	boundsH := math.Abs(float64(bw)*math.Sin(rad)) + math.Abs(float64(bh)*math.Cos(rad))
+	if boundsW <= 0 || boundsH <= 0 {
+		return 0
+	}
+	return float32(math.Min(float64(availW)/boundsW, float64(availH)/boundsH))
+}
+
+func viewerPercentValue(bw, bh int, angle, zoom, availW, availH float32) int {
+	fitted := viewerFitScale(bw, bh, angle, availW, availH)
+	if fitted <= 0 {
+		return int(math.Round(float64(zoom * 100)))
+	}
+	return int(math.Round(float64(fitted*zoom) * 100))
+}
+
+// viewerActualZoom converts a fit scale into the relative zoom that displays
+// the image at 100%, i.e. one bitmap pixel per logical display pixel.
+func viewerActualZoom(fit float32) float32 {
+	if fit <= 0 || math.IsNaN(float64(fit)) || math.IsInf(float64(fit), 0) {
+		return 1
+	}
+	return 1 / fit
+}
+
+func (a *App) viewerCanvasSize(c *ui.Context) (float32, float32) {
+	w, h := float32(1280), float32(800)
+	if a.win != nil {
+		cw, ch := a.win.ContentSize()
+		w, h = float32(cw), float32(ch)
+	} else if c != nil {
+		w, h = c.Size()
+	}
+	if a.viewer.ShowInfo {
+		w -= 300
+	}
+	h -= 50 + 48
+	return w, h
+}
+
+// viewerPercent reports the real display scale (image pixels to logical
+// pixels), not the relative fit multiplier. 100% therefore means 1:1.
+func (a *App) viewerPercent(c *ui.Context) int {
+	if a.viewer.Bitmap == nil || a.viewer.Item == nil || a.viewer.Item.Kind != "image" {
+		return int(math.Round(float64(a.viewer.Zoom * 100)))
+	}
+	bw, bh := a.viewer.Bitmap.Size()
+	w, h := a.viewerCanvasSize(c)
+	if w <= 0 || h <= 0 {
+		return 100
+	}
+	return viewerPercentValue(bw, bh, a.viewer.Angle, a.viewer.Zoom, w, h)
+}
+
 func (a *App) viewerOverlay(c *ui.Context) {
 	if !a.viewer.Open {
 		if a.viewer.Player != nil || a.viewer.Item != nil {
@@ -40,8 +133,14 @@ func (a *App) viewerOverlay(c *ui.Context) {
 				ui.Column(c).Grow(1).MinWidth(0).Children(func() {
 					components.Text(c, it.Name).FontSize(13.5).FontWeight(600).SingleLine().Ellipsis("…")
 					if t != nil {
-						components.Text(c, fmt.Sprintf("%d / %d", a.viewer.Index+1, len(t.Items))).
-							FontSize(10).TextColor(th.TextMuted)
+						pos, total := viewerMediaPosition(t.Items, a.viewer.Item)
+						if total == 0 {
+							pos, total = a.viewer.Index+1, len(t.Items)
+						}
+						if total > 0 {
+							components.Text(c, fmt.Sprintf("%d / %d", pos, total)).
+								FontSize(10).TextColor(th.TextMuted)
+						}
 					}
 				})
 				infoLabel := "显示信息 (I)"
@@ -62,17 +161,19 @@ func (a *App) viewerOverlay(c *ui.Context) {
 			})
 
 			ui.Row(c).Height(48).Padding(8, 14, 8, 14).Gap(4).Background(th.Surface).Children(func() {
-				components.Text(c, fmt.Sprintf("%.0f%%", a.viewer.Zoom*100)).FontSize(10.5).
-					TextColor(th.TextMuted).Width(42)
-				components.IconButton(c, lucide.ZoomOut(), "缩小 (−)", components.IconButtonPlain).
-					OnClick(func() { a.viewerZoom(0.8) })
-				components.IconButton(c, lucide.ZoomIn(), "放大 (+, =)", components.IconButtonPlain).
-					OnClick(func() { a.viewerZoom(1.25) })
-				components.IconButton(c, lucide.Maximize2(), "适合窗口 (0)", components.IconButtonPlain).
-					OnClick(a.viewerReset)
-				components.IconButton(c, lucide.RotateCw(), "顺时针旋转 (R)", components.IconButtonPlain).
-					OnClick(func() { a.viewerRotate(90) })
-				ui.Box(c).Width(1).Height(20).Background(th.Border).Margin(2, 6)
+				if it.Kind == "image" {
+					components.Text(c, fmt.Sprintf("%d%%", a.viewerPercent(c))).FontSize(10.5).
+						TextColor(th.TextMuted).Width(52)
+					components.IconButton(c, lucide.ZoomOut(), "缩小 (−)", components.IconButtonPlain).
+						OnClick(func() { a.viewerZoom(0.8) })
+					components.IconButton(c, lucide.ZoomIn(), "放大 (+, =)", components.IconButtonPlain).
+						OnClick(func() { a.viewerZoom(1.25) })
+					components.IconButton(c, lucide.Maximize2(), "适合窗口 (0)", components.IconButtonPlain).
+						OnClick(a.viewerReset)
+					components.IconButton(c, lucide.RotateCw(), "顺时针旋转 (R)", components.IconButtonPlain).
+						OnClick(func() { a.viewerRotate(90) })
+					ui.Box(c).Width(1).Height(20).Background(th.Border).Margin(2, 6)
+				}
 				ui.Spacer(c)
 				if a.viewer.Player != nil {
 					label := "播放"
@@ -91,13 +192,17 @@ func (a *App) viewerOverlay(c *ui.Context) {
 						a.viewer.Player.SetLoop(a.settings.LoopVideo)
 					}
 				}
+				pos, total := 0, 0
+				if t != nil {
+					pos, total = viewerMediaPosition(t.Items, a.viewer.Item)
+				}
 				prev := components.IconButton(c, lucide.ChevronLeft(), "上一张 (←)", components.IconButtonPlain).
-					Disabled(a.viewer.Index <= 0)
+					Disabled(pos <= 1)
 				if prev.Clicked() {
 					a.viewerStep(-1)
 				}
 				next := components.IconButton(c, lucide.ChevronRight(), "下一张 (→)", components.IconButtonPlain).
-					Disabled(t == nil || a.viewer.Index >= len(t.Items)-1)
+					Disabled(total == 0 || pos >= total)
 				if next.Clicked() {
 					a.viewerStep(1)
 				}
@@ -110,6 +215,7 @@ func (a *App) viewerOverlay(c *ui.Context) {
 			c.OnWindowShortcut(ui.Shift, ui.KeyEqual, func() { a.viewerZoom(1.25) })
 			c.OnWindowShortcut(0, ui.KeyMinus, func() { a.viewerZoom(0.8) })
 			c.OnWindowShortcut(0, ui.Key0, func() { a.viewerReset() })
+			c.OnWindowShortcut(0, ui.Key1, func() { a.viewerActualSize() })
 			c.OnWindowShortcut(0, ui.KeyR, func() { a.viewerRotate(90) })
 			c.OnWindowShortcut(ui.Shift, ui.KeyR, func() { a.viewerRotate(-90) })
 			c.OnWindowShortcut(0, ui.KeyI, func() { a.viewerToggleInfo() })
@@ -142,7 +248,7 @@ func (a *App) viewerCanvas(c *ui.Context, it *Item, th *ui.Theme) {
 					return
 				}
 				p.Fill(r, ui.RGBA(0, 0, 0, 245), 0)
-				fit := float32(math.Min(float64(r.W/float32(bw)), float64(r.H/float32(bh))))
+				fit := viewerFitScale(bw, bh, a.viewer.Angle, r.W, r.H)
 				s := fit * a.viewer.Zoom
 				cx := r.X + r.W/2 + a.viewer.PanX
 				cy := r.Y + r.H/2 + a.viewer.PanY

@@ -51,7 +51,7 @@ func classify(name string) (kind, ext string) {
 
 // ---------------------------------------------------------------------- model
 
-// Item is one file in a folder, as the page sees it.
+// Item is one file or subfolder in a folder, as the grid sees it.
 type Item struct {
 	ID     string `json:"id"`
 	Name   string `json:"name"`
@@ -84,6 +84,10 @@ func shortID(path string) string {
 }
 
 func (s *Store) Intern(path string) *Item {
+	return s.intern(path, false)
+}
+
+func (s *Store) intern(path string, isDir bool) *Item {
 	name := filepath.Base(path)
 	kind, ext := classify(name)
 	st, err := os.Stat(path)
@@ -92,19 +96,29 @@ func (s *Store) Intern(path string) *Item {
 	if err == nil {
 		size = st.Size()
 		mtime = st.ModTime().Unix()
+		if st.IsDir() {
+			kind, ext = "folder", ""
+			// A directory's size is not useful for sorting, and stamping it
+			// would make a folder look like a zero-byte file.
+			size = 0
+		}
+	}
+	if isDir {
+		kind, ext = "folder", ""
 	}
 	id := shortID(path)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if old, ok := s.byID[id]; ok {
 		updated := *old
+		oldKind := updated.Kind
 		updated.Name = name
 		updated.Path = path
 		updated.Kind = kind
 		updated.Ext = ext
 		updated.Video = kind == "video"
 		updated.Play = kind == "video" && browserPlayable[ext]
-		dimsChanged := updated.Mtime != mtime || updated.Size != size
+		dimsChanged := updated.Mtime != mtime || updated.Size != size || oldKind != kind
 		updated.Size = size
 		updated.Mtime = mtime
 		if dimsChanged {
@@ -240,6 +254,7 @@ type DirResult struct {
 	Total     int     `json:"total"`
 	Images    int     `json:"images"`
 	Videos    int     `json:"videos"`
+	Folders   int     `json:"folders"`
 	Others    int     `json:"others"`
 	Truncated bool    `json:"truncated"`
 	ElapsedMS int64   `json:"elapsedMs"`
@@ -274,29 +289,60 @@ func (FS) Browse(req BrowseRequest) DirResult {
 
 	var errLimitReached = errors.New("walk limit reached")
 
-	add := func(p string) bool {
+	add := func(p string, isDir bool) bool {
 		if seen[p] {
 			return true
 		}
 		if !req.ShowHidden && (isHidden(p) || strings.HasPrefix(filepath.Base(p), ".")) {
 			return true
 		}
-		kind, _ := classify(p)
-		if kind == "other" && !req.ShowOther {
+		if !isDir {
+			kind, _ := classify(p)
+			if kind == "other" && !req.ShowOther {
+				return true
+			}
+		}
+		it := items.intern(p, isDir)
+		if it.Kind == "other" && !req.ShowOther {
 			return true
 		}
 		if len(list) > req.Limit {
 			return false
 		}
 		seen[p] = true
-		list = append(list, items.Intern(p))
+		list = append(list, it)
 		// Keep collecting one extra entry so a folder holding exactly Limit
-		// files is not reported as truncated.
+		// entries is not reported as truncated.
 		return len(list) <= req.Limit
 	}
 
+	addDirectFolders := func() error {
+		entries, err := os.ReadDir(path)
+		if err != nil {
+			return err
+		}
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			p := filepath.Join(path, e.Name())
+			if !req.ShowHidden && (isHidden(p) || strings.HasPrefix(e.Name(), ".")) {
+				continue
+			}
+			if !add(p, true) {
+				return nil
+			}
+		}
+		return nil
+	}
+
 	if req.Recursive {
-		baseDepth := strings.Count(path, string(os.PathSeparator))
+		// Keep the direct subfolders as navigation targets, then flatten all
+		// media below them. Deeper folders are represented by their files.
+		if err := addDirectFolders(); err != nil {
+			res.Error = "无法读取此文件夹"
+			return res
+		}
 		_ = filepath.WalkDir(path, func(p string, d os.DirEntry, err error) error {
 			if err != nil {
 				return nil
@@ -308,12 +354,13 @@ func (FS) Browse(req BrowseRequest) DirResult {
 				if !req.ShowHidden && (isHidden(p) || strings.HasPrefix(d.Name(), ".")) {
 					return filepath.SkipDir
 				}
+				baseDepth := strings.Count(path, string(os.PathSeparator))
 				if strings.Count(p, string(os.PathSeparator))-baseDepth > 5 {
 					return filepath.SkipDir
 				}
 				return nil
 			}
-			if !add(p) {
+			if !add(p, false) {
 				return errLimitReached
 			}
 			return nil
@@ -325,10 +372,7 @@ func (FS) Browse(req BrowseRequest) DirResult {
 			return res
 		}
 		for _, e := range entries {
-			if e.IsDir() {
-				continue
-			}
-			if !add(filepath.Join(path, e.Name())) {
+			if !add(filepath.Join(path, e.Name()), e.IsDir()) {
 				break
 			}
 		}
@@ -339,13 +383,15 @@ func (FS) Browse(req BrowseRequest) DirResult {
 		res.Truncated = true
 	}
 	sortItems(list, req.Sort, req.Desc)
-	res.Images, res.Videos, res.Others = 0, 0, 0
+	res.Images, res.Videos, res.Folders, res.Others = 0, 0, 0, 0
 	for _, it := range list {
 		switch it.Kind {
 		case "image":
 			res.Images++
 		case "video":
 			res.Videos++
+		case "folder":
+			res.Folders++
 		default:
 			res.Others++
 		}
@@ -397,15 +443,24 @@ func sortItems(list []*Item, key string, desc bool) {
 		return naturalLess(a.Name, b.Name)
 	}
 	sort.SliceStable(list, func(i, j int) bool {
-		if desc {
-			return less(list[j], list[i])
+		a, b := list[i], list[j]
+		aFolder, bFolder := a.Kind == "folder", b.Kind == "folder"
+		if aFolder != bFolder {
+			// Directories stay above files whatever the sort direction:
+			// they are navigation targets, not media results.
+			return aFolder
 		}
-		return less(list[i], list[j])
+		if desc {
+			return less(b, a)
+		}
+		return less(a, b)
 	})
 }
 
 func kindRank(k string) int {
 	switch k {
+	case "folder":
+		return -1
 	case "image":
 		return 0
 	case "video":

@@ -219,6 +219,8 @@ func debugCommand(name, arg string) {
 		app.viewerRotate(float32(f))
 	case "viewerreset":
 		app.viewerReset()
+	case "vieweractual":
+		app.viewerActualSize()
 	case "search":
 		if t != nil {
 			t.Query = arg

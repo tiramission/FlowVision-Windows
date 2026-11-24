@@ -540,8 +540,11 @@ func (a *App) statusBar(c *ui.Context) {
 		if tab.Query != "" && len(tab.Items) != len(tab.All) {
 			components.Text(c, fmt.Sprintf("（共 %d 项）", len(tab.All))).FontSize(10.5).TextColor(th.TextMuted)
 		}
-		components.Text(c, fmt.Sprintf("%d 图片 · %d 视频", countKind(tab.Items, "image"), countKind(tab.Items, "video"))).
-			FontSize(10.5).TextColor(th.TextMuted)
+		counts := fmt.Sprintf("%d 图片 · %d 视频", countKind(tab.Items, "image"), countKind(tab.Items, "video"))
+		if n := countKind(tab.Items, "folder"); n > 0 {
+			counts += fmt.Sprintf(" · %d 文件夹", n)
+		}
+		components.Text(c, counts).FontSize(10.5).TextColor(th.TextMuted)
 		if n := len(tab.Selected); n > 0 {
 			components.Text(c, fmt.Sprintf("已选 %d 项", n)).FontSize(10.5).TextColor(th.Accent)
 		}

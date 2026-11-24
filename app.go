@@ -814,6 +814,23 @@ func (a *App) beginRename() {
 	a.refresh()
 }
 
+func renameName(it *Item, typed string) (string, string) {
+	name := strings.TrimSpace(typed)
+	// A folder has no extension to preserve; a name containing a dot is
+	// still a complete folder name.
+	if it == nil || it.Kind == "folder" {
+		return name, ""
+	}
+	oldExt := filepath.Ext(it.Name)
+	if oldExt != "" && filepath.Ext(name) == "" {
+		name += oldExt
+	}
+	if oldExt != "" && !strings.EqualFold(filepath.Ext(name), oldExt) {
+		return name, "扩展名不能修改"
+	}
+	return name, ""
+}
+
 func (a *App) commitRename() {
 	it := a.renameTarget
 	if it == nil {
@@ -826,13 +843,10 @@ func (a *App) commitRename() {
 		a.refresh()
 		return
 	}
-	// Keep the extension unless the user typed one intentionally.
-	oldExt := filepath.Ext(it.Name)
-	if oldExt != "" && filepath.Ext(name) == "" {
-		name += oldExt
-	}
-	if oldExt != "" && !strings.EqualFold(filepath.Ext(name), oldExt) {
-		a.renameErr = "扩展名不能修改"
+	var errMsg string
+	name, errMsg = renameName(it, name)
+	if errMsg != "" {
+		a.renameErr = errMsg
 		a.refresh()
 		return
 	}
@@ -848,6 +862,7 @@ func (a *App) commitRename() {
 	newName := filepath.Base(newPath)
 	if t := a.tab(); t != nil {
 		t.pendingSelect = newName
+		a.invalidateTree(filepath.Dir(newPath))
 	}
 	a.reloadActive()
 }
@@ -1002,9 +1017,40 @@ func (a *App) showError(msg string) {
 	a.refresh()
 }
 
+func isMediaKind(kind string) bool {
+	return kind == "image" || kind == "video"
+}
+
+// activateItem is the one place a grid tile is opened: folders navigate,
+// images/videos enter the viewer, and other files go to their default app.
+func (a *App) activateItem(it *Item) {
+	if it == nil {
+		return
+	}
+	switch {
+	case it.Kind == "folder":
+		a.goTo(it.Path, true)
+	case isMediaKind(it.Kind):
+		a.openViewer(it)
+	default:
+		if err := (AppSvc{}).OpenExternal(it.Path); err != nil {
+			a.showError(err.Error())
+		}
+	}
+}
+
 func (a *App) openViewer(it *Item) {
+	if it == nil {
+		return
+	}
+	if !isMediaKind(it.Kind) {
+		// A folder or an "other" tile can arrive through a context menu or
+		// the debug command. Never put a non-decodable file in the viewer.
+		a.activateItem(it)
+		return
+	}
 	t := a.tab()
-	if t == nil || it == nil {
+	if t == nil {
 		return
 	}
 	a.closeViewer()
@@ -1104,14 +1150,8 @@ func (a *App) viewerStep(delta int) {
 	if t == nil || len(t.Items) == 0 {
 		return
 	}
-	idx := a.viewer.Index + delta
+	idx := nextViewerIndex(t.Items, a.viewer.Index, delta)
 	if idx < 0 {
-		idx = 0
-	}
-	if idx >= len(t.Items) {
-		idx = len(t.Items) - 1
-	}
-	if idx == a.viewer.Index && a.viewer.Item == t.Items[idx] {
 		return
 	}
 	it := t.Items[idx]
@@ -1128,6 +1168,9 @@ func (a *App) viewerStep(delta int) {
 }
 
 func (a *App) viewerReset() {
+	if a.viewer.Item == nil || a.viewer.Item.Kind != "image" {
+		return
+	}
 	a.viewer.Zoom = 1
 	a.viewer.Angle = 0
 	a.viewer.PanX = 0
@@ -1135,11 +1178,33 @@ func (a *App) viewerReset() {
 	a.refresh()
 }
 
+// viewerActualSize sets the image to 100%: one bitmap pixel per display pixel.
+// Zoom is stored relative to the fit scale, so it is the reciprocal of that fit.
+func (a *App) viewerActualSize() {
+	if a.viewer.Bitmap == nil || a.viewer.Item == nil || a.viewer.Item.Kind != "image" {
+		return
+	}
+	bw, bh := a.viewer.Bitmap.Size()
+	w, h := a.viewerCanvasSize(nil)
+	fit := viewerFitScale(bw, bh, a.viewer.Angle, w, h)
+	if fit <= 0 {
+		return
+	}
+	a.viewer.Zoom = viewerActualZoom(fit)
+	a.viewer.PanX = 0
+	a.viewer.PanY = 0
+	a.refresh()
+}
+
 func (a *App) viewerToggleInfo() {
-	a.viewer.ShowInfo = !a.viewer.ShowInfo
-	a.settings.InfoPanel = a.viewer.ShowInfo
+	a.viewerSetInfo(!a.viewer.ShowInfo)
+}
+
+func (a *App) viewerSetInfo(show bool) {
+	a.viewer.ShowInfo = show
+	a.settings.InfoPanel = show
 	_ = saveSettings(a.settings)
-	if a.viewer.ShowInfo && !a.viewer.InfoReady && a.viewer.Item != nil {
+	if show && !a.viewer.InfoReady && a.viewer.Item != nil {
 		it := a.viewer.Item
 		gen := a.viewer.Gen
 		a.viewer.InfoReady = false
@@ -1159,6 +1224,9 @@ func (a *App) viewerToggleInfo() {
 }
 
 func (a *App) viewerZoom(delta float32) {
+	if a.viewer.Item == nil || a.viewer.Item.Kind != "image" {
+		return
+	}
 	z := a.viewer.Zoom * delta
 	if z < 0.15 {
 		z = 0.15
@@ -1171,6 +1239,9 @@ func (a *App) viewerZoom(delta float32) {
 }
 
 func (a *App) viewerRotate(delta float32) {
+	if a.viewer.Item == nil || a.viewer.Item.Kind != "image" {
+		return
+	}
 	a.viewer.Angle += delta
 	a.refresh()
 }

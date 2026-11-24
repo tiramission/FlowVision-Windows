@@ -222,7 +222,7 @@ func (a *App) gridView(c *ui.Context, tab *Tab) {
 			x, y, _ := box.PointerPosition()
 			if idx, ok := layout.hit(x, y); ok {
 				it := layout.Cells[idx].It
-				a.later(func() { a.openViewer(it) })
+				a.later(func() { a.activateItem(it) })
 			}
 		}
 		if box.RightClicked() {
@@ -273,7 +273,7 @@ func (a *App) gridView(c *ui.Context, tab *Tab) {
 			}
 			one := a.contextOne()
 			if m.Item("打开").Chosen() && one != nil {
-				a.later(func() { a.openViewer(one) })
+				a.later(func() { a.activateItem(one) })
 			}
 			if m.Item("在资源管理器中显示").Chosen() {
 				ids := append([]string(nil), a.contextIDs...)
@@ -306,22 +306,24 @@ func (a *App) gridView(c *ui.Context, tab *Tab) {
 				a.later(func() { a.askDelete(true) })
 			}
 			m.Separator()
-			if m.Item("显示信息").Disabled(one == nil).Chosen() && one != nil {
+			if m.Item("显示信息").Disabled(one == nil || !isMediaKind(one.Kind)).Chosen() && one != nil {
 				a.later(func() {
-					a.openViewer(one)
-					a.viewerToggleInfo()
+					a.activateItem(one)
+					if isMediaKind(one.Kind) {
+						a.viewerSetInfo(true)
+					}
 				})
 			}
 		})
 
 		box.OnShortcut(0, ui.KeyEnter, func() {
 			if it := tab.selectedOne(); it != nil {
-				a.later(func() { a.openViewer(it) })
+				a.later(func() { a.activateItem(it) })
 			}
 		})
 		box.OnShortcut(0, ui.KeySpace, func() {
 			if it := tab.selectedOne(); it != nil {
-				a.later(func() { a.openViewer(it) })
+				a.later(func() { a.activateItem(it) })
 			}
 		})
 		box.OnShortcut(0, ui.KeyDelete, func() {
@@ -402,7 +404,14 @@ func (a *App) drawGrid(p *ui.Painter, r ui.Rect, layout gridLayout, th *ui.Theme
 		p.Fill(card, cardFace, 10)
 		p.Stroke(card, cardBorder, 10, 1)
 
-		if it.Kind == "image" || it.Kind == "video" {
+		if it.Kind == "folder" {
+			p.Fill(imgR, th.Accent.Alpha(.08), 9)
+			side := float32(34)
+			p.Icon(lucide.Folder(), ui.Rect{X: imgR.X + (imgR.W-side)/2, Y: imgR.Y + (imgR.H-side)/2 - 8, W: side, H: side}, th.Accent)
+			label := "文件夹"
+			w, _ := p.MeasureText(0, ui.Span{Text: label, Size: 11, Weight: 500})
+			p.Text(imgR.X+(imgR.W-w)/2, imgR.Y+imgR.H/2+12, label, 11, th.TextMuted)
+		} else if it.Kind == "image" || it.Kind == "video" {
 			bmp := a.thumb(it, a.settings.ThumbSize)
 			if bmp != nil {
 				p.Clip(imgR, 9, func() {

@@ -5,7 +5,7 @@
 - 上游项目：https://github.com/netdcy/FlowVision （GPL-3.0）
 - 本移植版：GPL-3.0，见 `LICENSE`；第三方组件许可见 `THIRD_PARTY_NOTICES.md`
 - 技术栈：Go 1.27+ · [MyGo](https://github.com/egoist/mygo) v0.10.0 · [Onevra](https://oneo-me.github.io/onevra/) v0.2026.18 · `github.com/oneo-me/onevra/source`
-- 当前版本：**1.2.4（Onevra Settings / 设置与工具栏绑定修复 / 隐藏 ffmpeg 控制台）**
+- 当前版本：**1.2.5（子文件夹卡片 / 查看器实际缩放比 / 浏览与查看器交互修复）**
 - 历史版本：1.2.2 接入签名自动更新；1.2.1 移除系统标题栏；1.2.0 接入 Onevra；1.1.0 是 MyGo 原生 UI 基线；1.0.0 是 Go + WebView2 的第一阶段移植，仍保留在 Git 历史与 GitHub Release 中
 
 ---
@@ -26,6 +26,8 @@
 
 1.2.4 修复设置与工具栏控件绑定丢失的问题：所有开关、滑块和下拉框改为直接绑定持久草稿字段，保存后真正写回设置；设置页改用 Onevra `Settings` 的分类、搜索和窄窗口布局，并补齐排序、缓存上限、自动播放等入口。ffmpeg 取帧改用隐藏窗口方式启动，不再弹出控制台。
 
+1.2.5 修复非递归浏览不显示子文件夹的问题：网格现在始终显示当前目录的子文件夹卡片，可双击进入；文件夹排在文件之前，状态栏显示文件夹数量。查看器百分比改为实际显示缩放比（100% = 1:1），旋转后按旋转后的外接矩形重新适配；翻页跳过文件夹/其他文件，视频隐藏无效的缩放控件。另修复右键“显示信息”会反向关闭信息面板、其他文件被送入无法解码的查看器、带点号的文件夹重命名被当作扩展名等问题。
+
 构建 tag `mygo_nowebview` 让 MyGo 进入 native-only 模式。**纯 Go 构建必须带这个 tag**，否则 MyGo 会按默认 WebView 模式编译。
 
 ## 二、Onevra 集成
@@ -42,7 +44,7 @@
 | 功能 | 状态 | 说明 |
 |---|---|---|
 | 瀑布流网格 | ✅ | 自绘虚拟化：按窗口宽度、缩略图目标宽度与间距算列数，按宽高比分配最短列；只对可见区域请求缩略图；Onevra 风格卡片 + 悬停阴影 + 选中描边 |
-| 文件夹浏览 / 递归 / 排序 / 隐藏文件 | ✅ | 名称（自然排序）、日期、大小、类型；递归最多 5 层、单次最多 6,000 项 |
+| 文件夹浏览 / 递归 / 排序 / 隐藏文件 | ✅ | 网格显示当前目录的子文件夹卡片，双击进入；名称（自然排序）、日期、大小、类型，文件夹始终排在文件前；递归最多 5 层、单次最多 6,000 项 |
 | 多标签页 | ✅ | 每标签独立路径、排序、历史、搜索、选中状态与滚动位置；重启恢复 |
 | 自绘标题栏 | ✅ | 无系统标题栏/窗口按钮；Onevra 品牌、标签、新建与窗口控制；拖动/双击最大化/最小化/最大化还原/关闭；保留缩放边缘与 snap layouts |
 | 签名自动更新 | ✅ | MyGo `native` updater；后台每日检查 + 帮助菜单手动检查；Ed25519 校验更新归档/清单；安装到用户目录后下载、安装并重启 |
@@ -128,10 +130,10 @@ go build -tags "debug mygo_nowebview" -o fvdebug.exe .
 
 ## 七、测试与验证
 
-- **Go 测试全部通过**：`CGO_ENABLED=0 go test ./...` 与 `go test -tags mygo_nowebview .`。覆盖目录扫描/自然排序/递归/隐藏、同级导航、缩略图缓存与并发生成、EXIF、Settings 合并、Windows 保留名、文件操作，以及原生布局、Onevra 侧栏、Ctrl+F 搜索、标签关闭、搜索过滤、网格命中/键盘导航、右键菜单、设置分类/搜索/窄窗口/开关/滑块/保存、工具栏排序/递归开关、查看器浮层、自绘标题栏控件与 ffmpeg 隐藏窗口进程等回归。
+- **Go 测试全部通过**：`CGO_ENABLED=0 go test ./...` 与 `go test -tags mygo_nowebview .`。覆盖目录扫描/自然排序/递归/隐藏/子文件夹列表与排序、同级导航、缩略图缓存与并发生成、EXIF、Settings 合并、Windows 保留名、文件操作，以及原生布局、Onevra 侧栏、Ctrl+F 搜索、标签关闭、搜索过滤、网格命中/键盘导航、右键菜单、设置分类/搜索/窄窗口/开关/滑块/保存、工具栏排序/递归开关、查看器浮层/翻页跳过非媒体/实际缩放比、自绘标题栏控件与 ffmpeg 隐藏窗口进程等回归。
 - **真实窗口回归**：debug 构建的本地控制端点 + `CapturePage` 截图 + 真实鼠标点击，验证了 1320×850 与 760×500 布局、深/浅主题、空目录、11 项瀑布流、160 项滚动与滚动恢复、多标签溢出、查看器缩放/旋转/翻页/信息、设置滚动、单实例路径转发、同级/返回导航、搜索过滤、重命名/新建/回收站删除、菜单快捷键（`Ctrl+T/W/B/R/=/−`）与浏览键（`W/S/A/D`、`F5`）。
 - **标题栏回归**：DPI-aware 实际窗口截图确认无系统标题栏；真实点击最小化（`IsIconic=true`）、最大化/还原（`maximized` 状态与客户区尺寸同步）、关闭（进程退出）；双击标题栏空白区最大化；拖动标题栏移动窗口；760×500 下品牌、标签、新建与三枚窗口按钮均可见可点击。
-- **更新/构建回归**：本机 `go tool mygo build -platform windows/amd64` 成功生成 1.2.4 安装包；签名更新归档和 `update-windows-amd64.json` 由 GitHub Actions 使用仓库 secret 生成。MyGo 构建的应用可启动，状态栏显示 v1.2.4，自绘标题栏、标题栏“检查更新”按钮与窗口控制保持正常。GitHub Actions 发布后检查公开的 `releases/latest/download/update-windows-amd64.json`。
+- **更新/构建回归**：本机 `go tool mygo build -platform windows/amd64` 成功生成 1.2.5 安装包；签名更新归档和 `update-windows-amd64.json` 由 GitHub Actions 使用仓库 secret 生成。MyGo 构建的应用可启动，状态栏显示 v1.2.5，自绘标题栏、标题栏“检查更新”按钮与窗口控制保持正常。GitHub Actions 发布后检查公开的 `releases/latest/download/update-windows-amd64.json`。
 
 ## 八、目录
 
@@ -152,6 +154,7 @@ win32.go       隐藏属性、SHFileOperationW 回收站
 settings.go    设置模型与持久化
 debug.go       仅 debug build 启用的本地控制端点
 native_test.go 原生 UI/布局测试
+folders_test.go 文件夹卡片、排序、查看器翻页与实际缩放比测试
 CHANGELOG.md   版本发布说明（更新窗口读取对应章节）
 .github/       GitHub Actions 发布工作流
 resources/     icon.png

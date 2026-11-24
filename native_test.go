@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"math"
+	"path/filepath"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -407,6 +408,10 @@ func TestGridNavigation(t *testing.T) {
 
 func TestNativeGridContextMenu(t *testing.T) {
 	a := newViewTestApp()
+	pic := filepath.Join(t.TempDir(), "a.png")
+	writePNG(t, pic, 20, 20)
+	it := a.tab().Items[0]
+	it.Name, it.Path, it.Kind, it.Ext = "a.png", pic, "image", ".png"
 	tt := ui.NewTester(a.view, 1280, 800)
 	tt.RightClickAt(60, 220)
 	tt.Frame()
