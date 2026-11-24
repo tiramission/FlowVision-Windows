@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/oneo-me/onevra/source/icons/lucide"
 )
 
 // gridCell is one tile of the waterfall. X/Y are in the content box's
@@ -18,7 +19,7 @@ type gridCell struct {
 	ImgH float32
 }
 
-func (c gridCell) height() float32 { return c.ImgH + 26 }
+func (c gridCell) height() float32 { return c.ImgH + 33 }
 
 type gridLayout struct {
 	Cells  []gridCell
@@ -188,9 +189,15 @@ func (a *App) gridView(c *ui.Context, tab *Tab) {
 		}
 
 		box.Draw(func(p *ui.Painter, r ui.Rect) {
-			a.drawGrid(p, r, layout, th)
+			hover := -1
+			if x, y, over := box.PointerPosition(); over {
+				if idx, ok := layout.hit(x, y); ok {
+					hover = idx
+				}
+			}
+			a.drawGrid(p, r, layout, th, hover)
 			if box.FileDragOver() {
-				p.Fill(r, ui.RGBA(0, 122, 255, 22), 10)
+				p.Fill(r, th.Selection, 10)
 			}
 		})
 
@@ -373,51 +380,72 @@ func (a *App) contextOne() *Item {
 	return it
 }
 
-func (a *App) drawGrid(p *ui.Painter, r ui.Rect, layout gridLayout, th *ui.Theme) {
-	top := a.tab()
-	_ = top
-	for _, cell := range layout.Cells {
+func (a *App) drawGrid(p *ui.Painter, r ui.Rect, layout gridLayout, th *ui.Theme, hover int) {
+	for i, cell := range layout.Cells {
 		it := cell.It
-		imgR := ui.Rect{X: r.X + cell.X, Y: r.Y + cell.Y, W: cell.W, H: cell.ImgH}
+		card := ui.Rect{X: r.X + cell.X, Y: r.Y + cell.Y, W: cell.W, H: cell.height()}
+		imgR := ui.Rect{X: card.X + 1, Y: card.Y + 1, W: card.W - 2, H: cell.ImgH}
 		selected := false
 		if t := a.tab(); t != nil {
 			selected = t.Selected[it.ID]
 		}
+
+		// Each tile is a Onevra surface card: a warm face, a hairline border and
+		// a caption that stays inside the card rather than floating on the page.
+		cardFace := th.Surface
+		cardBorder := th.Border.Alpha(.75)
+		if i == hover {
+			cardFace = th.SurfaceHover
+			cardBorder = th.Accent.Alpha(.55)
+			p.Shadow(card, 10, 0, 3, 10, 0, ui.RGBA(0, 0, 0, .10))
+		}
+		p.Fill(card, cardFace, 10)
+		p.Stroke(card, cardBorder, 10, 1)
+
 		if it.Kind == "image" || it.Kind == "video" {
 			bmp := a.thumb(it, a.settings.ThumbSize)
-			p.Fill(imgR, th.Surface, 8)
 			if bmp != nil {
-				p.Clip(imgR, 8, func() {
+				p.Clip(imgR, 9, func() {
 					p.Image(bmp, imgR, ui.Cover)
 				})
 			} else {
-				p.Fill(imgR, ui.RGBA(0, 0, 0, 18), 8)
-				w, h := p.MeasureText(cell.W-16, ui.Span{Text: it.Name, Size: 12, Color: th.TextMuted})
-				p.Text(imgR.X+(imgR.W-w)/2, imgR.Y+(imgR.H-h)/2, it.Name, 12, th.TextMuted)
+				p.Fill(imgR, th.SurfaceHover, 9)
+				icon := lucide.ImageOff()
+				if it.Kind == "video" {
+					icon = lucide.Video()
+				}
+				side := float32(30)
+				p.Icon(icon, ui.Rect{X: imgR.X + (imgR.W-side)/2, Y: imgR.Y + (imgR.H-side)/2, W: side, H: side}, th.TextMuted)
 			}
 			if it.Kind == "video" {
-				badge := ui.Rect{X: imgR.X + 8, Y: imgR.Y + 8, W: 38, H: 18}
-				p.Fill(badge, ui.RGBA(0, 0, 0, 140), 9)
-				p.Text(badge.X+8, badge.Y+13, "视频", 11, ui.RGBA(255, 255, 255, 235))
+				badge := ui.Rect{X: imgR.X + 8, Y: imgR.Y + 8, W: 56, H: 22}
+				p.Fill(badge, ui.RGBA(0, 0, 0, 150), 11)
+				p.Icon(lucide.Play(), ui.Rect{X: badge.X + 7, Y: badge.Y + 6, W: 10, H: 10}, ui.RGBA(255, 255, 255, 235))
+				p.Text(badge.X+20, badge.Y+4, "视频", 10.5, ui.RGBA(255, 255, 255, 235))
 			}
 		} else {
-			p.Fill(imgR, th.Surface, 8)
-			p.Clip(imgR, 8, func() {
-				p.Fill(ui.Rect{X: imgR.X + imgR.W/2 - 22, Y: imgR.Y + imgR.H/2 - 28, W: 44, H: 44}, ui.RGBA(127, 127, 127, 36), 8)
-			})
+			p.Fill(imgR, th.SurfaceHover, 9)
 			ext := strings.TrimPrefix(strings.ToUpper(filepath.Ext(it.Name)), ".")
 			if ext == "" {
 				ext = "文件"
 			}
-			w, _ := p.MeasureText(0, ui.Span{Text: ext, Size: 13, Weight: 600})
-			p.Text(imgR.X+(imgR.W-w)/2, imgR.Y+imgR.H/2+10, ext, 13, th.TextMuted)
+			icon := lucide.File()
+			side := float32(30)
+			p.Icon(icon, ui.Rect{X: imgR.X + (imgR.W-side)/2, Y: imgR.Y + (imgR.H-side)/2 - 8, W: side, H: side}, th.TextMuted)
+			w, _ := p.MeasureText(0, ui.Span{Text: ext, Size: 12, Weight: 600})
+			p.Text(imgR.X+(imgR.W-w)/2, imgR.Y+imgR.H/2+10, ext, 12, th.TextMuted)
 		}
 		if selected {
-			p.Stroke(imgR, th.Accent, 8, 3)
+			p.Stroke(imgR, th.Accent, 9, 3)
 		}
-		captionY := imgR.Y + imgR.H + 4
-		p.Clip(ui.Rect{X: imgR.X, Y: captionY, W: imgR.W, H: 22}, 0, func() {
-			p.Text(imgR.X, captionY, it.Name, 12, th.Text)
+
+		captionY := imgR.Y + imgR.H + 8
+		p.Clip(ui.Rect{X: imgR.X + 9, Y: captionY, W: max(0, imgR.W-18), H: 18}, 0, func() {
+			color := th.Text
+			if i == hover {
+				color = th.Accent
+			}
+			p.Text(imgR.X+9, captionY, it.Name, 11.5, color)
 		})
 	}
 }

@@ -11,7 +11,7 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-const appVersion = "1.1.0"
+const appVersion = "1.2.0"
 
 var (
 	mainWin     *mygo.Window

@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/oneo-me/onevra/source/components"
+	"github.com/oneo-me/onevra/source/icons/lucide"
 )
 
 func (a *App) viewerOverlay(c *ui.Context) {
@@ -27,22 +29,29 @@ func (a *App) viewerOverlay(c *ui.Context) {
 		backdrop.Background(ui.RGBA(0, 0, 0, 0.82))
 		panel.Fill().Background(th.Background).Clip()
 		ui.Column(c).Fill().Children(func() {
-			ui.Row(c).Height(42).Padding(6, 12).Gap(8).Background(th.Surface).Children(func() {
-				ui.Text(c, it.Name).FontSize(14).FontWeight(600).SingleLine().Grow(1)
-				if t != nil {
-					ui.Text(c, fmt.Sprintf("%d / %d", a.viewer.Index+1, len(t.Items))).
-						FontSize(11).TextColor(th.TextMuted)
+			ui.Row(c).Height(50).Padding(8, 14, 8, 14).Gap(8).Background(th.Surface).Children(func() {
+				icon := lucide.Image()
+				if it.Kind == "video" {
+					icon = lucide.Film()
 				}
-				if ui.Button(c, "").Label("显示信息").Tooltip("显示信息 (I)").Children(func() {
-					ui.Text(c, "ⓘ").FontSize(14)
-				}).Clicked() {
-					a.viewerToggleInfo()
+				ui.Box(c).Size(30, 30).Radius(8).Background(th.Accent.Alpha(.12)).Center().Children(func() {
+					components.Icon(c, icon).Size(15, 15).TextColor(th.Accent)
+				})
+				ui.Column(c).Grow(1).MinWidth(0).Children(func() {
+					components.Text(c, it.Name).FontSize(13.5).FontWeight(600).SingleLine().Ellipsis("…")
+					if t != nil {
+						components.Text(c, fmt.Sprintf("%d / %d", a.viewer.Index+1, len(t.Items))).
+							FontSize(10).TextColor(th.TextMuted)
+					}
+				})
+				infoLabel := "显示信息 (I)"
+				if a.viewer.ShowInfo {
+					infoLabel = "隐藏信息 (I)"
 				}
-				if ui.Button(c, "").Label("关闭查看器").Tooltip("关闭 (Esc)").Children(func() {
-					ui.Text(c, "×").FontSize(15)
-				}).Clicked() {
-					a.closeViewer()
-				}
+				components.IconButton(c, lucide.Info(), infoLabel, components.IconButtonPlain).
+					OnClick(a.viewerToggleInfo)
+				components.IconButton(c, lucide.X(), "关闭查看器 (Esc)", components.IconButtonPlain).
+					OnClick(a.closeViewer)
 			})
 
 			ui.Row(c).Grow(1).Children(func() {
@@ -52,27 +61,25 @@ func (a *App) viewerOverlay(c *ui.Context) {
 				}
 			})
 
-			ui.Row(c).Height(40).Padding(6, 12).Gap(6).Background(th.Surface).Children(func() {
-				ui.Text(c, fmt.Sprintf("%.0f%%", a.viewer.Zoom*100)).FontSize(11).TextColor(th.TextMuted).Width(44)
-				if ui.Button(c, "−").Label("缩小").Tooltip("缩小 (−)").Clicked() {
-					a.viewerZoom(0.8)
-				}
-				if ui.Button(c, "+").Label("放大").Tooltip("放大 (=)").Clicked() {
-					a.viewerZoom(1.25)
-				}
-				if ui.Button(c, "适合").Label("适合窗口").Tooltip("适合窗口 (0)").Clicked() {
-					a.viewerReset()
-				}
-				if ui.Button(c, "旋转").Label("旋转 90°").Tooltip("顺时针旋转 (R)").Clicked() {
-					a.viewerRotate(90)
-				}
+			ui.Row(c).Height(48).Padding(8, 14, 8, 14).Gap(4).Background(th.Surface).Children(func() {
+				components.Text(c, fmt.Sprintf("%.0f%%", a.viewer.Zoom*100)).FontSize(10.5).
+					TextColor(th.TextMuted).Width(42)
+				components.IconButton(c, lucide.ZoomOut(), "缩小 (−)", components.IconButtonPlain).
+					OnClick(func() { a.viewerZoom(0.8) })
+				components.IconButton(c, lucide.ZoomIn(), "放大 (+, =)", components.IconButtonPlain).
+					OnClick(func() { a.viewerZoom(1.25) })
+				components.IconButton(c, lucide.Maximize2(), "适合窗口 (0)", components.IconButtonPlain).
+					OnClick(a.viewerReset)
+				components.IconButton(c, lucide.RotateCw(), "顺时针旋转 (R)", components.IconButtonPlain).
+					OnClick(func() { a.viewerRotate(90) })
+				ui.Box(c).Width(1).Height(20).Background(th.Border).Margin(2, 6)
 				ui.Spacer(c)
 				if a.viewer.Player != nil {
 					label := "播放"
 					if a.viewer.Player.Playing() {
 						label = "暂停"
 					}
-					if ui.Button(c, label).Clicked() {
+					if components.Button(c, label, components.ButtonSecondary).Clicked() {
 						if a.viewer.Player.Playing() {
 							a.viewer.Player.Pause()
 						} else {
@@ -80,16 +87,20 @@ func (a *App) viewerOverlay(c *ui.Context) {
 						}
 					}
 					loop := a.settings.LoopVideo
-					if ui.Checkbox(c, &loop, "循环").Changed() {
+					if components.Switch(c, &loop, "循环", components.SwitchOptions{Compact: true}).Changed() {
 						a.settings.LoopVideo = loop
 						_ = saveSettings(a.settings)
 						a.viewer.Player.SetLoop(loop)
 					}
 				}
-				if ui.Button(c, "‹ 上一张").Label("上一张").Disabled(a.viewer.Index <= 0).Clicked() {
+				prev := components.IconButton(c, lucide.ChevronLeft(), "上一张 (←)", components.IconButtonPlain).
+					Disabled(a.viewer.Index <= 0)
+				if prev.Clicked() {
 					a.viewerStep(-1)
 				}
-				if ui.Button(c, "下一张 ›").Label("下一张").Disabled(t == nil || a.viewer.Index >= len(t.Items)-1).Clicked() {
+				next := components.IconButton(c, lucide.ChevronRight(), "下一张 (→)", components.IconButtonPlain).
+					Disabled(t == nil || a.viewer.Index >= len(t.Items)-1)
+				if next.Clicked() {
 					a.viewerStep(1)
 				}
 			})
@@ -176,15 +187,18 @@ func (a *App) viewerCanvas(c *ui.Context, it *Item, th *ui.Theme) {
 }
 
 func (a *App) viewerInfoPanel(c *ui.Context, it *Item, th *ui.Theme) {
-	ui.Column(c).Width(286).FillHeight().Background(th.Surface).
-		BorderStartWidth(1).BorderColor(th.Border).
-		Padding(10, 12).Gap(5).Children(func() {
-		ui.Text(c, "信息").FontSize(13).Bold()
-		ui.Text(c, it.Name).FontSize(12).FontWeight(600)
-		ui.Text(c, it.Path).FontSize(10).TextColor(th.TextMuted)
+	ui.Column(c).Width(300).FillHeight().Background(th.Surface).
+		BorderStartWidth(1).BorderColor(th.Border.Alpha(.7)).
+		Padding(12, 14).Gap(7).Children(func() {
+		ui.Row(c).Gap(7).Children(func() {
+			components.Icon(c, lucide.SlidersHorizontal()).Size(14, 14).TextColor(th.TextMuted)
+			components.Text(c, "信息").FontSize(12).Bold()
+		})
+		components.Text(c, it.Name).FontSize(11.5).FontWeight(600).SingleLine().Ellipsis("…")
+		components.Text(c, it.Path).FontSize(9.5).TextColor(th.TextMuted).SingleLine().Ellipsis("…")
 		ui.Divider(c)
 		ui.Scroll(c).Grow(1).Children(func() {
-			ui.Column(c).Gap(4).Children(func() {
+			ui.Column(c).Gap(5).Children(func() {
 				infoRow(c, "类型", stringsUpper(it.Ext))
 				infoRow(c, "大小", (MediaSvc{}).FormatSize(it.Size))
 				infoRow(c, "修改时间", (AppSvc{}).FormatTime(it.Mtime))
@@ -196,27 +210,27 @@ func (a *App) viewerInfoPanel(c *ui.Context, it *Item, th *ui.Theme) {
 						infoRow(c, kv.K, kv.V)
 					}
 				} else {
-					ui.Text(c, "正在读取元数据…").FontSize(11).TextColor(th.TextMuted)
-				}
-				ui.Divider(c)
-				if ui.Button(c, "用默认应用打开").Clicked() {
-					_ = (AppSvc{}).OpenExternal(it.Path)
-				}
-				if ui.Button(c, "在资源管理器中显示").Clicked() {
-					_ = (AppSvc{}).Reveal(it.Path)
-				}
-				if ui.Button(c, "复制完整路径").Clicked() {
-					_ = (AppSvc{}).CopyText(it.Path)
+					components.Text(c, "正在读取元数据…").FontSize(10.5).TextColor(th.TextMuted)
 				}
 			})
 		})
+		ui.Divider(c)
+		if components.Button(c, "用默认应用打开", components.ButtonSecondary).FillWidth().Clicked() {
+			_ = (AppSvc{}).OpenExternal(it.Path)
+		}
+		if components.Button(c, "在资源管理器中显示", components.ButtonOutline).FillWidth().Clicked() {
+			_ = (AppSvc{}).Reveal(it.Path)
+		}
+		if components.Button(c, "复制完整路径", components.ButtonGhost).FillWidth().Clicked() {
+			_ = (AppSvc{}).CopyText(it.Path)
+		}
 	})
 }
 
 func infoRow(c *ui.Context, key, value string) {
 	ui.Column(c).Gap(1).Children(func() {
-		ui.Text(c, key).FontSize(10).TextColor(c.Theme().TextMuted)
-		ui.Text(c, value).FontSize(11).TextColor(c.Theme().Text)
+		components.Text(c, key).FontSize(9.5).TextColor(c.Theme().TextMuted)
+		components.Text(c, value).FontSize(11).TextColor(c.Theme().Text)
 	})
 }
 

@@ -12,6 +12,7 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 	mvideo "github.com/egoist/mygo/ui/video"
+	onevra "github.com/oneo-me/onevra/source/theme"
 )
 
 // Tab is one folder open in the window. The grid, the search field and the
@@ -705,6 +706,8 @@ func (a *App) applyTheme() {
 
 // uiTheme picks the native widget theme. It follows the desktop's accent and
 // accessibility preferences while honoring the app's light/dark choice.
+// Onevra's warm neutral palette and terracotta accent replace MyGo's defaults;
+// the palette is applied before any widget is built so controls share it.
 func (a *App) uiTheme(c *ui.Context) *ui.Theme {
 	if !a.themeDetected {
 		a.systemDark = c.Theme().Dark
@@ -717,13 +720,18 @@ func (a *App) uiTheme(c *ui.Context) *ui.Theme {
 	case "light":
 		dark = false
 	}
-	var t *ui.Theme
-	if dark {
-		t = ui.DarkTheme()
-	} else {
-		t = ui.LightTheme()
+	t := onevra.Palette(dark)
+	p := c.Preferences()
+	if p.HighContrast {
+		t.Border = t.Border.Mix(t.Text, 0.45)
+		t.TextMuted = t.TextMuted.Mix(t.Text, 0.4)
+		t.Focus.A = 255
+		t.Scrollbar = t.Scrollbar.Alpha(1.6)
 	}
-	return t.WithPreferences(c.Preferences())
+	if s := p.TextScale; s > 0 && s != 1 {
+		t.FontSize *= s
+	}
+	return t
 }
 
 func (a *App) clearCache() {

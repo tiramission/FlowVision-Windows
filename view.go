@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/oneo-me/onevra/source/components"
+	"github.com/oneo-me/onevra/source/icons/lucide"
 )
 
 func (a *App) view(c *ui.Context) {
@@ -45,87 +47,94 @@ func (a *App) viewShortcuts(c *ui.Context) {
 func (a *App) sidebarView(c *ui.Context) {
 	th := c.Theme()
 	side := ui.Column(c).Width(float32(a.sidebarWidth)).FillHeight().Background(th.Surface)
-	side.BorderStartWidth(1).BorderColor(th.Border)
+	side.BorderStartWidth(1).BorderColor(th.Border.Alpha(.55))
 	side.Children(func() {
-		ui.Row(c).Padding(12, 12, 6, 12).Gap(8).Children(func() {
-			ui.Text(c, "FlowVision").FontSize(17).Bold().Grow(1)
-			ui.Text(c, "v"+appVersion).FontSize(10).TextColor(th.TextMuted)
-		})
-		ui.Scroll(c).Grow(1).Padding(4, 8, 12, 8).Gap(2).Children(func() {
-			a.sidebarSection(c, "收藏")
-			if len(a.settings.Favorites) == 0 {
-				ui.Text(c, "用工具栏的星标收藏文件夹").FontSize(11).TextColor(th.TextMuted).Padding(4, 8)
-			}
-			for _, fav := range a.settings.Favorites {
-				fav := fav
-				a.sidebarPathRow(c, fav, "★", true)
-			}
-
-			a.sidebarSection(c, "位置")
-			for _, p := range a.places {
-				p := p
-				a.sidebarPathRow(c, p.Path, sidebarGlyph(p.Icon), false)
-			}
-
-			a.sidebarSection(c, "驱动器")
-			for _, p := range a.drives {
-				p := p
-				a.sidebarPathRow(c, p.Path, "▣", false)
-			}
-
-			folderRow := ui.Row(c).Gap(6).Padding(12, 4, 4, 4).Children(func() {
-				ui.Text(c, "文件夹").Bold().FontSize(11).TextColor(th.TextMuted).Grow(1)
-				if ui.Button(c, "").Label("刷新文件夹树").Tooltip("刷新").Children(func() {
-					ui.Text(c, "↻")
-				}).Clicked() {
-					if t := a.tab(); t != nil {
-						a.invalidateTree(t.Path)
-					}
-				}
+		// Onevra's warm, low-contrast navigation: a quiet brand mark, generous
+		// section spacing and sidebar items that only color their glyph.
+		ui.Row(c).Padding(16, 12, 10, 14).Gap(10).Children(func() {
+			ui.Box(c).Size(30, 30).Radius(9).Background(th.Accent.Alpha(.13)).Center().Children(func() {
+				components.Icon(c, lucide.Images).Size(17, 17).TextColor(th.Accent)
 			})
-			_ = folderRow
-			if t := a.tab(); t != nil {
-				a.ensureTree(t.Path)
-				if !a.treeLoaded[t.Path] {
-					ui.Text(c, "正在读取文件夹…").FontSize(11).TextColor(th.TextMuted).Padding(4, 8)
-				} else {
-					kids := a.treeKids[t.Path]
-					if len(kids) == 0 {
-						ui.Text(c, "没有子文件夹").FontSize(11).TextColor(th.TextMuted).Padding(4, 8)
+			ui.Column(c).Grow(1).MinWidth(0).Children(func() {
+				components.Text(c, "FlowVision").FontSize(15).Bold().SingleLine()
+				components.Text(c, "纯 Go 图像浏览器").FontSize(10).TextColor(th.TextMuted).SingleLine()
+			})
+		})
+
+		ui.Scroll(c).Grow(1).Padding(0, 6, 8, 8).Children(func() {
+			components.Sidebar(c).Children(func() {
+				components.SidebarSection(c, "收藏", func() {
+					if len(a.settings.Favorites) == 0 {
+						components.Text(c, "用工具栏的星标收藏文件夹").FontSize(10.5).TextColor(th.TextMuted).
+							Padding(2, 6).SingleLine()
 					}
-					ui.Tree(c, func() {
-						for _, kid := range kids {
-							a.treeFolder(c, kid.Path, kid.Name)
+					for _, fav := range a.settings.Favorites {
+						fav := fav
+						a.sidebarPathRow(c, fav, lucide.Star(), true)
+					}
+				})
+
+				components.SidebarSection(c, "位置", func() {
+					for _, p := range a.places {
+						p := p
+						a.sidebarPathRow(c, p.Path, placeIcon(p.Icon), false)
+					}
+				})
+
+				components.SidebarSection(c, "驱动器", func() {
+					for _, p := range a.drives {
+						p := p
+						a.sidebarPathRow(c, p.Path, lucide.HardDrive(), false)
+					}
+				})
+
+				components.SidebarSectionWithActions(c, "文件夹", func(c *ui.Context) {
+					components.IconButton(c, lucide.RefreshCw(), "刷新文件夹树", components.IconButtonCompact).
+						OnClick(func() {
+							if t := a.tab(); t != nil {
+								a.invalidateTree(t.Path)
+							}
+						})
+				}, func() {
+					if t := a.tab(); t != nil {
+						a.ensureTree(t.Path)
+						if !a.treeLoaded[t.Path] {
+							components.Text(c, "正在读取文件夹…").FontSize(10.5).TextColor(th.TextMuted).Padding(2, 6)
+						} else {
+							kids := a.treeKids[t.Path]
+							if len(kids) == 0 {
+								components.Text(c, "没有子文件夹").FontSize(10.5).TextColor(th.TextMuted).Padding(2, 6)
+							}
+							ui.Tree(c, func() {
+								for _, kid := range kids {
+									a.treeFolder(c, kid.Path, kid.Name)
+								}
+							})
 						}
-					})
-				}
-			}
+					}
+				})
+			})
+		})
+
+		ui.Row(c).Height(38).Padding(6, 8).Gap(2).Children(func() {
+			components.IconButton(c, lucide.SlidersHorizontal(), "设置", components.IconButtonPlain).
+				OnClick(a.openSettings)
+			components.IconButton(c, lucide.Keyboard(), "快捷键帮助", components.IconButtonPlain).
+				OnClick(func() { a.showHelp = true })
+			ui.Spacer(c)
+			components.Text(c, "v"+appVersion).FontSize(10).TextColor(th.TextMuted).Padding(0, 4)
 		})
 	})
 }
 
-func (a *App) sidebarSection(c *ui.Context, title string) {
-	ui.Text(c, title).FontSize(10).FontWeight(600).TextColor(c.Theme().TextMuted).
-		Padding(10, 8, 2, 8)
-}
-
-func (a *App) sidebarPathRow(c *ui.Context, path, glyph string, favorite bool) {
-	th := c.Theme()
+func (a *App) sidebarPathRow(c *ui.Context, path string, icon *ui.SVG, favorite bool) {
 	active := false
 	if t := a.tab(); t != nil {
 		active = strings.EqualFold(filepath.Clean(path), filepath.Clean(t.Path))
 	}
-	row := ui.Row(c.Key(path)).Focusable().Gap(7).Padding(3, 8).Radius(6)
-	if active {
-		row.Background(ui.RGBA(127, 127, 127, 28))
-	}
-	if row.Hovered() && !active {
-		row.Background(ui.RGBA(127, 127, 127, 14))
-	}
-	row.Children(func() {
-		ui.Text(c, glyph).FontSize(12).TextColor(th.TextMuted)
-		ui.Text(c, displayName(path)).SingleLine().FontSize(12).Grow(1)
-	})
+	name := displayName(path)
+	row := components.SidebarItem(c, name, icon, active)
+	row.Key(path)
 	if row.Clicked() {
 		a.goTo(path, true)
 	}
@@ -144,19 +153,35 @@ func (a *App) sidebarPathRow(c *ui.Context, path, glyph string, favorite bool) {
 	}
 }
 
+func placeIcon(kind string) *ui.SVG {
+	switch kind {
+	case "pictures":
+		return lucide.Images()
+	case "desktop":
+		return lucide.Monitor()
+	case "downloads":
+		return lucide.Download()
+	case "documents":
+		return lucide.FileText()
+	case "videos":
+		return lucide.Video()
+	}
+	return lucide.Folder()
+}
+
 func (a *App) treeFolder(c *ui.Context, path, name string) {
 	th := c.Theme()
 	open := a.treeOpenPtr(path)
 	item := ui.TreeItem(c.Key(path), name, open, func() {
 		if !a.treeLoaded[path] {
 			a.ensureTree(path)
-			ui.Text(c, "正在读取…").FontSize(11).TextColor(th.TextMuted)
+			components.Text(c, "正在读取…").FontSize(10.5).TextColor(th.TextMuted)
 			return
 		}
 		for _, kid := range a.treeKids[path] {
 			a.treeFolder(c, kid.Path, kid.Name)
 		}
-	})
+	}).FontSize(11.5)
 	active := false
 	if t := a.tab(); t != nil {
 		active = strings.EqualFold(filepath.Clean(path), filepath.Clean(t.Path))
@@ -172,23 +197,51 @@ func (a *App) treeFolder(c *ui.Context, path, name string) {
 
 func (a *App) tabStrip(c *ui.Context) {
 	th := c.Theme()
-	ui.Row(c).Height(38).Background(th.Surface).Padding(6, 8, 2, 8).Gap(6).Children(func() {
+	ui.Row(c).Height(48).Background(th.Surface).Padding(8, 10, 2, 10).Gap(6).Children(func() {
+		if !a.sidebar {
+			// A compact brand keeps the strip identifiable when the sidebar is
+			// hidden; it is part of Onevra's airy header rather than a toolbar.
+			ui.Row(c).Gap(7).Padding(0, 2).Children(func() {
+				components.Icon(c, lucide.Images).Size(16, 16).TextColor(th.Accent)
+				components.Text(c, "FlowVision").FontSize(12).FontWeight(600)
+			})
+			ui.Box(c).Width(1).Height(22).Background(th.Border).Margin(2, 6)
+		}
 		ui.ScrollHorizontal(c).Grow(1).Scrollbars(false).Children(func() {
-			ui.Row(c).Gap(4).Children(func() {
+			ui.Row(c).Gap(3).Children(func() {
 				for i, tab := range a.tabs {
 					tab := tab
 					i := i
-					box := ui.Row(c.Key(tab.ID)).Focusable().Height(30).Gap(4).Padding(0, 10).
-						PaddingEnd(6).Radius(7)
-					if i == a.active {
-						box.Background(th.Background)
+					active := i == a.active
+					box := ui.Row(c.Key(tab.ID)).Focusable().Height(32).Gap(6).Padding(0, 10).
+						PaddingEnd(6).Radius(8)
+					if active {
+						box.Background(th.Background).Border(1, th.Border.Alpha(.7))
 					} else if box.Hovered() {
-						box.Background(ui.RGBA(127, 127, 127, 18))
+						box.Background(th.Text.Alpha(.045))
 					}
+					box.DrawOver(func(p *ui.Painter, r ui.Rect) {
+						if active {
+							p.Fill(ui.Rect{X: r.X + 10, Y: r.Y + r.H - 2, W: r.W - 20, H: 2}, th.Accent, 1)
+						}
+					})
 					box.Children(func() {
-						ui.Text(c, tab.Name).SingleLine().MaxWidth(176).FontSize(12)
+						fg := th.TextMuted
+						if active {
+							fg = th.Accent
+						}
+						components.Icon(c, lucide.FolderOpen()).Size(13, 13).TextColor(fg)
+						components.Text(c, tab.Name).SingleLine().MaxWidth(168).FontSize(12).
+							TextColor(th.Text).FontWeight(func() int {
+							if active {
+								return 600
+							}
+							return 400
+						}())
 						close := ui.Button(c, "").Label("关闭标签页 "+tab.Name).Tooltip("关闭标签页").
-							Padding(2, 4).Children(func() { ui.Text(c, "×").FontSize(12) })
+							Size(20, 20).Padding(0).Radius(5).Children(func() {
+							components.Icon(c, lucide.X()).Size(11, 11).TextColor(th.TextMuted)
+						})
 						if close.Clicked() {
 							a.later(func() { a.closeTab(i) })
 						}
@@ -205,11 +258,8 @@ func (a *App) tabStrip(c *ui.Context) {
 		if a.scrollActiveTab {
 			a.scrollActiveTab = false
 		}
-		if ui.Button(c, "").Label("新建标签页").Tooltip("新建标签页 (Ctrl+T)").Children(func() {
-			ui.Text(c, "＋").FontSize(15)
-		}).Clicked() {
-			a.later(func() { a.newTab("") })
-		}
+		components.IconButton(c, lucide.Plus(), "新建标签页 (Ctrl+T)", components.IconButtonToolbar).
+			OnClick(func() { a.later(func() { a.newTab("") }) })
 	})
 }
 
@@ -219,28 +269,38 @@ func (a *App) toolbar(c *ui.Context) {
 	if tab == nil {
 		return
 	}
-	ui.Column(c).Padding(8, 12, 6, 12).Gap(6).Background(th.Background).Children(func() {
-		ui.Row(c).Gap(6).Children(func() {
-			iconButton(c, "←", "返回", func() { a.goBack() }, len(tab.History) == 0)
-			iconButton(c, "↑", "上一级", a.up, false)
-			iconButton(c, "‹", "上一文件夹", func() { a.sibling(-1) }, false)
-			iconButton(c, "›", "下一文件夹", func() { a.sibling(1) }, false)
+	ui.Column(c).Padding(10, 14, 8, 14).Gap(8).Background(th.Background).Children(func() {
+		ui.Row(c).Gap(2).Children(func() {
+			components.IconButton(c, lucide.ArrowLeft(), "返回", components.IconButtonPlain).
+				Disabled(len(tab.History) == 0).OnClick(func() { a.goBack() })
+			components.IconButton(c, lucide.ArrowUp(), "上一级", components.IconButtonPlain).
+				OnClick(a.up)
+			components.IconButton(c, lucide.ChevronLeft(), "上一文件夹", components.IconButtonPlain).
+				OnClick(func() { a.sibling(-1) })
+			components.IconButton(c, lucide.ChevronRight(), "下一文件夹", components.IconButtonPlain).
+				OnClick(func() { a.sibling(1) })
 
-			ui.Column(c).Grow(1).PaddingX(4).Children(func() {
-				ui.Text(c, tab.Name).FontSize(15).FontWeight(600).SingleLine()
-				ui.Text(c, tab.Path).FontSize(10).TextColor(th.TextMuted).SingleLine()
+			ui.Column(c).Grow(1).MinWidth(0).PaddingX(8).Clip().Children(func() {
+				components.Text(c, tab.Name).FontSize(17).FontWeight(600).SingleLine().Ellipsis("…")
+				components.Text(c, tab.Path).FontSize(10).TextColor(th.TextMuted).SingleLine().Ellipsis("…")
 			})
-			star := "☆"
+			star := components.IconButton(c, lucide.Star(), "收藏此文件夹", components.IconButtonPlain)
 			if a.isFavorite(tab.Path) {
-				star = "★"
+				star.TextColor(th.Accent)
 			}
-			iconButton(c, star, "收藏此文件夹", a.toggleFavorite, false)
-			iconButton(c, "⚙", "设置", a.openSettings, false)
+			if star.Clicked() {
+				a.toggleFavorite()
+			}
+			components.IconButton(c, lucide.Settings(), "设置", components.IconButtonPlain).
+				OnClick(a.openSettings)
 		})
-		ui.Row(c).Gap(6).Children(func() {
-			ui.TextInput(c.Key(fmt.Sprintf("search-%d", tab.ID)), &tab.Query).
-				Placeholder("搜索此文件夹").Label("搜索").Grow(1).MaxWidth(420).
-				Bind(&a.searchHandle)
+		ui.Row(c).Gap(6).Wrap().Children(func() {
+			ui.Box(c.Key(fmt.Sprintf("search-%d", tab.ID))).Grow(1).MaxWidth(420).Children(func() {
+				search := components.TextBox(c, &tab.Query, components.TextBoxOptions{
+					LeadingIcon: lucide.Search(),
+				}).Placeholder("搜索此文件夹").Label("搜索").FillWidth().Bind(&a.searchHandle)
+				_ = search
+			})
 			if a.focusSearch {
 				a.searchHandle.SelectAll(c)
 				a.focusSearch = false
@@ -250,17 +310,16 @@ func (a *App) toolbar(c *ui.Context) {
 				a.refresh()
 			}
 			if tab.Query != "" {
-				if ui.Button(c, "").Label("清除搜索").Tooltip("清除搜索").Padding(2, 6).Children(func() {
-					ui.Text(c, "×").FontSize(12)
-				}).Clicked() {
-					tab.Query = ""
-					tab.refilter()
-					a.refresh()
-				}
+				components.IconButton(c, lucide.X(), "清除搜索", components.IconButtonCompact).
+					OnClick(func() {
+						tab.Query = ""
+						tab.refilter()
+						a.refresh()
+					})
 			}
 			sortValue := sortLabel(tab.Sort)
 			sel := ui.Select(c.Key("sort"), &sortValue, []string{"名称", "日期", "大小", "类型"}).
-				Label("排序").Width(84)
+				Label("排序").Width(92)
 			if sel.Changed() {
 				if key := sortKey(sortValue); key != tab.Sort {
 					tab.Sort = key
@@ -268,24 +327,26 @@ func (a *App) toolbar(c *ui.Context) {
 					a.loadTab(tab, true)
 				}
 			}
-			dirGlyph := "↑"
+			dirIcon := lucide.ArrowUp()
+			dirLabel := "升序，点击切换为降序"
 			if tab.Desc {
-				dirGlyph = "↓"
+				dirIcon = lucide.ArrowDown()
+				dirLabel = "降序，点击切换为升序"
 			}
-			if ui.Button(c, "").Label("切换排序方向").Tooltip("升序 / 降序").
-				Padding(3, 8).Children(func() { ui.Text(c, dirGlyph).FontSize(13) }).Clicked() {
-				tab.Desc = !tab.Desc
-				a.persist()
-				a.loadTab(tab, true)
-			}
+			components.IconButton(c, dirIcon, dirLabel, components.IconButtonPlain).
+				OnClick(func() {
+					tab.Desc = !tab.Desc
+					a.persist()
+					a.loadTab(tab, true)
+				})
 			recursive := a.settings.Recursive
-			if ui.Toggle(c, &recursive, "递归").Changed() {
+			if components.Switch(c, &recursive, "递归", components.SwitchOptions{Compact: true}).Changed() {
 				a.settings.Recursive = recursive
 				_ = saveSettings(a.settings)
 				a.loadTab(tab, true)
 			}
 			hidden := a.settings.ShowHidden
-			if ui.Toggle(c, &hidden, "隐藏").Changed() {
+			if components.Switch(c, &hidden, "隐藏", components.SwitchOptions{Compact: true}).Changed() {
 				a.settings.ShowHidden = hidden
 				_ = saveSettings(a.settings)
 				a.treeGen++
@@ -295,12 +356,6 @@ func (a *App) toolbar(c *ui.Context) {
 			}
 		})
 	})
-}
-
-func iconButton(c *ui.Context, glyph, label string, fn func(), disabled bool) {
-	btn := ui.Button(c, "").Label(label).Tooltip(label).Disabled(disabled).
-		Padding(3, 8).Children(func() { ui.Text(c, glyph).FontSize(14) })
-	btn.OnClick(fn)
 }
 
 func sortLabel(key string) string {
@@ -331,39 +386,47 @@ func (a *App) content(c *ui.Context) {
 	th := c.Theme()
 	tab := a.tab()
 	if tab == nil {
-		ui.Column(c).Grow(1).Center().Children(func() {
-			ui.Text(c, "没有打开的文件夹").TextColor(th.TextMuted)
-		})
+		emptyState(c, lucide.FolderOpen(), "没有打开的文件夹", "")
 		return
 	}
 	switch {
 	case tab.Loading:
-		ui.Column(c).Grow(1).Center().Gap(8).Children(func() {
-			ui.Text(c, "正在读取…").TextColor(th.TextMuted)
-		})
+		emptyState(c, lucide.Images(), "正在读取…", "")
 	case tab.Err != "":
-		ui.Column(c).Grow(1).Center().Gap(10).Children(func() {
-			ui.Text(c, tab.Err).TextColor(th.Text)
-			ui.Button(c, "重试").OnClick(func() { a.loadTab(tab, false) })
+		ui.Column(c).Grow(1).Center().Gap(12).Children(func() {
+			components.Icon(c, lucide.ImageOff()).Size(30, 30).TextColor(th.TextMuted)
+			components.Text(c, tab.Err).TextColor(th.Text).MaxWidth(520).Center()
+			components.Button(c, "重试", components.ButtonSecondary).OnClick(func() { a.loadTab(tab, false) })
 		})
 	case len(tab.Items) == 0:
-		ui.Column(c).Grow(1).Center().Gap(8).Children(func() {
-			if tab.Query != "" {
-				ui.Text(c, "没有匹配的图片").TextColor(th.TextMuted)
-			} else {
-				ui.Text(c, "此文件夹没有可显示的图片").TextColor(th.TextMuted)
-			}
-			if tab.Query != "" {
-				ui.Button(c, "清除搜索").OnClick(func() {
+		if tab.Query != "" {
+			ui.Column(c).Grow(1).Center().Gap(12).Children(func() {
+				components.Icon(c, lucide.SearchX()).Size(30, 30).TextColor(th.TextMuted)
+				components.Text(c, "没有匹配的图片").TextColor(th.TextMuted)
+				components.Button(c, "清除搜索", components.ButtonSecondary).OnClick(func() {
 					tab.Query = ""
 					tab.refilter()
 					a.refresh()
 				})
-			}
-		})
+			})
+		} else {
+			emptyState(c, lucide.Images(), "此文件夹没有可显示的图片", "把图片或文件夹拖进来，或换一个文件夹")
+		}
 	default:
 		a.gridView(c, tab)
 	}
+}
+
+func emptyState(c *ui.Context, icon *ui.SVG, title, detail string) {
+	ui.Column(c).Grow(1).Center().Gap(10).Children(func() {
+		ui.Box(c).Size(56, 56).Radius(16).Background(c.Theme().Surface).Center().Children(func() {
+			components.Icon(c, icon).Size(26, 26).TextColor(c.Theme().TextMuted)
+		})
+		components.Text(c, title).FontSize(14).TextColor(c.Theme().TextMuted)
+		if detail != "" {
+			components.Text(c, detail).FontSize(11).TextColor(c.Theme().TextMuted).MaxWidth(420).Center()
+		}
+	})
 }
 
 func (a *App) statusBar(c *ui.Context) {
@@ -372,27 +435,27 @@ func (a *App) statusBar(c *ui.Context) {
 	if tab == nil {
 		return
 	}
-	ui.Row(c).Height(27).Padding(0, 12).Gap(10).Background(th.Surface).Children(func() {
-		ui.Text(c, fmt.Sprintf("%d 项", len(tab.Items))).FontSize(11).TextColor(th.TextMuted)
+	ui.Row(c).Height(30).Padding(0, 14).Gap(10).Background(th.Surface).Children(func() {
+		components.Text(c, fmt.Sprintf("%d 项", len(tab.Items))).FontSize(10.5).TextColor(th.TextMuted)
 		if tab.Query != "" && len(tab.Items) != len(tab.All) {
-			ui.Text(c, fmt.Sprintf("（共 %d 项）", len(tab.All))).FontSize(11).TextColor(th.TextMuted)
+			components.Text(c, fmt.Sprintf("（共 %d 项）", len(tab.All))).FontSize(10.5).TextColor(th.TextMuted)
 		}
-		ui.Text(c, fmt.Sprintf("%d 图片 · %d 视频", countKind(tab.Items, "image"), countKind(tab.Items, "video"))).
-			FontSize(11).TextColor(th.TextMuted)
+		components.Text(c, fmt.Sprintf("%d 图片 · %d 视频", countKind(tab.Items, "image"), countKind(tab.Items, "video"))).
+			FontSize(10.5).TextColor(th.TextMuted)
 		if n := len(tab.Selected); n > 0 {
-			ui.Text(c, fmt.Sprintf("已选 %d 项", n)).FontSize(11).TextColor(th.Accent)
+			components.Text(c, fmt.Sprintf("已选 %d 项", n)).FontSize(10.5).TextColor(th.Accent)
 		}
 		if tab.Result.Truncated {
-			ui.Text(c, "已截断").FontSize(11).TextColor(th.TextMuted)
+			components.Text(c, "已截断").FontSize(10.5).TextColor(th.TextMuted)
 		}
 		ui.Spacer(c)
 		if a.settings.Recursive {
-			ui.Badge(c, "递归").FontSize(10)
+			components.Badge(c, "递归", components.BadgeOptions{Tone: components.BadgeWarning})
 		}
 		if a.settings.ShowHidden {
-			ui.Badge(c, "隐藏").FontSize(10)
+			components.Badge(c, "隐藏", components.BadgeOptions{Tone: components.BadgeNeutral})
 		}
-		ui.Text(c, "纯 Go 原生 UI").FontSize(10).TextColor(th.TextMuted)
+		components.Text(c, "Onevra · 纯 Go").FontSize(10).TextColor(th.TextMuted)
 	})
 }
 
@@ -404,20 +467,4 @@ func countKind(items []*Item, kind string) int {
 		}
 	}
 	return n
-}
-
-func sidebarGlyph(icon string) string {
-	switch icon {
-	case "pictures":
-		return "▦"
-	case "desktop":
-		return "▭"
-	case "downloads":
-		return "↓"
-	case "documents":
-		return "▤"
-	case "videos":
-		return "▶"
-	}
-	return "▢"
 }

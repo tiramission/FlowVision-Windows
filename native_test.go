@@ -37,6 +37,54 @@ func newViewTestApp() *App {
 	return a
 }
 
+func TestNativeOnevraSidebar(t *testing.T) {
+	a := newViewTestApp()
+	a.settings.Sidebar = true
+	a.sidebar = true
+	a.places = []Place{
+		{Name: "Desktop", Path: `C:\Users\test\Desktop`, Icon: "desktop"},
+		{Name: "Pictures", Path: `C:\Pictures`, Icon: "pictures"},
+	}
+	a.drives = []Place{{Name: "C:", Path: `C:\`, Icon: "drive"}}
+	tt := ui.NewTester(a.view, 1280, 800)
+	for _, want := range []string{"收藏", "位置", "驱动器", "文件夹", "Pictures"} {
+		if !tt.HasText(want) {
+			t.Fatalf("Onevra sidebar missing %q: %q", want, tt.Texts())
+		}
+	}
+	tt.Frame()
+	tt.Frame()
+}
+
+func TestNativeSearchShortcut(t *testing.T) {
+	a := newViewTestApp()
+	tt := ui.NewTester(a.view, 1280, 800)
+	tt.Key(ui.Ctrl, ui.KeyF)
+	tt.Frame()
+	tt.Type("b")
+	tt.Frame()
+	if len(a.tab().Items) != 1 || a.tab().Items[0].Name != "b.txt" {
+		t.Fatalf("ctrl+f filter: %+v", itemNames(a.tab().Items))
+	}
+}
+
+func TestNativeOnevraTabClose(t *testing.T) {
+	a := newViewTestApp()
+	second := newTab(1, `C:\Other`)
+	second.Name = "Other"
+	second.Loaded = true
+	a.tabs = append(a.tabs, second)
+	a.active = 1
+	tt := ui.NewTester(a.view, 1280, 800)
+	if err := tt.Click("关闭标签页 Other"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if len(a.tabs) != 1 || a.tab().Name != "Pictures" {
+		t.Fatalf("close tab: tabs=%d active=%d", len(a.tabs), a.active)
+	}
+}
+
 func TestNativeViewBuilds(t *testing.T) {
 	a := newViewTestApp()
 	tt := ui.NewTester(a.view, 1280, 800)
