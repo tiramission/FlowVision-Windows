@@ -20,6 +20,8 @@ var (
 	procSetClipboardData = user32.NewProc("SetClipboardData")
 	procCloseClipboard   = user32.NewProc("CloseClipboard")
 	procGetCursorPos     = user32.NewProc("GetCursorPos")
+	procGetWindowRect    = user32.NewProc("GetWindowRect")
+	procGetDpiForWindow  = user32.NewProc("GetDpiForWindow")
 	kernel32             = syscall.NewLazyDLL("kernel32.dll")
 	procGlobalAlloc      = kernel32.NewProc("GlobalAlloc")
 	procGlobalLock       = kernel32.NewProc("GlobalLock")
@@ -40,13 +42,58 @@ type win32Point struct {
 	Y int32
 }
 
-// cursorPosition reads the global mouse position. Viewer chrome auto-hide
-// only needs to know whether the pointer moved; screen coordinates avoid
-// mixing DPI-scaled client coordinates with the physical cursor.
+type win32Rect struct {
+	Left   int32
+	Top    int32
+	Right  int32
+	Bottom int32
+}
+
+// cursorPosition reads the global mouse position in physical screen pixels.
 func cursorPosition() (int32, int32, bool) {
 	var p win32Point
 	r, _, _ := procGetCursorPos.Call(uintptr(unsafe.Pointer(&p)))
 	return p.X, p.Y, r != 0
+}
+
+// cursorAtWindowVerticalEdge tells whether the physical cursor is within
+// bandDIP of the window's top or bottom edge. The viewer chrome ticker uses it
+// to reveal the floating bars only at those edges.
+func cursorAtWindowVerticalEdge(hwnd uintptr, bandDIP float64) (top, bottom, ok bool) {
+	if hwnd == 0 {
+		return false, false, false
+	}
+	_, y, cursorOK := cursorPosition()
+	if !cursorOK {
+		return false, false, false
+	}
+	var r win32Rect
+	rectOK, _, _ := procGetWindowRect.Call(hwnd, uintptr(unsafe.Pointer(&r)))
+	if rectOK == 0 || r.Bottom <= r.Top {
+		return false, false, false
+	}
+	dpi, _, _ := procGetDpiForWindow.Call(hwnd)
+	if dpi == 0 {
+		dpi = 96
+	}
+	band := int32(bandDIP * float64(dpi) / 96)
+	if band < 1 {
+		band = 1
+	}
+	top, bottom = windowVerticalEdgeHit(y, r.Top, r.Bottom, band)
+	return top, bottom, true
+}
+
+// windowVerticalEdgeHit is the DPI-free part of the edge test. A band taller
+// than half the window would make every position an edge, so it is capped.
+func windowVerticalEdgeHit(y, top, bottom, band int32) (hitTop, hitBottom bool) {
+	if bottom <= top || band <= 0 {
+		return false, false
+	}
+	if band > (bottom-top)/2 {
+		band = (bottom - top) / 2
+	}
+	return y >= top && y < top+band, y <= bottom && y >= bottom-band
 }
 
 // setClipboardText puts UTF-16 text on the Windows clipboard. The WebView's

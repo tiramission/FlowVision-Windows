@@ -154,6 +154,12 @@ type Viewer struct {
 	SeekSeconds    float64
 	SeekUntil      time.Time
 	DraggingSeek   bool
+
+	HoldActive bool
+	HoldButton int
+	HoldAt     time.Time
+	HoldX      float32
+	HoldY      float32
 }
 
 // App holds the state the native view builds from. It is only changed on the
@@ -1190,12 +1196,12 @@ func (a *App) loadViewerMedia(it *Item) {
 	}
 }
 
+const viewerChromeEdgeBandDIP = 64
+
 func (a *App) startViewerChromeTicker(gen int) {
 	go func() {
 		ticker := time.NewTicker(120 * time.Millisecond)
 		defer ticker.Stop()
-		var lastX, lastY int32
-		var baseline bool
 		for range ticker.C {
 			alive := true
 			mygo.RunOnMain(func() {
@@ -1206,18 +1212,14 @@ func (a *App) startViewerChromeTicker(gen int) {
 				if a.win == nil || !a.win.IsFullScreen() {
 					return
 				}
-				x, y, ok := cursorPosition()
+				inTop, inBottom, ok := cursorAtWindowVerticalEdge(a.win.NativeHandle(), viewerChromeEdgeBandDIP)
 				if !ok {
 					return
 				}
-				if !baseline {
-					lastX, lastY, baseline = x, y, true
-					return
-				}
-				moved := x != lastX || y != lastY
-				lastX, lastY = x, y
 				now := time.Now()
-				if moved {
+				if inTop || inBottom {
+					// Keep the bars alive while the pointer rests at either
+					// edge. Leaving the edge starts the normal 2.5s fade timer.
 					a.viewer.ChromeUntil = now.Add(2500 * time.Millisecond)
 					if !a.viewer.ChromeVisible {
 						a.viewer.ChromeVisible = true
@@ -1377,6 +1379,7 @@ func (a *App) viewerStep(delta int) {
 		return
 	}
 	it := t.Items[idx]
+	a.cancelViewerHold()
 	a.viewer.Open = true
 	a.viewer.Item = it
 	a.viewer.Index = idx
@@ -1386,6 +1389,19 @@ func (a *App) viewerStep(delta int) {
 	a.viewer.PanY = 0
 	a.viewer.Bitmap = nil
 	a.loadViewerMedia(it)
+	a.refresh()
+}
+
+// viewerFit fits the current orientation into the canvas without undoing a
+// rotation. The long-press right gesture uses it, matching upstream's "switch
+// zoom to view".
+func (a *App) viewerFit() {
+	if a.viewer.Item == nil || a.viewer.Item.Kind != "image" {
+		return
+	}
+	a.viewer.Zoom = 1
+	a.viewer.PanX = 0
+	a.viewer.PanY = 0
 	a.refresh()
 }
 

@@ -11,6 +11,11 @@ import (
 	"github.com/oneo-me/onevra/source/icons/lucide"
 )
 
+const (
+	viewerHoldDelay = 400 * time.Millisecond
+	viewerHoldSlop  = float32(8)
+)
+
 // nextViewerIndex walks past folders and other files so the arrow buttons
 // only land on something the viewer can actually decode.
 func nextViewerIndex(items []*Item, from, delta int) int {
@@ -249,6 +254,9 @@ func (a *App) viewerHeader(c *ui.Context, it *Item, th *ui.Theme, floating bool)
 func (a *App) viewerShortcuts(c *ui.Context, it *Item) {
 	c.OnWindowShortcut(0, ui.KeyLeft, func() { a.viewerStep(-1) })
 	c.OnWindowShortcut(0, ui.KeyRight, func() { a.viewerStep(1) })
+	// Windows mouse side buttons arrive as back/forward keys.
+	c.OnWindowShortcut(0, ui.KeyBack, func() { a.viewerStep(-1) })
+	c.OnWindowShortcut(0, ui.KeyForward, func() { a.viewerStep(1) })
 	if !a.viewerFullscreen() {
 		// The info panel is deliberately absent in immersive fullscreen; F11
 		// returns to the windowed layout where it can be shown again.
@@ -414,10 +422,67 @@ func (a *App) viewerNavControls(c *ui.Context, it *Item, th *ui.Theme) {
 	_ = th
 }
 
+func (a *App) cancelViewerHold() {
+	a.viewer.HoldActive = false
+	a.viewer.HoldButton = -1
+	a.viewer.HoldAt = time.Time{}
+}
+
+func (a *App) beginViewerHold(button int, x, y float32, at time.Time) {
+	if button != 0 && button != 1 {
+		return
+	}
+	a.viewer.HoldActive = true
+	a.viewer.HoldButton = button
+	a.viewer.HoldAt = at
+	a.viewer.HoldX = x
+	a.viewer.HoldY = y
+}
+
+func (a *App) moveViewerHold(x, y float32) {
+	if !a.viewer.HoldActive {
+		return
+	}
+	dx, dy := x-a.viewer.HoldX, y-a.viewer.HoldY
+	if dx*dx+dy*dy > viewerHoldSlop*viewerHoldSlop {
+		a.cancelViewerHold()
+	}
+}
+
+func (a *App) endViewerHold(button int, canceled bool) {
+	if !a.viewer.HoldActive {
+		return
+	}
+	if canceled || button == a.viewer.HoldButton {
+		a.cancelViewerHold()
+	}
+}
+
+// finishViewerHold turns a stationary long press into the same zoom shortcuts
+// upstream FlowVision offers: primary for actual size, secondary for fit.
+func (a *App) finishViewerHold(c *ui.Context) {
+	if !a.viewer.HoldActive {
+		return
+	}
+	elapsed := c.Now().Sub(a.viewer.HoldAt)
+	if elapsed < viewerHoldDelay {
+		c.After(viewerHoldDelay - elapsed)
+		return
+	}
+	button := a.viewer.HoldButton
+	a.cancelViewerHold()
+	if button == 0 {
+		a.viewerActualSize()
+	} else if button == 1 {
+		a.viewerFit()
+	}
+}
+
 func (a *App) viewerCanvas(c *ui.Context, it *Item, th *ui.Theme) {
 	ui.Box(c).Grow(1).FillHeight().Clip().Children(func() {
 		canvasW, canvasH := a.viewerCanvasSize(c)
 		box := ui.Box(c).Fill().Focusable().Label("媒体查看器")
+		a.finishViewerHold(c)
 		if a.viewerFullscreen() && !a.viewer.ChromeVisible {
 			box.Cursor(ui.CursorNone)
 		}
@@ -490,6 +555,22 @@ func (a *App) viewerCanvas(c *ui.Context, it *Item, th *ui.Theme) {
 					a.viewerZoomAt(0.89, ev.X, ev.Y, canvasW, canvasH)
 				}
 				return true
+			case ui.InputPointerDown:
+				at := ev.Time
+				if at.IsZero() {
+					at = c.Now()
+				}
+				a.beginViewerHold(ev.Button, ev.X, ev.Y, at)
+				if a.viewer.HoldActive {
+					c.After(viewerHoldDelay)
+				}
+				return false
+			case ui.InputPointerMove:
+				a.moveViewerHold(ev.X, ev.Y)
+				return false
+			case ui.InputPointerUp:
+				a.endViewerHold(ev.Button, ev.Canceled)
+				return false
 			}
 			return false
 		})

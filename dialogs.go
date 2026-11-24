@@ -202,8 +202,10 @@ func (a *App) helpModal(c *ui.Context) {
 					shortcutRow(c, "查看器：1", "100% 原始像素")
 					shortcutRow(c, "查看器：C", "图片居中")
 					shortcutRow(c, "查看器：← / →", "上一张 / 下一张")
+					shortcutRow(c, "查看器：鼠标侧键", "上一张 / 下一张")
+					shortcutRow(c, "查看器：长按左键 / 右键", "100% / 适应窗口")
 					shortcutRow(c, "查看器：I", "显示 / 隐藏信息")
-					components.Text(c, "网格支持拖入文件或文件夹；拖动查看器中的图片可平移。").FontSize(10.5).TextColor(th.TextMuted)
+					components.Text(c, "网格支持拖入文件或文件夹；拖动查看器中的图片可平移；全屏浮层只在鼠标到达顶部或底部边缘时出现。").FontSize(10.5).TextColor(th.TextMuted)
 				})
 			})
 			ui.Row(c).Justify(ui.End).Children(func() {
