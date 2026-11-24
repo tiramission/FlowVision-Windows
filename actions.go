@@ -11,16 +11,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/egoist/mygo"
-	"github.com/egoist/mygo/plugins/updater"
 	"github.com/egoist/mygo/transfer"
 )
-
-// checkForUpdates opens the updater's own window. The native menu is only
-// reachable with Alt after the app hides the system title bar, so the title
-// bar, Settings and About call it directly.
-func (a *App) checkForUpdates() {
-	a.later(updater.CheckForUpdates)
-}
 
 // AppSvc collects the app-level actions the native UI calls.
 type AppSvc struct{}

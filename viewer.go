@@ -75,6 +75,30 @@ func viewerActualZoom(fit float32) float32 {
 	return 1 / fit
 }
 
+func clampViewerZoom(z float32) float32 {
+	if math.IsNaN(float64(z)) || math.IsInf(float64(z), 0) {
+		return 1
+	}
+	return max(0.15, min(12, z))
+}
+
+// viewerZoomAtPoint scales the image while keeping the bitmap point under the
+// pointer at the same canvas position. Pan is relative to the canvas center,
+// so both the pointer and the current pan are measured from that center.
+func viewerZoomAtPoint(zoom, panX, panY, delta, x, y, w, h float32) (newZoom, newPanX, newPanY float32) {
+	if zoom <= 0 || w <= 0 || h <= 0 || delta <= 0 {
+		return zoom, panX, panY
+	}
+	newZoom = clampViewerZoom(zoom * delta)
+	if newZoom == zoom {
+		return zoom, panX, panY
+	}
+	ax := x - w/2
+	ay := y - h/2
+	ratio := newZoom / zoom
+	return newZoom, ax - (ax-panX)*ratio, ay - (ay-panY)*ratio
+}
+
 func (a *App) viewerFullscreen() bool {
 	return a.win != nil && a.win.IsFullScreen()
 }
@@ -246,6 +270,7 @@ func (a *App) viewerShortcuts(c *ui.Context, it *Item) {
 	c.OnWindowShortcut(0, ui.KeyMinus, func() { a.viewerZoom(0.8) })
 	c.OnWindowShortcut(0, ui.Key0, func() { a.viewerReset() })
 	c.OnWindowShortcut(0, ui.Key1, func() { a.viewerActualSize() })
+	c.OnWindowShortcut(0, ui.KeyC, func() { a.viewerCenter() })
 	c.OnWindowShortcut(0, ui.KeyR, func() { a.viewerRotate(90) })
 	c.OnWindowShortcut(ui.Shift, ui.KeyR, func() { a.viewerRotate(-90) })
 }
@@ -280,6 +305,8 @@ func (a *App) viewerImageControls(c *ui.Context, th *ui.Theme) {
 		OnClick(a.viewerReset)
 	components.IconButton(c, lucide.ScanLine(), "实际大小 1:1 (1)", components.IconButtonPlain).
 		OnClick(a.viewerActualSize)
+	components.IconButton(c, lucide.Crosshair(), "居中图片 (C)", components.IconButtonPlain).
+		OnClick(a.viewerCenter)
 	components.IconButton(c, lucide.RotateCw(), "顺时针旋转 (R)", components.IconButtonPlain).
 		OnClick(func() { a.viewerRotate(90) })
 	ui.Box(c).Width(1).Height(20).Background(th.Border).Margin(2, 6)
@@ -389,6 +416,7 @@ func (a *App) viewerNavControls(c *ui.Context, it *Item, th *ui.Theme) {
 
 func (a *App) viewerCanvas(c *ui.Context, it *Item, th *ui.Theme) {
 	ui.Box(c).Grow(1).FillHeight().Clip().Children(func() {
+		canvasW, canvasH := a.viewerCanvasSize(c)
 		box := ui.Box(c).Fill().Focusable().Label("媒体查看器")
 		if a.viewerFullscreen() && !a.viewer.ChromeVisible {
 			box.Cursor(ui.CursorNone)
@@ -448,19 +476,19 @@ func (a *App) viewerCanvas(c *ui.Context, it *Item, th *ui.Theme) {
 			switch ev.Kind {
 			case ui.InputZoom:
 				if ev.Scale > 0 {
-					a.viewerZoom(ev.Scale)
+					a.viewerZoomAt(ev.Scale, ev.X, ev.Y, canvasW, canvasH)
 				}
 				return true
 			case ui.InputScroll:
 				if ev.Precise {
 					a.viewer.PanX -= ev.DX
 					a.viewer.PanY -= ev.DY
+					a.refresh()
 				} else if ev.DY < 0 {
-					a.viewerZoom(1.12)
+					a.viewerZoomAt(1.12, ev.X, ev.Y, canvasW, canvasH)
 				} else if ev.DY > 0 {
-					a.viewerZoom(0.89)
+					a.viewerZoomAt(0.89, ev.X, ev.Y, canvasW, canvasH)
 				}
-				a.refresh()
 				return true
 			}
 			return false

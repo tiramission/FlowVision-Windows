@@ -36,6 +36,8 @@ type debugState struct {
 	ViewerOpen    bool     `json:"viewerOpen"`
 	ViewerIndex   int      `json:"viewerIndex"`
 	ViewerZoom    float32  `json:"viewerZoom"`
+	ViewerPanX    float32  `json:"viewerPanX"`
+	ViewerPanY    float32  `json:"viewerPanY"`
 	ViewerAngle   float32  `json:"viewerAngle"`
 	ViewerInfo    bool     `json:"viewerInfo"`
 	ViewerChrome  bool     `json:"viewerChrome"`
@@ -49,6 +51,9 @@ type debugState struct {
 	ShowSettings  bool     `json:"showSettings"`
 	ShowHelp      bool     `json:"showHelp"`
 	ShowAbout     bool     `json:"showAbout"`
+	UpdateOpen    bool     `json:"updateOpen"`
+	UpdatePhase   string   `json:"updatePhase"`
+	UpdateVersion string   `json:"updateVersion,omitempty"`
 	Maximized     bool     `json:"maximized"`
 	Fullscreen    bool     `json:"fullscreen"`
 	PlayerReady   bool     `json:"playerReady"`
@@ -76,6 +81,9 @@ func debugSnapshot() debugState {
 	st.ShowSettings = app.showSettings
 	st.ShowHelp = app.showHelp
 	st.ShowAbout = app.showAbout
+	st.UpdateOpen = app.updateOpen
+	st.UpdatePhase = app.updatePhase.String()
+	st.UpdateVersion = app.updateVersion
 	st.Maximized = app.maximized
 	if mainWin != nil {
 		st.ContentW, st.ContentH = mainWin.ContentSize()
@@ -105,6 +113,8 @@ func debugSnapshot() debugState {
 		st.ViewerOpen = true
 		st.ViewerIndex = app.viewer.Index
 		st.ViewerZoom = app.viewer.Zoom
+		st.ViewerPanX = app.viewer.PanX
+		st.ViewerPanY = app.viewer.PanY
 		st.ViewerAngle = app.viewer.Angle
 		st.ViewerInfo = app.viewer.ShowInfo
 		st.ViewerChrome = app.viewer.ChromeVisible
@@ -244,6 +254,16 @@ func debugCommand(name, arg string) {
 		app.closeViewer()
 	case "viewerinfo":
 		app.viewerToggleInfo()
+	case "viewerpan":
+		parts := strings.Split(arg, ",")
+		if len(parts) == 2 {
+			x, _ := strconv.ParseFloat(strings.TrimSpace(parts[0]), 32)
+			y, _ := strconv.ParseFloat(strings.TrimSpace(parts[1]), 32)
+			app.viewer.PanX, app.viewer.PanY = float32(x), float32(y)
+			app.refresh()
+		}
+	case "viewercenter":
+		app.viewerCenter()
 	case "viewerchrome":
 		switch arg {
 		case "auto":
@@ -367,6 +387,8 @@ func debugCommand(name, arg string) {
 	case "about":
 		app.showAbout = true
 		app.refresh()
+	case "updateui":
+		app.debugUpdateUI(arg)
 	case "error":
 		app.showError(arg)
 	case "favorite":

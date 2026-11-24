@@ -362,10 +362,14 @@ func (a *App) tabStrip(c *ui.Context) {
 			a.scrollActiveTab = false
 		}
 		// The native menu is keyboard-only once the app draws its own title
-		// bar, so keep the update command visible in the title bar.
-		components.IconButton(c, lucide.CloudDownload(), "检查更新", components.IconButtonPlain).
-			Size(30, 30).Tooltip("从 GitHub Release 检查签名更新").
-			OnClick(a.checkForUpdates)
+		// bar, so keep the update command visible in the title bar. A newer
+		// version tints the icon until the user opens or dismisses the panel.
+		updateBtn := components.IconButton(c, lucide.CloudDownload(), "检查更新", components.IconButtonPlain).
+			Size(30, 30).Tooltip("从 GitHub Release 检查签名更新")
+		if a.updateAvailable != nil {
+			updateBtn.TextColor(th.Accent)
+		}
+		updateBtn.OnClick(a.checkForUpdates)
 		components.IconButton(c, lucide.Plus(), "新建标签页 (Ctrl+T)", components.IconButtonToolbar).
 			OnClick(func() { a.later(func() { a.newTab("") }) })
 	})

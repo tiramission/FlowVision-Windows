@@ -190,6 +190,20 @@ type App struct {
 	showAbout bool
 	errorMsg  string
 
+	updateOpen        bool
+	updatePhase       UpdatePhase
+	updateVersion     string
+	updateNotes       string
+	updateDate        time.Time
+	updateErr         string
+	updateProgress    float64
+	updateDownloaded  int64
+	updateTotal       int64
+	updateAvailable   *mygo.Update
+	updateCancel      context.CancelFunc
+	updateGen         int
+	updateAutoStarted bool
+
 	renameOpen   bool
 	renameTarget *Item
 	renameDraft  string
@@ -1439,18 +1453,29 @@ func (a *App) viewerSetInfo(show bool) {
 	a.refresh()
 }
 
+func (a *App) viewerCenter() {
+	if a.viewer.Item == nil || a.viewer.Item.Kind != "image" {
+		return
+	}
+	a.viewer.PanX = 0
+	a.viewer.PanY = 0
+	a.refresh()
+}
+
 func (a *App) viewerZoom(delta float32) {
 	if a.viewer.Item == nil || a.viewer.Item.Kind != "image" {
 		return
 	}
-	z := a.viewer.Zoom * delta
-	if z < 0.15 {
-		z = 0.15
+	a.viewer.Zoom = clampViewerZoom(a.viewer.Zoom * delta)
+	a.refresh()
+}
+
+func (a *App) viewerZoomAt(delta, x, y, w, h float32) {
+	if a.viewer.Item == nil || a.viewer.Item.Kind != "image" {
+		return
 	}
-	if z > 12 {
-		z = 12
-	}
-	a.viewer.Zoom = z
+	a.viewer.Zoom, a.viewer.PanX, a.viewer.PanY = viewerZoomAtPoint(
+		a.viewer.Zoom, a.viewer.PanX, a.viewer.PanY, delta, x, y, w, h)
 	a.refresh()
 }
 

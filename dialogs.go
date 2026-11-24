@@ -17,6 +17,7 @@ func (a *App) overlays(c *ui.Context) {
 	a.errorModal(c)
 	a.helpModal(c)
 	a.aboutModal(c)
+	a.updateModal(c)
 	a.viewerOverlay(c)
 }
 
@@ -199,6 +200,7 @@ func (a *App) helpModal(c *ui.Context) {
 					shortcutRow(c, "查看器：R / Shift+R", "顺时针 / 逆时针旋转")
 					shortcutRow(c, "查看器：0", "适合窗口")
 					shortcutRow(c, "查看器：1", "100% 原始像素")
+					shortcutRow(c, "查看器：C", "图片居中")
 					shortcutRow(c, "查看器：← / →", "上一张 / 下一张")
 					shortcutRow(c, "查看器：I", "显示 / 隐藏信息")
 					components.Text(c, "网格支持拖入文件或文件夹；拖动查看器中的图片可平移。").FontSize(10.5).TextColor(th.TextMuted)
