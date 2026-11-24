@@ -34,7 +34,19 @@ jobs:
           }
           "Building FlowVision $version"
 
-      - name: Create draft release
+      - name: Extract release notes
+        shell: pwsh
+        run: |
+          $version = (Get-Content -Raw mygo.json | ConvertFrom-Json).version
+          $text = Get-Content -Raw CHANGELOG.md
+          $pattern = '(?ms)^##\s+\[?' + [regex]::Escape($version) + '\]?[^\r\n]*\r?\n(.*?)(?=\r?\n##\s+|\z)'
+          $match = [regex]::Match($text, $pattern)
+          if (-not $match.Success) {
+            throw "CHANGELOG.md has no section for $version"
+          }
+          Set-Content -Path release-notes.md -Value $match.Groups[1].Value.Trim() -Encoding utf8
+
+      - name: Create or update release notes
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -45,7 +57,9 @@ jobs:
           gh release view $tag --repo $repo --json tagName *> $null
           if ($LASTEXITCODE -ne 0) {
             gh release create $tag --repo $repo --draft --verify-tag `
-              --title "FlowVision $version" --generate-notes
+              --title "FlowVision $version" --notes-file release-notes.md
+          } else {
+            gh release edit $tag --repo $repo --notes-file release-notes.md
           }
 
       - name: Build, sign updates, and upload
