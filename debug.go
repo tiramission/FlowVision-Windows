@@ -47,6 +47,9 @@ type debugState struct {
 	ShowSettings bool     `json:"showSettings"`
 	ShowHelp     bool     `json:"showHelp"`
 	ShowAbout    bool     `json:"showAbout"`
+	Maximized    bool     `json:"maximized"`
+	ContentW     int      `json:"contentWidth"`
+	ContentH     int      `json:"contentHeight"`
 	ErrorMsg     string   `json:"errorMessage,omitempty"`
 	Items        []string `json:"items"`
 }
@@ -60,6 +63,10 @@ func debugSnapshot() debugState {
 	st.ShowSettings = app.showSettings
 	st.ShowHelp = app.showHelp
 	st.ShowAbout = app.showAbout
+	st.Maximized = app.maximized
+	if mainWin != nil {
+		st.ContentW, st.ContentH = mainWin.ContentSize()
+	}
 	st.ErrorMsg = app.errorMsg
 	for _, t := range app.tabs {
 		st.Tabs = append(st.Tabs, t.Path)
@@ -240,6 +247,17 @@ func debugCommand(name, arg string) {
 				w, _ := strconv.Atoi(parts[0])
 				h, _ := strconv.Atoi(parts[1])
 				mainWin.SetSize(w, h)
+			}
+		}
+	case "window":
+		if mainWin != nil {
+			switch arg {
+			case "minimize":
+				mainWin.Minimize()
+			case "maximize":
+				mainWin.Maximize()
+			case "restore":
+				mainWin.Unmaximize()
 			}
 		}
 	case "sidebar":

@@ -157,6 +157,7 @@ type App struct {
 	sidebar         bool
 	sidebarWidth    int
 	activeTabHandle ui.Handle
+	maximized       bool
 
 	showSettings    bool
 	draft           Settings

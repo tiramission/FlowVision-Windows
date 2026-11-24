@@ -14,20 +14,128 @@ func (a *App) view(c *ui.Context) {
 	c.SetTheme(a.uiTheme(c))
 	th := c.Theme()
 	a.viewShortcuts(c)
-	ui.Row(c).Fill().Background(th.Background).Children(func() {
-		if a.sidebar {
-			a.sidebarView(c)
-		}
-		ui.Column(c).Grow(1).FillHeight().Children(func() {
-			a.tabStrip(c)
-			a.toolbar(c)
-			a.content(c)
-			a.statusBar(c)
+	ui.Column(c).Fill().Background(th.Background).Children(func() {
+		a.titleBar(c)
+		ui.Row(c).Grow(1).FillWidth().Children(func() {
+			if a.sidebar {
+				a.sidebarView(c)
+			}
+			ui.Column(c).Grow(1).FillHeight().Children(func() {
+				a.toolbar(c)
+				a.content(c)
+				a.statusBar(c)
+			})
 		})
 	})
 
 	a.overlays(c)
 	a.runPending()
+}
+
+const titleBarHeight float32 = 48
+
+// titleBar is the window's own title bar. The system's caption and buttons are
+// gone (WindowOptions.HideWindowButtons), so the brand, tabs and window controls
+// live in one row that drags the window like a caption; the content below
+// starts at the same y the old tab strip did.
+func (a *App) titleBar(c *ui.Context) {
+	th := c.Theme()
+	bar := ui.Row(c).Height(titleBarHeight).FillWidth().Background(th.Surface).
+		Padding(0, 0, 0, 12).Gap(8).AlignItems(ui.Center).DragWindow()
+	bar.BorderWidth(0, 0, 1, 0).BorderColor(th.Border.Alpha(.55))
+	bar.Children(func() {
+		brand := ui.Row(c).Height(titleBarHeight).Gap(9).Padding(0, 6, 0, 0).AlignItems(ui.Center).DragWindow()
+		if a.sidebar {
+			// Keep the brand aligned over the sidebar, so the tab row begins at
+			// the content column's left edge.
+			brand.Width(float32(a.sidebarWidth) - 12)
+		}
+		brand.Children(func() {
+			ui.Box(c).Size(26, 26).Radius(8).Background(th.Accent.Alpha(.13)).Center().Children(func() {
+				components.Icon(c, lucide.Images).Size(15, 15).TextColor(th.Accent)
+			})
+			components.Text(c, "FlowVision").FontSize(13).FontWeight(600).SingleLine()
+		})
+
+		ui.Box(c).Width(1).Height(22).Background(th.Border).Margin(0, 4)
+
+		a.tabStrip(c)
+		a.windowControls(c)
+	})
+}
+
+// windowControls draws the minimize, maximize/restore and close buttons that
+// replace the hidden system buttons. They sit at the far right of the title
+// bar, full height, as native caption buttons do.
+func (a *App) windowControls(c *ui.Context) {
+	ui.Row(c).Height(titleBarHeight).Gap(0).Children(func() {
+		a.windowControl(c, lucide.Minus(), "最小化", false, false, func() {
+			if a.win != nil {
+				a.win.Minimize()
+			}
+		})
+		// Maximize and restore share one button; the app tracks the state
+		// through OnMaximize/OnUnmaximize to draw the correct glyph.
+		icon := lucide.Square()
+		label := "最大化"
+		if a.maximized {
+			icon = lucide.Copy()
+			label = "还原"
+		}
+		a.windowControl(c, icon, label, false, true, func() {
+			if a.win == nil {
+				return
+			}
+			if a.maximized {
+				a.win.Unmaximize()
+			} else {
+				a.win.Maximize()
+			}
+		})
+		a.windowControl(c, lucide.X(), "关闭", true, false, func() {
+			if a.win != nil {
+				a.win.Close()
+			}
+		})
+	})
+}
+
+func (a *App) windowControl(c *ui.Context, icon *ui.SVG, label string, danger, maximize bool, action func()) {
+	th := c.Theme()
+	b := ui.ButtonBase(c).Label(label).Size(46, titleBarHeight).Padding(0).Radius(0)
+	b.Draw(func(p *ui.Painter, r ui.Rect) {
+		var face ui.Color
+		switch {
+		case b.IsDisabled():
+		case b.Pressed():
+			if danger {
+				face = th.Danger.Mix(ui.RGB(0, 0, 0), .18)
+			} else {
+				face = th.Text.Alpha(.14)
+			}
+		case b.Hovered():
+			if danger {
+				face = th.Danger
+			} else {
+				face = th.Text.Alpha(.08)
+			}
+		}
+		if face.A > 0 {
+			p.Fill(r, face, 0)
+		}
+	}).Children(func() {
+		fg := th.TextMuted
+		if danger && b.Hovered() {
+			fg = ui.RGB(255, 255, 255)
+		}
+		components.Icon(c, icon).Size(14, 14).TextColor(fg)
+	})
+	if maximize {
+		b.MaximizeButton()
+	}
+	if b.Clicked() && action != nil {
+		a.later(action)
+	}
 }
 
 // viewShortcuts keeps the original single-letter browsing keys and the
@@ -49,19 +157,10 @@ func (a *App) sidebarView(c *ui.Context) {
 	side := ui.Column(c).Width(float32(a.sidebarWidth)).FillHeight().Background(th.Surface)
 	side.BorderStartWidth(1).BorderColor(th.Border.Alpha(.55))
 	side.Children(func() {
-		// Onevra's warm, low-contrast navigation: a quiet brand mark, generous
-		// section spacing and sidebar items that only color their glyph.
-		ui.Row(c).Padding(16, 12, 10, 14).Gap(10).Children(func() {
-			ui.Box(c).Size(30, 30).Radius(9).Background(th.Accent.Alpha(.13)).Center().Children(func() {
-				components.Icon(c, lucide.Images).Size(17, 17).TextColor(th.Accent)
-			})
-			ui.Column(c).Grow(1).MinWidth(0).Children(func() {
-				components.Text(c, "FlowVision").FontSize(15).Bold().SingleLine()
-				components.Text(c, "纯 Go 图像浏览器").FontSize(10).TextColor(th.TextMuted).SingleLine()
-			})
-		})
-
-		ui.Scroll(c).Grow(1).Padding(0, 6, 8, 8).Children(func() {
+		// The brand and window controls live in the custom title bar above;
+		// the sidebar starts directly with navigation so the window does not
+		// spend a second row on identity.
+		ui.Scroll(c).Grow(1).Padding(8, 6, 8, 8).Children(func() {
 			components.Sidebar(c).Children(func() {
 				components.SidebarSection(c, "收藏", func() {
 					if len(a.settings.Favorites) == 0 {
@@ -197,17 +296,8 @@ func (a *App) treeFolder(c *ui.Context, path, name string) {
 
 func (a *App) tabStrip(c *ui.Context) {
 	th := c.Theme()
-	ui.Row(c).Height(48).Background(th.Surface).Padding(8, 10, 2, 10).Gap(6).Children(func() {
-		if !a.sidebar {
-			// A compact brand keeps the strip identifiable when the sidebar is
-			// hidden; it is part of Onevra's airy header rather than a toolbar.
-			ui.Row(c).Gap(7).Padding(0, 2).Children(func() {
-				components.Icon(c, lucide.Images).Size(16, 16).TextColor(th.Accent)
-				components.Text(c, "FlowVision").FontSize(12).FontWeight(600)
-			})
-			ui.Box(c).Width(1).Height(22).Background(th.Border).Margin(2, 6)
-		}
-		ui.ScrollHorizontal(c).Grow(1).Scrollbars(false).Children(func() {
+	ui.Row(c).Grow(1).MinWidth(0).Height(titleBarHeight).AlignItems(ui.Center).Children(func() {
+		ui.ScrollHorizontal(c).Grow(1).Scrollbars(false).DragWindow().Children(func() {
 			ui.Row(c).Gap(3).Children(func() {
 				for i, tab := range a.tabs {
 					tab := tab

@@ -85,6 +85,39 @@ func TestNativeOnevraTabClose(t *testing.T) {
 	}
 }
 
+func TestNativeTitleBarControls(t *testing.T) {
+	a := newViewTestApp()
+	tt := ui.NewTester(a.view, 1280, 800)
+	if !tt.HasText("FlowVision") {
+		t.Fatalf("title bar brand missing: %q", tt.Texts())
+	}
+	// The window controls are real hit targets, not painted title-bar art.
+	// a.win is nil in the tester, so the actions are deliberately no-ops.
+	for _, label := range []string{"最小化", "最大化"} {
+		if err := tt.Click(label); err != nil {
+			t.Fatalf("title bar control %q: %v", label, err)
+		}
+	}
+	tt.Frame()
+	if a.win != nil {
+		t.Fatal("the test app unexpectedly has a window")
+	}
+}
+
+func TestNativeTitleBarNarrowWindow(t *testing.T) {
+	a := newViewTestApp()
+	a.sidebar = true
+	a.sidebarWidth = 248
+	tt := ui.NewTester(a.view, 760, 500)
+	if !tt.HasText("FlowVision") {
+		t.Fatalf("narrow title bar brand missing: %q", tt.Texts())
+	}
+	if err := tt.Click("关闭"); err != nil {
+		t.Fatalf("narrow title bar close: %v", err)
+	}
+	tt.Frame()
+}
+
 func TestNativeViewBuilds(t *testing.T) {
 	a := newViewTestApp()
 	tt := ui.NewTester(a.view, 1280, 800)

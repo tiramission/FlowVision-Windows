@@ -11,7 +11,7 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-const appVersion = "1.2.0"
+const appVersion = "1.2.1"
 
 var (
 	mainWin     *mygo.Window
@@ -102,23 +102,39 @@ func initLog() {
 
 func openMainWindow() {
 	win := mygo.NewWindow(mygo.WindowOptions{
-		Title:     "FlowVision",
-		Content:   ui.View(app.view),
-		Width:     1320,
-		Height:    850,
-		MinWidth:  720,
-		MinHeight: 460,
-		StateKey:  "main",
-		Hidden:    true,
+		Title:             "FlowVision",
+		Content:           ui.View(app.view),
+		Width:             1320,
+		Height:            850,
+		MinWidth:          720,
+		MinHeight:         460,
+		TitleBarStyle:     mygo.TitleBarHidden,
+		TitleBarHeight:    48,
+		HideWindowButtons: true,
+		StateKey:          "main",
+		Hidden:            true,
 	})
 	mainWin = win
 	app.attach(win)
+	win.OnMaximize(func() {
+		app.maximized = true
+		app.refresh()
+	})
+	win.OnUnmaximize(func() {
+		app.maximized = false
+		app.refresh()
+	})
+	win.OnResize(func() {
+		app.refresh()
+	})
 	if data, err := os.ReadFile(iconPath()); err == nil {
 		_ = win.SetIcon(data)
 	}
 	win.OnReadyToShow(func() {
 		win.Show()
 		win.Focus()
+		app.maximized = win.IsMaximized()
+		app.refresh()
 		pendingMu.Lock()
 		p := pendingOpen
 		pendingOpen = ""
