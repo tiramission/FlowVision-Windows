@@ -348,6 +348,12 @@ func (a *App) tabStrip(c *ui.Context) {
 		if a.scrollActiveTab {
 			a.scrollActiveTab = false
 		}
+		// The native menu is keyboard-only once the app draws its own title
+		// bar, so keep the update command visible in the title bar.
+		components.Button(c, "检查更新", components.ButtonGhost).
+			Height(28).Padding(0, 9).Radius(7).
+			Tooltip("从 GitHub Release 检查签名更新").
+			OnClick(a.checkForUpdates)
 		components.IconButton(c, lucide.Plus(), "新建标签页 (Ctrl+T)", components.IconButtonToolbar).
 			OnClick(func() { a.later(func() { a.newTab("") }) })
 	})

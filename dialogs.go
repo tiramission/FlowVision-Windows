@@ -100,6 +100,14 @@ func (a *App) settingsModal(c *ui.Context) {
 					}
 
 					ui.Divider(c)
+					components.Text(c, "软件更新").FontSize(11).Bold().TextColor(th.Text.Alpha(.72))
+					components.Text(c, fmt.Sprintf("当前版本 v%s · 从 GitHub Release 获取签名更新", appVersion())).
+						FontSize(11).TextColor(th.TextMuted)
+					if components.Button(c, "检查更新", components.ButtonSecondary).Clicked() {
+						a.checkForUpdates()
+					}
+
+					ui.Divider(c)
 					components.Text(c, "缩略图缓存").FontSize(11).Bold().TextColor(th.Text.Alpha(.72))
 					components.Text(c, fmt.Sprintf("%d 个文件 · %s", a.cacheInfo.Files, (MediaSvc{}).FormatSize(a.cacheInfo.Bytes))).
 						FontSize(11).TextColor(th.TextMuted)
@@ -346,7 +354,10 @@ func (a *App) aboutModal(c *ui.Context) {
 			components.Text(c, "Windows 重写：Go 后端与 MyGo 原生 ui 包，Onevra 提供主题与控件；不使用 WebView2、HTML 或 JavaScript。").
 				FontSize(10.5).TextColor(th.TextMuted)
 			components.Text(c, "许可证：GPL-3.0").FontSize(10.5)
-			ui.Row(c).Justify(ui.End).Children(func() {
+			ui.Row(c).Justify(ui.SpaceBetween).Children(func() {
+				if components.Button(c, "检查更新", components.ButtonSecondary).Clicked() {
+					a.checkForUpdates()
+				}
 				if components.Button(c, "关闭", components.ButtonPrimary).Clicked() {
 					a.showAbout = false
 				}

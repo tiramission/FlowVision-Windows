@@ -5,8 +5,8 @@
 - 上游项目：https://github.com/netdcy/FlowVision （GPL-3.0）
 - 本移植版：GPL-3.0，见 `LICENSE`；第三方组件许可见 `THIRD_PARTY_NOTICES.md`
 - 技术栈：Go 1.27+ · [MyGo](https://github.com/egoist/mygo) v0.10.0 · [Onevra](https://oneo-me.github.io/onevra/) v0.2026.18 · `github.com/oneo-me/onevra/source`
-- 当前版本：**1.2.2（Onevra 原生 UI / 自绘标题栏 / 签名自动更新）**
-- 历史版本：1.2.1 移除系统标题栏；1.2.0 接入 Onevra；1.1.0 是 MyGo 原生 UI 基线；1.0.0 是 Go + WebView2 的第一阶段移植，仍保留在 Git 历史与 GitHub Release 中
+- 当前版本：**1.2.3（Onevra 原生 UI / 自绘标题栏 / 签名自动更新）**
+- 历史版本：1.2.2 接入签名自动更新；1.2.1 移除系统标题栏；1.2.0 接入 Onevra；1.1.0 是 MyGo 原生 UI 基线；1.0.0 是 Go + WebView2 的第一阶段移植，仍保留在 Git 历史与 GitHub Release 中
 
 ---
 
@@ -20,7 +20,9 @@
 
 1.2.1 去掉系统标题栏和系统窗口按钮，窗口顶部改为 48 DIP 的 Onevra 自绘标题栏：左侧品牌，中部标签页与新建按钮，右侧自绘的最小化、最大化/还原、关闭。标题栏可拖动、双击最大化，最大化按钮保留 Windows 11 snap layouts；窗口仍保留系统缩放边缘。
 
-1.2.2 接入 MyGo 的签名更新链路：`mygo.json` 配置公开的 GitHub 更新源与 Ed25519 公钥，应用使用 `native` updater 在后台检查、展示发布说明、下载和重启；“帮助 → 检查更新…”可手动检查。发布由 GitHub Actions 在 `v*` 标签上构建安装包、更新归档与清单并上传，私钥只存在 GitHub secret 和本机备份中。
+1.2.2 接入 MyGo 的签名更新链路：`mygo.json` 配置公开的 GitHub 更新源与 Ed25519 公钥，应用使用 `native` updater 在后台检查、展示发布说明、下载和重启。发布由 GitHub Actions 在 `v*` 标签上构建安装包、更新归档与清单并上传，私钥只存在 GitHub secret 和本机备份中。
+
+1.2.3 修复自绘标题栏后看不到更新入口的问题：原生菜单栏只能通过 Alt 调出，因此把“检查更新”常驻在标题栏；设置页新增“软件更新”区块，关于窗口也提供检查更新按钮。
 
 构建 tag `mygo_nowebview` 让 MyGo 进入 native-only 模式。**纯 Go 构建必须带这个 tag**，否则 MyGo 会按默认 WebView 模式编译。
 
@@ -127,7 +129,7 @@ go build -tags "debug mygo_nowebview" -o fvdebug.exe .
 - **Go 测试 39 个全部通过**：`go test -tags mygo_nowebview .`。覆盖目录扫描/自然排序/递归/隐藏、同级导航、缩略图缓存与并发生成、EXIF、Settings 合并、Windows 保留名、文件操作，以及原生布局、Onevra 侧栏、Ctrl+F 搜索、标签关闭、搜索过滤、网格命中/键盘导航、右键菜单、设置弹窗、查看器浮层、自绘标题栏控件与窄窗口等 UI 测试。
 - **真实窗口回归**：debug 构建的本地控制端点 + `CapturePage` 截图 + 真实鼠标点击，验证了 1320×850 与 760×500 布局、深/浅主题、空目录、11 项瀑布流、160 项滚动与滚动恢复、多标签溢出、查看器缩放/旋转/翻页/信息、设置滚动、单实例路径转发、同级/返回导航、搜索过滤、重命名/新建/回收站删除、菜单快捷键（`Ctrl+T/W/B/R/=/−`）与浏览键（`W/S/A/D`、`F5`）。
 - **标题栏回归**：DPI-aware 实际窗口截图确认无系统标题栏；真实点击最小化（`IsIconic=true`）、最大化/还原（`maximized` 状态与客户区尺寸同步）、关闭（进程退出）；双击标题栏空白区最大化；拖动标题栏移动窗口；760×500 下品牌、标签、新建与三枚窗口按钮均可见可点击。
-- **更新/构建回归**：`go tool mygo build -platform windows/amd64` 成功生成 1.2.2 安装包、签名更新归档和 `update-windows-amd64.json`；MyGo 构建的应用可启动，状态栏显示 v1.2.2，自绘标题栏与窗口控制保持正常。GitHub Actions 发布后还需检查公开的 `releases/latest/download/update-windows-amd64.json`。
+- **更新/构建回归**：`go tool mygo build -platform windows/amd64` 成功生成 1.2.3 安装包、签名更新归档和 `update-windows-amd64.json`；MyGo 构建的应用可启动，状态栏显示 v1.2.3，自绘标题栏、标题栏“检查更新”按钮与窗口控制保持正常。GitHub Actions 发布后还需检查公开的 `releases/latest/download/update-windows-amd64.json`。
 
 ## 八、目录
 
