@@ -2,6 +2,36 @@
 
 全部版本遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的章节格式；更新面板会显示当前版本对应的发布说明。
 
+## [1.4.0] - 2026-11-26
+
+### 变更
+
+- 查看器 2560 预览默认改用 `draw.ApproxBiLinear` 快缩放，保留 `FLOWVISION_VIEWER_SCALER=hq`（CatmullRom）与 `FLOWVISION_VIEWER_PREVIEW=legacy` 两条诊断回退；24 MP 冷开 P50 418 ms、P95 474 ms（旧链路 0.87–1.43 s）。
+- 预览生成不再“先编码 JPEG、再 `ui.DecodeBitmap` 上屏”：未命中直接 `ui.NewBitmap` 上屏，同一份缩放在后台编码 q90 写盘；缓存命中走 JPEG 解码后更新持久 bitmap 槽。查看器只保留一个当前预览纹理，避免连续打开 50 次在 MyGo 纹理缓存里留下 50 张 2560 图。
+- 打开瞬间用网格缩略图占位：`Viewer.Placeholder` 只借不拥有；占位首帧在 6–9 ms 内可见，清晰图到达后替换。
+- 预加载改为当前图完成后再调度：缓存检查移出 `previewMu`，单 worker、96 MB 预算、按字节淘汰、`takeViewerPreload` 转移所有权；preload 跳过当前图，关闭查看器统一释放。已验证 `viewerstep` 命中邻图预加载，状态为 `viewerPreloadHit=true`。
+- 新增悬停预取：左右各 18% 边带、垂直 24%–76%、220 ms 延迟；复用 `ViewerPreload` 总开关，`ViewerPreload=0` 时不布防。
+- 新增按需 1:1 全分辨率：≤2560 直接跳过；≤50 MP 解码原图并替换，单条 256 MB 预算；>50 MP 保持 2560 并提示“原图超过 50MP，只显示 2560 预览”。24 MP 1:1 实测 334 ms、bitmap 91.55 MB、Private 319 MB；50 MP-under 1:1 531 ms、190.7 MB、Private 708 MB；80 MP 预览 660 ms，1:1 正确拒绝。
+- 新增非侵入式单槽 HUD：默认 auto，底部 pill，200 ms 淡出，80 ms 合并缩放事件，不堆叠、不抢焦点；设置 → 控制新增“查看器状态提示”（off/auto/always），环境变量 `FLOWVISION_VIEWER_HUD` 用于诊断。加载超 500 ms 才显示“正在载入大图…”，占位阶段不显示假 100%。
+- 关闭查看器时停止加载/全屏/HUD timer，释放 fullres 与 viewer-owned bitmap，再 `debug.FreeOSMemory` 回收大图临时堆；连续 50 次打开/关闭 Private 184→211 MB，增长 26 MB，关闭后回落至 157 MB。
+- 新增/更新 `docs/查看器加载性能优化计划.md`、`docs/查看器加载性能基线.md`、`docs/查看器加载性能报告.md`、`tools/bench_viewer.ps1` 与基准 JSON。
+
+### 测试
+
+- 全量 `go test ./...` 通过（约 35 s）；新增查看器快/慢路径、缓存、preload 预算与当前图跳过、1:1 边界、HUD 模式、悬停边带、设置页滚动到 HUD 选项、真实照片质量与 bitmap 槽复用测试。
+- 23 张真实照片基准：`BenchmarkViewerPreviewCold` 352.6 ms/张，`BenchmarkViewerPreviewWarm` 53.9 ms/张；应用层 10 次冷开 P50 418 ms/P95 474 ms，热缓存 10 次 P50 72 ms/P95 80 ms。
+- 真实照片质量门禁：wm-01 最低 PSNR 38.06 dB，5 张均 ≥38 dB；MAE 1.55/255，比计划目标 1.5 高 0.05，作为已知偏差记录；合成渐变 PSNR 31.9 dB，满足 ≥30 dB。
+- 50 次开关：10 次采样 Private 184.4→210.6 MB，最大 215.2 MB，增长 26.2 MB（目标 ≤30 MB）；关闭后 156.6 MB，preload/fullres 归零。
+- debug 实机截图覆盖占位首帧、1:1、80 MP 限制、auto HUD、缩放 HUD 和设置页 HUD 选项。
+
+### 已知限制
+
+- 真实照片 MAE 1.55/255 高于计划目标 1.5/255，PSNR 门禁通过；未做逐张并排原尺寸视觉审查。
+- 50 MP/80 MP 边界图是合成图；真实相机语料为 15 张 Wikimedia 照片 + 8 张 Picsum，未覆盖真实 48 MP 相机样张。
+- 10 分钟沉浸 HUD 长跑和悬停预取的物理指针端到端未在本次验收中完成；HUD 单槽/合并/淡出与悬停边带由单元测试覆盖。
+- `go vet ./...` 仍只报告 `thumb_wic_windows.go` 既有的两条 `unsafe.Pointer` 告警，本次未处理。
+- 1:1 只保留单条 fullres，没有多图 LRU；计划中的 128 MB preload 预算实际采用更保守的 96 MB。
+
 ## [1.3.0] - 2026-11-26
 
 ### 变更

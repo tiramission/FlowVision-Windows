@@ -234,8 +234,8 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 						},
 						{
 							ID: "viewer-preload", Title: "预加载相邻图片",
-							Description: "打开图片时预先解码前后各若干张，切换更快；0 关闭",
-							Keywords:    []string{"preload", "cache", "预加载", "缓存", "相邻"},
+							Description: "打开图片时预先解码前后各若干张，切换更快；0 关闭，同时关闭悬停预取",
+							Keywords:    []string{"preload", "cache", "预加载", "缓存", "相邻", "悬停"},
 							Leading:     settingsIcon(lucide.Images()),
 							Stacked:     true,
 							Build: func(c *ui.Context) {
@@ -247,6 +247,15 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 									ui.Spacer(c)
 									components.Text(c, "默认 2 张").FontSize(10).TextColor(th.TextMuted)
 								})
+							},
+						},
+						{
+							ID: "viewer-hud", Title: "查看器状态提示",
+							Description: "切图、加载、缩放、边界等瞬时状态；不堆叠，不挡画面中心",
+							Keywords:    []string{"hud", "toast", "status", "状态", "提示", "缩放"},
+							Leading:     settingsIcon(lucide.Sparkles()),
+							Build: func(c *ui.Context) {
+								a.viewerHUDSetting(c)
 							},
 						},
 					},
@@ -364,6 +373,34 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 				},
 			},
 		},
+	}
+}
+
+func (a *App) viewerHUDSetting(c *ui.Context) {
+	sel := components.Select(c.Key("settings-viewer-hud"), &a.draft.ViewerHUD)
+	sel.Trigger.Width(180).Label("查看器状态提示")
+	sel.Trigger.Children(func() {
+		components.Text(c, viewerHUDName(a.draft.ViewerHUD)).SingleLine()
+	})
+	sel.Popup(func(panel ui.Element) {
+		for _, key := range []string{"off", "auto", "always"} {
+			key := key
+			item := sel.Item(key)
+			item.Children(func() {
+				components.Text(c, viewerHUDName(key)).SingleLine()
+			})
+		}
+	})
+}
+
+func viewerHUDName(key string) string {
+	switch key {
+	case "off":
+		return "关闭"
+	case "always":
+		return "始终显示"
+	default:
+		return "自动（推荐）"
 	}
 }
 

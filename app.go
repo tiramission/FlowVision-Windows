@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"image"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -130,22 +132,36 @@ func (t *Tab) selectedOne() *Item {
 
 // Viewer is the media viewer shown inside the host window.
 type Viewer struct {
-	Open          bool
-	Item          *Item
-	Index         int
-	Loading       bool
-	Err           string
-	Bitmap        *ui.Bitmap
-	Zoom          float32
-	Angle         float32
-	PanX          float32
-	PanY          float32
-	ShowInfo      bool
-	Immersive     bool
-	ChromeVisible bool
-	ChromeUntil   time.Time
-	CursorVisible bool
-	CursorUntil   time.Time
+	Open    bool
+	Item    *Item
+	Index   int
+	Loading bool
+	Err     string
+	Bitmap  *ui.Bitmap
+	// Placeholder is borrowed from the grid thumbnail cache. It is drawn while
+	// the real preview is still decoding and must never be released here.
+	Placeholder *ui.Bitmap
+	// BitmapOwned marks a bitmap this viewer created (currently only the 1:1
+	// full-resolution image). Preload-cache bitmaps stay owned by that cache.
+	BitmapOwned        bool
+	FullResReady       bool
+	FullResLoading     bool
+	FullResUnsupported bool
+	OneToOne           bool
+	LoadStarted        time.Time
+	Notice             viewerNotice
+	NoticeKey          string
+	NoticeAt           time.Time
+	Zoom               float32
+	Angle              float32
+	PanX               float32
+	PanY               float32
+	ShowInfo           bool
+	Immersive          bool
+	ChromeVisible      bool
+	ChromeUntil        time.Time
+	CursorVisible      bool
+	CursorUntil        time.Time
 	// CursorX and CursorY track the physical pointer between frames, so a
 	// pointer moving over the video layer wakes the cursor even when the
 	// video element, rather than the canvas, receives the motion.
@@ -254,6 +270,19 @@ type App struct {
 	viewerPreloadWorker  int
 	viewerPreloadEpoch   int
 	viewerPreloadMu      sync.Mutex
+	viewerPreloadBytes   int64
+
+	viewerStats       viewerLoadStats
+	viewerSlot        *ui.Bitmap
+	viewerFullRes     *viewerFullResEntry
+	viewerFullResKey  string
+	viewerSlowTimer   *time.Timer
+	viewerFullTimer   *time.Timer
+	viewerNoticeTimer *time.Timer
+
+	hoverTimer *time.Timer
+	hoverKey   string
+	hoverToken int
 
 	themeDetected bool
 	systemDark    bool
@@ -1197,9 +1226,22 @@ func (a *App) loadViewerMedia(it *Item) {
 	a.viewer.Gen = a.viewerGen
 	gen := a.viewer.Gen
 	a.startViewerChromeTicker(gen)
+	a.clearViewerHover()
+	a.stopViewerLoadTimers()
+	a.clearViewerFullRes()
+	a.releaseViewerOwnedBitmap()
+	a.viewerStats = viewerLoadStats{}
 	a.viewer.Loading = true
 	a.viewer.Err = ""
 	a.viewer.Bitmap = nil
+	a.viewer.BitmapOwned = false
+	a.viewer.Placeholder = a.viewerPlaceholder(it)
+	a.viewer.FullResReady = false
+	a.viewer.FullResLoading = false
+	a.viewer.FullResUnsupported = false
+	a.viewer.OneToOne = false
+	a.viewer.Notice = viewerNotice{}
+	a.viewer.LoadStarted = time.Now()
 	a.viewer.SeekSeconds = 0
 	a.viewer.SeekUntil = time.Time{}
 	a.viewer.DraggingSeek = false
@@ -1209,6 +1251,10 @@ func (a *App) loadViewerMedia(it *Item) {
 		a.viewer.Player.Close()
 		a.viewer.Player = nil
 	}
+	if a.viewer.Placeholder != nil {
+		a.viewerStats.PlaceholderHit = true
+	}
+	a.startViewerSlowNotice(gen, "正在载入大图…", viewerNoticeLoadDelay)
 	if it.Kind == "video" {
 		// Read the container before Media Foundation opens the file. Some
 		// decoders keep an exclusive handle while playing, which would make a
@@ -1235,7 +1281,6 @@ func (a *App) loadViewerMedia(it *Item) {
 			}()
 		}
 	}
-	thisFramePreloaded := false
 	switch it.Kind {
 	case "video":
 		player, err := mvideo.Open(it.Path)
@@ -1246,9 +1291,13 @@ func (a *App) loadViewerMedia(it *Item) {
 				}
 				return
 			}
+			a.stopViewerLoadTimers()
 			a.viewer.Loading = false
+			a.viewer.Placeholder = nil
+			a.viewer.Notice = viewerNotice{}
 			if err != nil {
 				a.viewer.Err = err.Error()
+				a.notifyViewerError(err.Error())
 			} else {
 				a.viewer.Player = player
 				player.SetLoop(a.settings.LoopVideo)
@@ -1263,31 +1312,60 @@ func (a *App) loadViewerMedia(it *Item) {
 		})
 	default:
 		if bmp := a.takeViewerPreload(it); bmp != nil {
+			a.stopViewerLoadTimers()
 			a.viewer.Loading = false
 			a.viewer.Bitmap = bmp
-			thisFramePreloaded = true
+			a.viewer.BitmapOwned = true
+			a.viewer.Placeholder = nil
+			a.viewer.Notice = viewerNotice{}
+			a.viewerStats.PreloadHit = true
+			a.viewerStats.LoadMs = time.Since(a.viewer.LoadStarted).Milliseconds()
+			a.scheduleViewerPreload()
+			a.refresh()
 			break
 		}
 		go func() {
-			bmp, err := decodeViewerImage(it)
+			res, err := loadViewerPreviewData(it)
 			a.update(func() {
 				if a.viewer.Gen != gen || a.viewer.Item != it {
+					if res != nil && res.Bmp != nil {
+						res.Bmp.ReleasePixels()
+					}
 					return
 				}
+				a.stopViewerLoadTimers()
 				a.viewer.Loading = false
+				a.viewer.Notice = viewerNotice{}
 				if err != nil {
+					if res != nil && res.Bmp != nil {
+						res.Bmp.ReleasePixels()
+					}
 					a.viewer.Err = err.Error()
-				} else {
-					a.viewer.Bitmap = bmp
-					a.storeViewerPreload(it, bmp)
+					a.notifyViewerError(err.Error())
+					a.refresh()
+					return
 				}
+				bitmapMs := res.BitmapMs
+				if res.Img != nil {
+					bitmapMs = a.attachViewerPreview(res.Img)
+				} else {
+					a.viewer.Bitmap = res.Bmp
+					a.viewer.BitmapOwned = false
+				}
+				a.viewer.Placeholder = nil
+				a.viewerStats.CacheHit = res.CacheHit
+				a.viewerStats.DecodeMs = res.DecodeMs
+				a.viewerStats.ScaleMs = res.ScaleMs
+				a.viewerStats.EncodeMs = res.EncodeMs
+				a.viewerStats.BitmapMs = bitmapMs
+				a.viewerStats.LoadMs = time.Since(a.viewer.LoadStarted).Milliseconds()
+				if res.Bmp != nil {
+					a.storeViewerPreload(it, res.Bmp)
+				}
+				a.scheduleViewerPreload()
 				a.refresh()
 			})
 		}()
-	}
-	a.scheduleViewerPreload()
-	if thisFramePreloaded {
-		a.refresh()
 	}
 }
 
@@ -1370,6 +1448,10 @@ func (a *App) startViewerChromeTicker(gen int) {
 func (a *App) closeViewer() {
 	wasOpen := a.viewer.Open
 	a.stopViewerSideMouseHook()
+	a.stopViewerLoadTimers()
+	a.clearViewerHover()
+	a.clearViewerFullRes()
+	a.releaseViewerOwnedBitmap()
 	a.clearViewerPreloadCache()
 	a.viewerKeysDown = nil
 	if a.viewer.Player != nil {
@@ -1378,8 +1460,38 @@ func (a *App) closeViewer() {
 	}
 	a.viewer = Viewer{}
 	if wasOpen {
+		// A 24MP decode allocates ~100MB in a few short-lived buffers. Go's
+		// pacer otherwise keeps that high-water mark for the next open, which
+		// looks like a leak across fifty open/close cycles on a 4GB machine.
+		// Collect and return the freed pages once the viewer's owner has
+		// dropped every bitmap; closing the viewer is already a transition.
+		debug.FreeOSMemory()
 		a.refresh()
 	}
+}
+
+func (a *App) attachViewerPreview(img image.Image) int64 {
+	start := time.Now()
+	if a.viewerSlot == nil {
+		a.viewerSlot = ui.NewBitmap(img)
+	} else {
+		a.viewerSlot.Update(img)
+	}
+	a.viewer.Bitmap = a.viewerSlot
+	// The app, not the viewer, owns the slot; it survives close/open so MyGo
+	// keeps one GPU texture instead of one per image for 240 frames.
+	a.viewer.BitmapOwned = false
+	return time.Since(start).Milliseconds()
+}
+
+func (a *App) releaseViewerOwnedBitmap() {
+	if a.viewer.BitmapOwned && a.viewer.Bitmap != nil {
+		if a.viewerFullRes == nil || a.viewer.Bitmap != a.viewerFullRes.Bmp {
+			a.viewer.Bitmap.ReleasePixels()
+		}
+	}
+	a.viewer.Bitmap = nil
+	a.viewer.BitmapOwned = false
 }
 
 func (a *App) startVideoTicker(gen int) {
@@ -1525,7 +1637,7 @@ func (a *App) viewerStep(delta int) {
 	a.viewer.Angle = 0
 	a.viewer.PanX = 0
 	a.viewer.PanY = 0
-	a.viewer.Bitmap = nil
+	a.releaseViewerOwnedBitmap()
 	a.loadViewerMedia(it)
 	a.refresh()
 }
@@ -1540,6 +1652,7 @@ func (a *App) viewerFit() {
 	a.viewer.Zoom = 1
 	a.viewer.PanX = 0
 	a.viewer.PanY = 0
+	a.viewer.OneToOne = false
 	a.refresh()
 }
 
@@ -1551,6 +1664,7 @@ func (a *App) viewerReset() {
 	a.viewer.Angle = 0
 	a.viewer.PanX = 0
 	a.viewer.PanY = 0
+	a.viewer.OneToOne = false
 	a.refresh()
 }
 
@@ -1562,6 +1676,7 @@ func (a *App) viewerActualSize() {
 	if a.viewer.Bitmap == nil || a.viewer.Item == nil || a.viewer.Item.Kind != "image" {
 		return
 	}
+	a.requestViewerFullRes(true)
 	bw, bh := a.viewer.Bitmap.Size()
 	w, h := a.viewerCanvasSize(nil)
 	fit := viewerFitScale(bw, bh, a.viewer.Angle, w, h)
@@ -1571,6 +1686,8 @@ func (a *App) viewerActualSize() {
 	a.viewer.Zoom = clampViewerZoom(viewerActualZoom(fit))
 	a.viewer.PanX = 0
 	a.viewer.PanY = 0
+	a.viewer.OneToOne = true
+	a.notifyViewer("zoom", "100%", viewerNoticeInfo, 1200*time.Millisecond)
 	a.refresh()
 }
 
@@ -1581,6 +1698,8 @@ func (a *App) viewerActualSizeAt(x, y, w, h float32) {
 	if a.viewer.Bitmap == nil || a.viewer.Item == nil || a.viewer.Item.Kind != "image" {
 		return
 	}
+	a.requestViewerFullRes(true)
+	a.viewer.OneToOne = true
 	bw, bh := a.viewer.Bitmap.Size()
 	if w <= 0 || h <= 0 {
 		w, h = a.viewerCanvasSize(nil)
@@ -1649,7 +1768,13 @@ func (a *App) viewerZoom(delta float32) {
 	if a.viewer.Item == nil || a.viewer.Item.Kind != "image" {
 		return
 	}
+	before := a.viewer.Zoom
 	a.viewer.Zoom = clampViewerZoom(a.viewer.Zoom * delta)
+	if a.viewer.Zoom != before {
+		a.viewer.OneToOne = false
+	}
+	a.maybeRequestViewerFullRes()
+	a.notifyViewer("zoom", fmt.Sprintf("%d%%", a.viewerPercent(nil)), viewerNoticeInfo, 1200*time.Millisecond)
 	a.refresh()
 }
 
@@ -1657,8 +1782,14 @@ func (a *App) viewerZoomAt(delta, x, y, w, h float32) {
 	if a.viewer.Item == nil || a.viewer.Item.Kind != "image" {
 		return
 	}
+	before := a.viewer.Zoom
 	a.viewer.Zoom, a.viewer.PanX, a.viewer.PanY = viewerZoomAtPoint(
 		a.viewer.Zoom, a.viewer.PanX, a.viewer.PanY, delta, x, y, w, h)
+	if a.viewer.Zoom != before {
+		a.viewer.OneToOne = false
+	}
+	a.maybeRequestViewerFullRes()
+	a.notifyViewer("zoom", fmt.Sprintf("%d%%", a.viewerPercent(nil)), viewerNoticeInfo, 1200*time.Millisecond)
 	a.refresh()
 }
 

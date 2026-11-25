@@ -6,7 +6,7 @@
 
 把本地图片和视频变成可浏览、可沉浸查看的瀑布流。FlowVision for Windows 是 [netdcy/FlowVision](https://github.com/netdcy/FlowVision)（macOS，Swift/AppKit）的 Windows 重写版：**Go + MyGo 原生 `ui` + Onevra**，不使用 WebView2、HTML 或 JavaScript，也不需要 cgo、Swift 或 Xcode。
 
-当前版本 **1.3.0**：缩略图链路改为 WIC/Shell 原生解码，24 MP 大图单张从约 71–75 ms 降到约 33–40 ms，300 张目录整体吞吐约 2.1x，峰值堆从约 419 MB 降到 15 MB；EXIF 内嵌缩略图先出 160 px 预览，再替换为最终图；缓存增加 256 MB 字节上限和近似 LRU，滚动刷新合并到下一帧。
+当前版本 **1.4.0**：查看器 2560 预览改用 `ApproxBiLinear` 快缩放并直接上屏，24 MP 冷开 P50 从 0.87–1.43 s 降到 418 ms，热缓存 P50 72 ms；打开先用网格缩略图占位（6–9 ms 可见），邻图预加载、悬停预取、按需 1:1 全分辨率（≤50 MP）和非侵入式 HUD 全部落地；连续 50 次开关内存增长 26 MB。
 
 ## 下载与安装
 
@@ -28,13 +28,13 @@ irm https://github.com/tiramission/FlowVision-Windows/releases/latest/download/i
 
 - **瀑布流浏览**：按窗口宽度和缩略图尺寸计算列数，按图片宽高比分配最短列；只绘制可见卡片、只请求可见缩略图，大目录也能流畅滚动。
 - **文件夹与标签页**：子文件夹作为卡片进入；名称、日期、大小、类型排序；递归模式生成纯媒体墙；多标签页各自保存路径、历史、排序、搜索、选中和滚动位置。
-- **图片查看器**：适应窗口、实际大小、缩放、旋转、拖动平移；长按左键按鼠标指针位置缩放到 100%，已到 100% 不再放大；长按右键恢复适应窗口并固定居中，不受指针位置影响；鼠标侧键切换上一张/下一张，单击和长按可分别配置；`C` 或控制栏准星按钮一键把图片移回画布中心；滚轮和触控板捏合缩放以鼠标指针位置为锚点；`100%` 是真正的 1:1 像素比。
+- **图片查看器**：默认打开 2560 px 快速预览，打开瞬间先用网格缩略图占位；支持按需 1:1 全分辨率（≤50 MP，超过 50 MP 明确提示）；适应窗口、实际大小、缩放、旋转、拖动平移；长按左键按鼠标指针位置缩放到 100%，已到 100% 不再放大；长按右键恢复适应窗口并固定居中，不受指针位置影响；鼠标侧键切换上一张/下一张，单击和长按可分别配置；`C` 或控制栏准星按钮一键把图片移回画布中心；滚轮和触控板捏合缩放以鼠标指针位置为锚点；`100%` 是真正的 1:1 像素比。查看器使用底部单槽状态提示，不堆叠、不遮挡画面中心，可在设置里切换 off/auto/always。
 - **视频查看器**：原生解码与播放，支持拖动进度、±10 秒、0.5×–2× 倍速、静音和循环；鼠标侧键同样可切换上一个/下一个媒体；信息面板显示分辨率、帧率与随播放位置变化的实时码率；沉浸时光标隐藏后，在视频画面上移动鼠标也会立即恢复。
 - **主窗口最大化与全屏**：自绘标题栏把最大化/还原和全屏/退出全屏分开，`F11` 切换全屏。最大化遵循系统工作区，全屏覆盖整个显示器；两种模式互不串用。
 - **查看器沉浸**：查看器打开后只在主窗口内铺满画布，不再改变主窗口最大化/全屏状态。沉浸时标题栏、控制栏和信息栏退出布局，只有鼠标进入顶部或底部 64 DIP 边缘区域才浮出顶部/底部控件，离开边缘 2.5 秒后隐藏；`F11` 在查看器内切换沉浸，关闭查看器不会改变主窗口状态。
 - **独立光标计时**：查看器沉浸时鼠标静止 2.5 秒才隐藏，移动、点击、滚轮或缩放都会立即恢复；浮层显示/隐藏不再直接控制指针。
 - **快捷键帮助**：`F1` 打开分类帮助，可按全部、浏览、图片查看器、视频与窗口筛选；快捷键按场景分组为卡片，并显示条目数。
-- **侧键与预加载**：设置 → 控制里为查看器的“上一张 / 下一张”分别录制单击和长按快捷键，物理侧键可直接按下识别；查看器可预加载前后各若干张图片（默认 2 张）。
+- **侧键与预加载**：设置 → 控制里为查看器的“上一张 / 下一张”分别录制单击和长按快捷键，物理侧键可直接按下识别；查看器可预加载前后各若干张图片（默认 2 张，96 MB 预算）；鼠标在左右边带停留 220 ms 会优先预取该方向相邻图片，`ViewerPreload=0` 时同步关闭。
 - **文件操作**：回收站删除、永久删除、重命名、新建文件夹、资源管理器定位、默认程序打开、复制路径；右键菜单与键盘操作并存。
 - **原生界面**：Onevra 的暖白/暖黑主题、陶土色强调色、Sidebar、IconButton、TextBox、Switch、Badge 与 Lucide 矢量图标；照片网格由 Go 侧的 `ui.Box.Draw` 虚拟化绘制。
 - **签名更新**：MyGo `Updater` 校验 Ed25519 签名，支持增量补丁；应用内更新面板负责检查、显示中文发布说明、下载进度、安装与重启，不再使用 MyGo 自带更新窗口。
@@ -56,6 +56,7 @@ irm https://github.com/tiramission/FlowVision-Windows/releases/latest/download/i
 - **纯 Go 原生窗口**：`ui.View` 构建整个界面；构建 tag `mygo_nowebview` 让 MyGo 进入 native-only 模式，避免引入 WebView 运行时。
 - **虚拟化网格**：`grid.go` 只对可见区域绘制卡片、缩略图、文件名、选中描边和悬停阴影，不为几千张图片创建控件。
 - **缩略图管线**：Windows Imaging Component（WIC）优先读取 JPEG/PNG/TIFF/BMP/GIF/WebP，内嵌缩略图或 `IWICBitmapScaler`（HighQualityCubic）缩放到目标尺寸；HEIC/RAW/ICO 优先系统 Shell provider，普通 JPEG 不依赖 Shell；WIC/Shell 失败自动回退纯 Go。EXIF IFD1 内嵌缩略图先发 160 px preview，最终图到达后替换；磁盘 JPEG q84、`v2` 后端版本、420 条目 + 256 MB 字节双上限、近似 LRU；透明图预乘后合成到中性底色。
+- **查看器管线**：最长边 2560、`ApproxBiLinear` 快缩放、`ui.NewBitmap` 直接上屏、JPEG q90 异步写缓存；缓存命中走 JPEG 解码后更新一个持久 bitmap 槽，避免每次打开都新建 17 MB 纹理。预加载单 worker、96 MB 字节预算、当前图跳过；1:1 只在 ≤50 MP 的单图上按需解码，256 MB 单条预算，关闭/切图立即释放并回收大图临时堆。
 - **异步媒体信息**：尺寸、EXIF、MP4/MOV sample table、帧率和滚动码率在后台读取；视频先取容器 metadata，再启动播放器，避免文件句柄冲突。
 - **自绘窗口**：`TitleBarHidden` + `HideWindowButtons`，48 DIP 标题栏承担拖动、双击最大化、最小化/最大化/全屏/关闭和 Windows 11 snap layouts；全屏状态由窗口自身维护。
 - **更新链路**：`mygo.json` 配置 GitHub 更新源与公钥；`mygo.Updater.Check` 返回新版本，`Update.Install` 下载并校验签名归档或增量补丁，成功后 `mygo.App.Relaunch()`。
@@ -106,6 +107,17 @@ pwsh tools/bench_thumb.ps1 -Go "C:\path\to\go.exe" -Backend go
 
 可以用 `FLOWVISION_THUMB_BACKEND=go|wic|shell|embedded|dct` 单独切换后端；正式应用默认 `auto`。
 
+查看器性能基准需要先构建 debug 版本；脚本会启动临时实例、记录分项与内存，并写出 JSON：
+
+```powershell
+pwsh tools/bench_viewer.ps1 -Go "C:\path\to\go.exe" -Runs 10 -Out docs\viewer-bench-app.json
+pwsh tools/bench_viewer.ps1 -Go "C:\path\to\go.exe" -Warm -Runs 10 -Out docs\viewer-bench-app-warm.json
+pwsh tools/bench_viewer.ps1 -Runs 50 -Out docs\viewer-bench-app-cycles.json
+go test -run '^$' -bench BenchmarkViewerPreview -benchtime=20x -count=1 .
+```
+
+`FLOWVISION_VIEWER_PREVIEW=fast|hq|legacy`、`FLOWVISION_VIEWER_SCALER=fast|hq`、`FLOWVISION_VIEWER_CACHE=off`、`FLOWVISION_VIEWER_HUD=off|auto|always|debug` 可用于诊断；`FLOWVISION_VIEWER_PRELOAD=off` 只用于基准隔离。
+
 测试覆盖目录扫描、自然排序、递归与隐藏文件、缩略图缓存与并发生成、EXIF、设置合并、Windows 保留名、文件操作、文件夹卡片、查看器翻页与实际缩放比、**指针锚定缩放**、**长按左/右键缩放与拖动取消**、**侧键翻页**、**沉浸边缘命中**、**指针移动恢复光标**、**独立光标计时**、视频控件与码率、自绘标题栏、Onevra 设置页和 ffmpeg 隐藏窗口进程。
 
 真实窗口回归通过 debug 构建的本地端点完成，覆盖 1320×850 与 760×500 布局、深/浅主题、瀑布流滚动与恢复、多标签、主窗口最大化/全屏、查看器沉浸、设置、重命名/新建/回收站、菜单快捷键和窗口控制。
@@ -119,7 +131,7 @@ pwsh tools/bench_thumb.ps1 -Go "C:\path\to\go.exe" -Backend go
 | HEIC / AVIF / RAW | 缩略图：有系统 codec 时走 WIC/Shell；当前机器无 HEIC codec 时显示占位。查看器仍主要依赖 Go 解码，无法预览时交系统关联程序打开 |
 | 视频缩略图 | 依赖外部 `ffmpeg.exe`（PATH 或 exe 同级）；缺失时显示渐变占位图 |
 | 视频播放 | 依赖本机解码器；部分 MKV/HEVC 只能外部打开 |
-| 超大图 | 超过 3,000 万像素时使用 2,560 px 预览，避免解码卡顿 |
+| 超大图 | 默认显示最长边 2,560 px 预览；>80 MP 拒绝生成预览；1:1 只对 ≤50 MP 的单图按需启用，>50 MP 显示预览并在 HUD/信息面板提示 |
 | 右键八向手势 | 未迁移；右键用于原生上下文菜单 |
 | 系统主题实时跟随 | 启动时检测系统深浅色；运行中可在设置里立即切换主题 |
 
@@ -131,9 +143,14 @@ app.go           App/Tab/Viewer 状态、异步加载、历史、选择、设置
 view.go          侧栏、标签栏、工具栏、内容区、状态栏、浏览快捷键
 grid.go          自绘虚拟瀑布流、卡片、命中测试、选择、右键菜单、拖放
 viewer.go        图片/视频查看器、主窗口内沉浸浮层、指针锚定缩放、长按缩放与侧键翻页
+viewer_preview.go 查看器 2560 预览生成、快/慢缩放、缩略图占位、磁盘缓存
+viewer_fullres.go 1:1 全分辨率按需解码、50 MP/256 MB 门禁与释放
+viewer_preload.go 邻图预加载、字节预算、所有权转移
+viewer_hover.go  左右边带悬停预取
+viewer_hud.go    单槽状态提示与 debug HUD
+settings_ui.go   Onevra 设置分类、搜索、控件与保存
 update_ui.go     应用内中文更新面板、检查/下载/安装状态
 dialogs.go       重命名、新建、删除确认、帮助、关于
-settings_ui.go   Onevra 设置分类、搜索、控件与保存
 menu.go          原生菜单与更新入口
 dir.go           目录扫描、排序、导航
 thumb.go         缩略图生成、磁盘缓存、ffmpeg 取帧、缓存淘汰
@@ -155,6 +172,9 @@ docs/            移植说明与发布流程
 - 版本历史：[`CHANGELOG.md`](CHANGELOG.md)
 - 缩略图性能报告：[`docs/缩略图性能报告.md`](docs/缩略图性能报告.md)
 - 缩略图基线：[`docs/缩略图性能基线.md`](docs/缩略图性能基线.md)
+- 查看器性能报告：[`docs/查看器加载性能报告.md`](docs/查看器加载性能报告.md)
+- 查看器性能基线：[`docs/查看器加载性能基线.md`](docs/查看器加载性能基线.md)
+- 查看器优化计划：[`docs/查看器加载性能优化计划.md`](docs/查看器加载性能优化计划.md)
 - 后端 spike：[`docs/缩略图WIC-spike.md`](docs/缩略图WIC-spike.md)
 - 测试语料说明：[`docs/缩略图测试语料说明.md`](docs/缩略图测试语料说明.md)
 - 移植说明：[`docs/移植说明.md`](docs/移植说明.md)

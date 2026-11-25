@@ -3,13 +3,18 @@ package main
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 )
 
+const viewerPreloadBudget = 96 << 20
+
 type viewerPreloadEntry struct {
-	Bmp *ui.Bitmap
-	Err string
+	Bmp   *ui.Bitmap
+	Bytes int64
+	At    int64
+	Err   string
 }
 
 type viewerPreloadJob struct {
@@ -26,16 +31,11 @@ func viewerPreloadKey(it *Item) string {
 }
 
 func decodeViewerImage(it *Item) (*ui.Bitmap, error) {
-	data, err := previewBytes(it)
-	if err != nil {
-		if raw, rerr := os.ReadFile(it.Path); rerr == nil {
-			data, err = raw, nil
-		}
-	}
+	res, err := loadViewerPreview(it)
 	if err != nil {
 		return nil, err
 	}
-	return ui.DecodeBitmap(data)
+	return res.Bmp, nil
 }
 
 func (a *App) viewerPreloadItems(n int) []*Item {
@@ -71,6 +71,9 @@ func (a *App) scheduleViewerPreload() {
 		return
 	}
 	n := a.settings.ViewerPreload
+	if os.Getenv("FLOWVISION_VIEWER_PRELOAD") == "off" {
+		n = 0
+	}
 	if n < 0 {
 		n = 0
 	}
@@ -79,8 +82,10 @@ func (a *App) scheduleViewerPreload() {
 	}
 	items := a.viewerPreloadItems(n)
 	desired := map[string]bool{}
+	currentKey := ""
 	if a.viewer.Item.Kind == "image" {
-		desired[viewerPreloadKey(a.viewer.Item)] = true
+		currentKey = viewerPreloadKey(a.viewer.Item)
+		desired[currentKey] = true
 	}
 	for _, it := range items {
 		desired[viewerPreloadKey(it)] = true
@@ -94,8 +99,9 @@ func (a *App) scheduleViewerPreload() {
 		a.viewerPreloadLoading = map[string]bool{}
 	}
 	a.viewerPreloadDesired = desired
-	for key := range a.viewerPreload {
+	for key, entry := range a.viewerPreload {
 		if !desired[key] {
+			a.releaseViewerPreloadEntryLocked(entry)
 			delete(a.viewerPreload, key)
 		}
 	}
@@ -112,7 +118,7 @@ func (a *App) scheduleViewerPreload() {
 	}
 	for _, it := range items {
 		key := viewerPreloadKey(it)
-		if a.viewerPreload[key] != nil || a.viewerPreloadLoading[key] || keep[key] {
+		if key == currentKey || a.viewerPreload[key] != nil || a.viewerPreloadLoading[key] || keep[key] {
 			continue
 		}
 		keep[key] = true
@@ -125,6 +131,7 @@ func (a *App) scheduleViewerPreload() {
 		start = true
 	}
 	epoch := a.viewerPreloadEpoch
+	a.pruneViewerPreloadLocked(currentKey)
 	a.viewerPreloadMu.Unlock()
 
 	if start {
@@ -170,7 +177,15 @@ func (a *App) runViewerPreloadWorker(epoch int) {
 			if a.viewerPreload == nil {
 				a.viewerPreload = map[string]*viewerPreloadEntry{}
 			}
-			a.viewerPreload[job.Key] = &viewerPreloadEntry{Bmp: bmp}
+			if old := a.viewerPreload[job.Key]; old != nil {
+				a.releaseViewerPreloadEntryLocked(old)
+			}
+			entry := &viewerPreloadEntry{Bmp: bmp, Bytes: viewerBitmapBytes(bmp), At: time.Now().UnixNano()}
+			a.viewerPreload[job.Key] = entry
+			a.viewerPreloadBytes += entry.Bytes
+			a.pruneViewerPreloadLocked(viewerPreloadKey(a.viewer.Item))
+		} else if bmp != nil {
+			bmp.ReleasePixels()
 		}
 		a.viewerPreloadMu.Unlock()
 	}
@@ -179,19 +194,31 @@ func (a *App) runViewerPreloadWorker(epoch int) {
 func (a *App) clearViewerPreloadCache() {
 	a.viewerPreloadMu.Lock()
 	a.viewerPreloadEpoch++
+	for _, entry := range a.viewerPreload {
+		a.releaseViewerPreloadEntryLocked(entry)
+	}
 	a.viewerPreload = map[string]*viewerPreloadEntry{}
 	a.viewerPreloadLoading = map[string]bool{}
 	a.viewerPreloadDesired = map[string]bool{}
 	a.viewerPreloadQueue = nil
 	a.viewerPreloadWorker = 0
+	a.viewerPreloadBytes = 0
 	a.viewerPreloadMu.Unlock()
 }
 
+// takeViewerPreload removes the entry and transfers its pixels to the viewer.
+// The caller must set Viewer.BitmapOwned so the bitmap is released on close or
+// on the next image.
 func (a *App) takeViewerPreload(it *Item) *ui.Bitmap {
 	key := viewerPreloadKey(it)
 	a.viewerPreloadMu.Lock()
 	defer a.viewerPreloadMu.Unlock()
 	if entry := a.viewerPreload[key]; entry != nil {
+		delete(a.viewerPreload, key)
+		a.viewerPreloadBytes -= entry.Bytes
+		if a.viewerPreloadBytes < 0 {
+			a.viewerPreloadBytes = 0
+		}
 		return entry.Bmp
 	}
 	return nil
@@ -201,12 +228,69 @@ func (a *App) storeViewerPreload(it *Item, bmp *ui.Bitmap) {
 	if it == nil || bmp == nil || !a.viewer.Open {
 		return
 	}
+	// The current image is already drawn and owned by the viewer. Caching the
+	// same bitmap would give it two owners and double-release it on close.
+	if a.viewer.Item != nil && viewerPreloadKey(a.viewer.Item) == viewerPreloadKey(it) {
+		return
+	}
+	key := viewerPreloadKey(it)
 	a.viewerPreloadMu.Lock()
 	if a.viewerPreload == nil {
 		a.viewerPreload = map[string]*viewerPreloadEntry{}
 	}
-	a.viewerPreload[viewerPreloadKey(it)] = &viewerPreloadEntry{Bmp: bmp}
+	if old := a.viewerPreload[key]; old != nil {
+		a.releaseViewerPreloadEntryLocked(old)
+	}
+	entry := &viewerPreloadEntry{Bmp: bmp, Bytes: viewerBitmapBytes(bmp), At: time.Now().UnixNano()}
+	a.viewerPreload[key] = entry
+	a.viewerPreloadBytes += entry.Bytes
+	a.pruneViewerPreloadLocked(viewerPreloadKey(a.viewer.Item))
 	a.viewerPreloadMu.Unlock()
+}
+
+func viewerBitmapBytes(bmp *ui.Bitmap) int64 {
+	if bmp == nil {
+		return 0
+	}
+	w, h := bmp.Size()
+	return int64(w) * int64(h) * 4
+}
+
+func (a *App) releaseViewerPreloadEntryLocked(entry *viewerPreloadEntry) {
+	if entry == nil {
+		return
+	}
+	a.viewerPreloadBytes -= entry.Bytes
+	if a.viewerPreloadBytes < 0 {
+		a.viewerPreloadBytes = 0
+	}
+	if entry.Bmp != nil {
+		entry.Bmp.ReleasePixels()
+	}
+}
+
+func (a *App) pruneViewerPreloadLocked(currentKey string) {
+	if a.viewerPreloadBytes <= viewerPreloadBudget {
+		return
+	}
+	for a.viewerPreloadBytes > viewerPreloadBudget {
+		var oldestKey string
+		var oldestAt int64 = 1<<63 - 1
+		for key, entry := range a.viewerPreload {
+			if key == currentKey {
+				continue
+			}
+			if entry != nil && entry.At < oldestAt {
+				oldestAt = entry.At
+				oldestKey = key
+			}
+		}
+		if oldestKey == "" {
+			break
+		}
+		a.releaseViewerPreloadEntryLocked(a.viewerPreload[oldestKey])
+		delete(a.viewerPreload, oldestKey)
+	}
 }
 
 func (a *App) viewerPreloadCount() int {

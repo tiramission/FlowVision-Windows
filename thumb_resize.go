@@ -229,3 +229,10 @@ func areaSampler(src image.Image) func(x0, y0, x1, y1 int) (r, g, b, a uint8) {
 		return uint8(sr / n), uint8(sg / n), uint8(sb / n), uint8(sa / n)
 	}
 }
+
+// scaleImageFast draws src into dst with an approximate bilinear filter. It is
+// used only for the viewer's 2560 first-frame preview; the grid keeps the
+// higher-quality Catmull-Rom path.
+func scaleImageFast(dst draw.Image, src image.Image) {
+	draw.ApproxBiLinear.Scale(dst, dst.Bounds(), src, src.Bounds(), draw.Over, nil)
+}

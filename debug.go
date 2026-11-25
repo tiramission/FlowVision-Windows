@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -22,77 +23,105 @@ import (
 )
 
 type debugState struct {
-	Version         string   `json:"version"`
-	Active          int      `json:"active"`
-	Path            string   `json:"path"`
-	Name            string   `json:"name"`
-	Loading         bool     `json:"loading"`
-	Err             string   `json:"error,omitempty"`
-	Total           int      `json:"total"`
-	Filtered        int      `json:"filtered"`
-	Query           string   `json:"query"`
-	ScrollY         float32  `json:"scrollY"`
-	Selected        []string `json:"selected"`
-	Tabs            []string `json:"tabs"`
-	ViewerOpen      bool     `json:"viewerOpen"`
-	ViewerIndex     int      `json:"viewerIndex"`
-	ViewerZoom      float32  `json:"viewerZoom"`
-	ViewerPanX      float32  `json:"viewerPanX"`
-	ViewerPanY      float32  `json:"viewerPanY"`
-	ViewerAngle     float32  `json:"viewerAngle"`
-	ViewerInfo      bool     `json:"viewerInfo"`
-	ViewerImmersive bool     `json:"viewerImmersive"`
-	ViewerChrome    bool     `json:"viewerChrome"`
-	ViewerCursor    bool     `json:"viewerCursorVisible"`
-	ViewerErr       string   `json:"viewerError,omitempty"`
-	HasBitmap       bool     `json:"hasBitmap"`
-	ThumbSize       int      `json:"thumbSize"`
-	ThumbPending    int      `json:"thumbPending"`
-	ThumbRunning    int      `json:"thumbRunning"`
-	ThumbReady      int      `json:"thumbReady"`
-	ThumbPreview    int      `json:"thumbPreview"`
-	ThumbCacheMB    float64  `json:"thumbCacheMB"`
-	ThumbBackend    string   `json:"thumbBackend"`
-	Goroutines      int      `json:"goroutines"`
-	Sidebar         bool     `json:"sidebar"`
-	Recursive       bool     `json:"recursive"`
-	ShowHidden      bool     `json:"showHidden"`
-	ShowCardNames   bool     `json:"showCardNames"`
-	ShowSettings    bool     `json:"showSettings"`
-	SettingsCat     string   `json:"settingsCategory"`
-	BindingCapture  string   `json:"bindingCapture"`
-	SidePrev        string   `json:"sidePrev"`
-	SideNext        string   `json:"sideNext"`
-	SidePrevHold    string   `json:"sidePrevHold"`
-	SideNextHold    string   `json:"sideNextHold"`
-	SideMouseHook   bool     `json:"sideMouseHook"`
-	ViewerCanAct    bool     `json:"viewerCanAct"`
-	ViewerPreload   int      `json:"viewerPreload"`
-	ViewerCached    int      `json:"viewerPreloadCached"`
-	ShowHelp        bool     `json:"showHelp"`
-	ShowAbout       bool     `json:"showAbout"`
-	UpdateOpen      bool     `json:"updateOpen"`
-	UpdatePhase     string   `json:"updatePhase"`
-	UpdateVersion   string   `json:"updateVersion,omitempty"`
-	Maximized       bool     `json:"maximized"`
-	Fullscreen      bool     `json:"fullscreen"`
-	PlayerReady     bool     `json:"playerReady"`
-	PlayerPlaying   bool     `json:"playerPlaying"`
-	PlayerPosMS     int64    `json:"playerPositionMs"`
-	PlayerDurMS     int64    `json:"playerDurationMs"`
-	VideoWidth      int      `json:"videoWidth"`
-	VideoHeight     int      `json:"videoHeight"`
-	VideoFPS        float64  `json:"videoFps"`
-	VideoKbps       int      `json:"videoKbps"`
-	VideoLive       bool     `json:"videoLiveBitrate"`
-	ContentW        int      `json:"contentWidth"`
-	ContentH        int      `json:"contentHeight"`
-	ErrorMsg        string   `json:"errorMessage,omitempty"`
-	Items           []string `json:"items"`
+	Version                  string   `json:"version"`
+	Active                   int      `json:"active"`
+	Path                     string   `json:"path"`
+	Name                     string   `json:"name"`
+	Loading                  bool     `json:"loading"`
+	Err                      string   `json:"error,omitempty"`
+	Total                    int      `json:"total"`
+	Filtered                 int      `json:"filtered"`
+	Query                    string   `json:"query"`
+	ScrollY                  float32  `json:"scrollY"`
+	Selected                 []string `json:"selected"`
+	Tabs                     []string `json:"tabs"`
+	ViewerOpen               bool     `json:"viewerOpen"`
+	ViewerIndex              int      `json:"viewerIndex"`
+	ViewerName               string   `json:"viewerName,omitempty"`
+	ViewerBytes              int64    `json:"viewerBytes,omitempty"`
+	ViewerZoom               float32  `json:"viewerZoom"`
+	ViewerPanX               float32  `json:"viewerPanX"`
+	ViewerPanY               float32  `json:"viewerPanY"`
+	ViewerAngle              float32  `json:"viewerAngle"`
+	ViewerInfo               bool     `json:"viewerInfo"`
+	ViewerImmersive          bool     `json:"viewerImmersive"`
+	ViewerChrome             bool     `json:"viewerChrome"`
+	ViewerCursor             bool     `json:"viewerCursorVisible"`
+	ViewerErr                string   `json:"viewerError,omitempty"`
+	HasBitmap                bool     `json:"hasBitmap"`
+	ThumbSize                int      `json:"thumbSize"`
+	ThumbPending             int      `json:"thumbPending"`
+	ThumbRunning             int      `json:"thumbRunning"`
+	ThumbReady               int      `json:"thumbReady"`
+	ThumbPreview             int      `json:"thumbPreview"`
+	ThumbCacheMB             float64  `json:"thumbCacheMB"`
+	ThumbBackend             string   `json:"thumbBackend"`
+	Goroutines               int      `json:"goroutines"`
+	Sidebar                  bool     `json:"sidebar"`
+	Recursive                bool     `json:"recursive"`
+	ShowHidden               bool     `json:"showHidden"`
+	ShowCardNames            bool     `json:"showCardNames"`
+	ShowSettings             bool     `json:"showSettings"`
+	SettingsCat              string   `json:"settingsCategory"`
+	BindingCapture           string   `json:"bindingCapture"`
+	SidePrev                 string   `json:"sidePrev"`
+	SideNext                 string   `json:"sideNext"`
+	SidePrevHold             string   `json:"sidePrevHold"`
+	SideNextHold             string   `json:"sideNextHold"`
+	SideMouseHook            bool     `json:"sideMouseHook"`
+	ViewerCanAct             bool     `json:"viewerCanAct"`
+	ViewerPreload            int      `json:"viewerPreload"`
+	ViewerCached             int      `json:"viewerPreloadCached"`
+	ViewerPreloadMB          float64  `json:"viewerPreloadMB"`
+	ViewerPreloadHit         bool     `json:"viewerPreloadHit"`
+	ViewerHUD                string   `json:"viewerHUD"`
+	ViewerLoadMs             int64    `json:"viewerLoadMs"`
+	ViewerDecodeMs           int64    `json:"viewerDecodeMs"`
+	ViewerScaleMs            int64    `json:"viewerScaleMs"`
+	ViewerEncodeMs           int64    `json:"viewerEncodeMs"`
+	ViewerBitmapMs           int64    `json:"viewerBitmapMs"`
+	ViewerCacheHit           bool     `json:"viewerCacheHit"`
+	ViewerPlaceholder        bool     `json:"viewerPlaceholder"`
+	ViewerFullRes            bool     `json:"viewerFullRes"`
+	ViewerFullResMB          float64  `json:"viewerFullResMB"`
+	ViewerOneToOne           bool     `json:"viewerOneToOne"`
+	ViewerFullResLoading     bool     `json:"viewerFullResLoading"`
+	ViewerFullResUnsupported bool     `json:"viewerFullResUnsupported"`
+	ViewerNotice             string   `json:"viewerNotice,omitempty"`
+	HeapAllocMB              float64  `json:"heapAllocMB"`
+	HeapSysMB                float64  `json:"heapSysMB"`
+	StackSysMB               float64  `json:"stackSysMB"`
+	NumGC                    uint32   `json:"numGC"`
+	ShowHelp                 bool     `json:"showHelp"`
+	ShowAbout                bool     `json:"showAbout"`
+	UpdateOpen               bool     `json:"updateOpen"`
+	UpdatePhase              string   `json:"updatePhase"`
+	UpdateVersion            string   `json:"updateVersion,omitempty"`
+	Maximized                bool     `json:"maximized"`
+	Fullscreen               bool     `json:"fullscreen"`
+	PlayerReady              bool     `json:"playerReady"`
+	PlayerPlaying            bool     `json:"playerPlaying"`
+	PlayerPosMS              int64    `json:"playerPositionMs"`
+	PlayerDurMS              int64    `json:"playerDurationMs"`
+	VideoWidth               int      `json:"videoWidth"`
+	VideoHeight              int      `json:"videoHeight"`
+	VideoFPS                 float64  `json:"videoFps"`
+	VideoKbps                int      `json:"videoKbps"`
+	VideoLive                bool     `json:"videoLiveBitrate"`
+	ContentW                 int      `json:"contentWidth"`
+	ContentH                 int      `json:"contentHeight"`
+	ErrorMsg                 string   `json:"errorMessage,omitempty"`
+	Items                    []string `json:"items"`
 }
 
 func debugSnapshot() debugState {
 	st := debugState{Version: appVersion(), Active: app.active}
+	var ms runtime.MemStats
+	runtime.ReadMemStats(&ms)
+	st.HeapAllocMB = float64(ms.HeapAlloc) / (1 << 20)
+	st.HeapSysMB = float64(ms.HeapSys) / (1 << 20)
+	st.StackSysMB = float64(ms.StackSys) / (1 << 20)
+	st.NumGC = ms.NumGC
 	st.Sidebar = app.sidebar
 	st.ThumbSize = app.settings.ThumbSize
 	if app.thumbQueue != nil {
@@ -121,6 +150,8 @@ func debugSnapshot() debugState {
 	st.BindingCapture = app.bindingCapture
 	st.ViewerPreload = app.settings.ViewerPreload
 	st.ViewerCached = app.viewerPreloadCount()
+	st.ViewerPreloadMB = float64(app.viewerPreloadBytesValue()) / (1 << 20)
+	st.ViewerHUD = app.viewerHUDMode()
 	st.ShowHelp = app.showHelp
 	st.ShowAbout = app.showAbout
 	st.UpdateOpen = app.updateOpen
@@ -154,6 +185,10 @@ func debugSnapshot() debugState {
 	if app.viewer.Open {
 		st.ViewerOpen = true
 		st.ViewerIndex = app.viewer.Index
+		if app.viewer.Item != nil {
+			st.ViewerName = app.viewer.Item.Name
+			st.ViewerBytes = app.viewer.Item.Size
+		}
 		st.ViewerZoom = app.viewer.Zoom
 		st.ViewerPanX = app.viewer.PanX
 		st.ViewerPanY = app.viewer.PanY
@@ -164,6 +199,20 @@ func debugSnapshot() debugState {
 		st.ViewerCursor = app.viewer.CursorVisible
 		st.ViewerErr = app.viewer.Err
 		st.HasBitmap = app.viewer.Bitmap != nil
+		st.ViewerLoadMs = app.viewerStats.LoadMs
+		st.ViewerDecodeMs = app.viewerStats.DecodeMs
+		st.ViewerScaleMs = app.viewerStats.ScaleMs
+		st.ViewerEncodeMs = app.viewerStats.EncodeMs
+		st.ViewerBitmapMs = app.viewerStats.BitmapMs
+		st.ViewerCacheHit = app.viewerStats.CacheHit
+		st.ViewerPreloadHit = app.viewerStats.PreloadHit
+		st.ViewerPlaceholder = app.viewer.Placeholder != nil
+		st.ViewerFullRes = app.viewer.FullResReady
+		st.ViewerFullResMB = float64(app.viewerStats.FullResBytes) / (1 << 20)
+		st.ViewerOneToOne = app.viewer.OneToOne
+		st.ViewerFullResLoading = app.viewer.FullResLoading
+		st.ViewerFullResUnsupported = app.viewer.FullResUnsupported
+		st.ViewerNotice = app.viewer.Notice.Text
 		if p := app.viewer.Player; p != nil {
 			st.PlayerReady = p.Ready()
 			st.PlayerPlaying = p.Playing()
@@ -351,6 +400,9 @@ func debugCommand(name, arg string) {
 		app.viewerReset()
 	case "vieweractual":
 		app.viewerActualSize()
+	case "gc":
+		runtime.GC()
+		debug.FreeOSMemory()
 	case "search":
 		if t != nil {
 			t.Query = arg

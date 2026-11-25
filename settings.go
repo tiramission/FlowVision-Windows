@@ -39,6 +39,7 @@ type Settings struct {
 	ActiveTab     int         `json:"activeTab"`
 	CacheLimitMB  int         `json:"cacheLimitMB"`
 	ViewerPreload int         `json:"viewerPreload"`
+	ViewerHUD     string      `json:"viewerHUD"` // off | auto | always
 	SidePrev      SideBinding `json:"sidePrev"`
 	SideNext      SideBinding `json:"sideNext"`
 	SidePrevHold  SideBinding `json:"sidePrevHold"`
@@ -63,6 +64,7 @@ func defaultSettings() Settings {
 		LoopVideo:     false,
 		CacheLimitMB:  1500,
 		ViewerPreload: 2,
+		ViewerHUD:     "auto",
 		SidePrev:      defaultSidePrev(),
 		SideNext:      defaultSideNext(),
 	}
@@ -142,6 +144,11 @@ func mergeSettings(def, s Settings) Settings {
 	}
 	if s.ViewerPreload > 8 {
 		s.ViewerPreload = 8
+	}
+	switch s.ViewerHUD {
+	case "off", "auto", "always":
+	default:
+		s.ViewerHUD = def.ViewerHUD
 	}
 	if s.Favorites == nil {
 		s.Favorites = []string{}

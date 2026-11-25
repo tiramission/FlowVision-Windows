@@ -1,0 +1,31 @@
+{
+  "schema": "flowvision.viewer.bench/v1",
+  "generatedAt": "2026-11-26T05:46:00+08:00",
+  "tool": "go test -run ^$ -bench BenchmarkViewerPreview -benchtime=20x -count=1 .",
+  "environment": {
+    "cpu": "12th Gen Intel(R) Core(TM) i7-12700H",
+    "go": "go1.27.4 windows/amd64"
+  },
+  "corpus": {
+    "path": "testdata/thumb-corpus/real",
+    "items": 23,
+    "filter": "JPEG with width*height >= 2MP; excludes cam-* fixtures",
+    "note": "15 Wikimedia 3000-3840px photos + 8 Picsum photos"
+  },
+  "benchmarks": [
+    {
+      "name": "BenchmarkViewerPreviewCold",
+      "nsPerOp": 352551855,
+      "msPerImage": 352.6,
+      "cache": "off",
+      "includes": "decode + ApproxBiLinear scale + JPEG q90 encode + ui.NewBitmap"
+    },
+    {
+      "name": "BenchmarkViewerPreviewWarm",
+      "nsPerOp": 53873925,
+      "msPerImage": 53.9,
+      "cache": "preview JPEG cache hit",
+      "includes": "JPEG decode + ui.NewBitmap"
+    }
+  ]
+}

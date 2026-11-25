@@ -539,6 +539,19 @@ func (a *App) viewerCanvas(c *ui.Context, it *Item, th *ui.Theme) {
 					w, _ := p.MeasureText(0, ui.Span{Text: msg, Size: 13})
 					p.Text(r.X+(r.W-w)/2, r.Y+r.H/2, msg, 13, ui.RGBA(230, 230, 235, 255))
 				}
+			case a.viewer.Bitmap == nil && a.viewer.Placeholder != nil:
+				p.Fill(r, ui.RGBA(0, 0, 0, 245), 0)
+				bw, bh := a.viewer.Placeholder.Size()
+				if bw > 0 && bh > 0 {
+					fit := viewerFitScale(bw, bh, a.viewer.Angle, r.W, r.H)
+					s := fit
+					cx := r.X + r.W/2
+					cy := r.Y + r.H/2
+					w, h := float32(bw), float32(bh)
+					p.Transform(ui.Scaling(s, s).Then(ui.Rotation(a.viewer.Angle)).Then(ui.Translation(cx, cy)), 0, 0, func() {
+						p.Image(a.viewer.Placeholder, ui.Rect{X: -w / 2, Y: -h / 2, W: w, H: h}, ui.FillBox)
+					})
+				}
 			case a.viewer.Bitmap == nil:
 				p.Fill(r, ui.RGBA(0, 0, 0, 245), 0)
 				msg := "正在载入…"
@@ -561,6 +574,14 @@ func (a *App) viewerCanvas(c *ui.Context, it *Item, th *ui.Theme) {
 				p.Transform(ui.Scaling(s, s).Then(ui.Rotation(a.viewer.Angle)).Then(ui.Translation(cx, cy)), 0, 0, func() {
 					p.Image(a.viewer.Bitmap, ui.Rect{X: -w / 2, Y: -h / 2, W: w, H: h}, ui.FillBox)
 				})
+			}
+			if it.Kind == "image" {
+				pct := -1
+				if a.viewer.Bitmap != nil {
+					bw, bh := a.viewer.Bitmap.Size()
+					pct = viewerPercentValue(bw, bh, a.viewer.Angle, a.viewer.Zoom, r.W, r.H)
+				}
+				a.drawViewerHUD(p, r, th, pct)
 			}
 		})
 		if a.viewer.Player != nil {
@@ -617,6 +638,7 @@ func (a *App) viewerCanvas(c *ui.Context, it *Item, th *ui.Theme) {
 				}
 				return false
 			case ui.InputPointerMove:
+				a.updateViewerHover(ev.X, ev.Y, canvasW, canvasH)
 				a.moveViewerHold(ev.X, ev.Y)
 				return false
 			case ui.InputPointerUp:
@@ -653,6 +675,14 @@ func (a *App) viewerInfoPanel(c *ui.Context, it *Item, th *ui.Theme) {
 				} else if a.viewer.InfoReady {
 					if a.viewer.Info.Width > 0 {
 						infoRow(c, "尺寸", fmt.Sprintf("%d × %d", a.viewer.Info.Width, a.viewer.Info.Height))
+					}
+					switch {
+					case a.viewer.FullResUnsupported:
+						infoRow(c, "1:1", "原图超过 50MP，只用 2560 预览")
+					case a.viewer.FullResReady:
+						infoRow(c, "1:1", "已载入全分辨率")
+					case a.viewer.FullResLoading:
+						infoRow(c, "1:1", "正在载入全分辨率…")
 					}
 					for _, kv := range a.viewer.Info.Exif {
 						infoRow(c, kv.K, kv.V)

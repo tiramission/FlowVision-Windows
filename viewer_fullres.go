@@ -1,0 +1,236 @@
+package main
+
+import (
+	"fmt"
+	"image"
+	"os"
+	"time"
+
+	"github.com/egoist/mygo/ui"
+)
+
+const (
+	viewerFullResMaxPixels   = 50_000_000
+	viewerFullResBudgetBytes = 256 << 20
+)
+
+type viewerFullResEntry struct {
+	Key   string
+	Bmp   *ui.Bitmap
+	Bytes int64
+	At    time.Time
+}
+
+func viewerFullResKey(it *Item) string {
+	if it == nil {
+		return ""
+	}
+	return fmt.Sprintf("%s|%d|%d", it.ID, it.Mtime, it.Size)
+}
+
+func viewerFullResWithinLimit(w, h int) bool {
+	if w <= 0 || h <= 0 {
+		return true
+	}
+	return int64(w)*int64(h) <= viewerFullResMaxPixels
+}
+
+// requestViewerFullRes decodes and keeps one full-resolution bitmap. The
+// preview stays visible while it runs, so the switch to 1:1 is not a blank
+// frame.
+func (a *App) requestViewerFullRes(oneToOne bool) {
+	it := a.viewer.Item
+	if it == nil || it.Kind != "image" {
+		return
+	}
+	if oneToOne {
+		a.viewer.OneToOne = true
+	}
+	if a.viewer.FullResReady {
+		return
+	}
+	if a.viewer.FullResLoading || a.viewer.FullResUnsupported {
+		return
+	}
+	if a.viewerFullRes != nil && a.viewerFullRes.Key == viewerFullResKey(it) && a.viewerFullRes.Bmp != nil {
+		if a.viewer.Bitmap == nil {
+			return
+		}
+		bw, bh := a.viewerFullRes.Bmp.Size()
+		oldW, oldH := a.viewer.Bitmap.Size()
+		a.viewer.Bitmap = a.viewerFullRes.Bmp
+		a.viewer.BitmapOwned = true
+		a.viewer.FullResReady = true
+		a.viewer.Placeholder = nil
+		a.adjustViewerZoomForBitmapSwap(oldW, oldH, bw, bh)
+		a.refresh()
+		return
+	}
+	w, h := it.W, it.H
+	if w <= 0 || h <= 0 {
+		d := imageDims(it.Path, it.Mtime)
+		w, h = d.W, d.H
+	}
+	if w > 0 && h > 0 && !viewerFullResWithinLimit(w, h) {
+		a.viewer.FullResUnsupported = true
+		a.notifyViewer("fullres-limit", "原图超过 50MP，只显示 2560 预览", viewerNoticeLimit, 3*time.Second)
+		a.refresh()
+		return
+	}
+	// A preview at or below 2560 is already the full image; decoding it again
+	// would only add memory and change nothing on screen.
+	if w > 0 && h > 0 && w <= viewerPreviewMaxDim && h <= viewerPreviewMaxDim {
+		return
+	}
+
+	gen := a.viewer.Gen
+	key := viewerFullResKey(it)
+	a.viewer.FullResLoading = true
+	a.viewer.OneToOne = oneToOne
+	a.startViewerFullTimer(gen)
+	go func() {
+		bmp, bytes, err := decodeViewerFullRes(it)
+		a.update(func() {
+			if a.viewer.Gen != gen || a.viewer.Item != it || viewerFullResKey(a.viewer.Item) != key {
+				if bmp != nil {
+					bmp.ReleasePixels()
+				}
+				return
+			}
+			a.stopViewerFullTimer()
+			a.viewer.FullResLoading = false
+			if err != nil {
+				if bmp != nil {
+					bmp.ReleasePixels()
+				}
+				if err == errViewerFullResTooLarge {
+					a.viewer.FullResUnsupported = true
+					a.notifyViewer("fullres-limit", "原图超过 50MP，只显示 2560 预览", viewerNoticeLimit, 3*time.Second)
+				} else {
+					a.notifyViewer("fullres", "原图载入失败："+err.Error(), viewerNoticeError, 4*time.Second)
+				}
+				a.refresh()
+				return
+			}
+			if bytes > viewerFullResBudgetBytes {
+				bmp.ReleasePixels()
+				a.notifyViewer("fullres-limit", "原图超出 256MB 内存预算", viewerNoticeLimit, 3*time.Second)
+				a.refresh()
+				return
+			}
+			a.clearViewerFullRes()
+			oldBmp := a.viewer.Bitmap
+			oldOwned := a.viewer.BitmapOwned
+			oldW, oldH := 0, 0
+			if oldBmp != nil {
+				oldW, oldH = oldBmp.Size()
+			}
+			a.viewerFullRes = &viewerFullResEntry{Key: key, Bmp: bmp, Bytes: bytes, At: time.Now()}
+			a.viewer.Bitmap = bmp
+			a.viewer.BitmapOwned = true
+			a.viewer.FullResReady = true
+			a.viewer.Placeholder = nil
+			a.viewerStats.FullResBytes = bytes
+			nw, nh := bmp.Size()
+			a.adjustViewerZoomForBitmapSwap(oldW, oldH, nw, nh)
+			if oldOwned && oldBmp != nil && oldBmp != bmp {
+				oldBmp.ReleasePixels()
+			}
+			a.refresh()
+		})
+	}()
+}
+
+func decodeViewerFullRes(it *Item) (*ui.Bitmap, int64, error) {
+	f, err := os.Open(it.Path)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer f.Close()
+	src, _, err := image.Decode(f)
+	if err != nil {
+		return nil, 0, err
+	}
+	d := imageDims(it.Path, it.Mtime)
+	if d.Orient > 1 && d.Orient < 9 {
+		src = orientImage(src, d.Orient)
+	}
+	b := src.Bounds()
+	if int64(b.Dx())*int64(b.Dy()) > viewerFullResMaxPixels {
+		return nil, 0, errViewerFullResTooLarge
+	}
+	bmp := ui.NewBitmap(src)
+	return bmp, int64(b.Dx()) * int64(b.Dy()) * 4, nil
+}
+
+var errViewerFullResTooLarge = fmt.Errorf("image exceeds 50MP")
+
+func (a *App) startViewerFullTimer(gen int) {
+	a.stopViewerFullTimer()
+	a.viewerFullTimer = time.AfterFunc(1200*time.Millisecond, func() {
+		a.update(func() {
+			if a.viewer.Gen == gen && a.viewer.FullResLoading {
+				a.notifyViewer("fullres", "正在载入 1:1 原图…", viewerNoticeInfo, 0)
+			}
+		})
+	})
+}
+
+func (a *App) stopViewerFullTimer() {
+	if a.viewerFullTimer != nil {
+		a.viewerFullTimer.Stop()
+		a.viewerFullTimer = nil
+	}
+}
+
+func (a *App) clearViewerFullRes() {
+	a.stopViewerFullTimer()
+	if a.viewerFullRes != nil {
+		if a.viewerFullRes.Bmp != nil {
+			a.viewerFullRes.Bmp.ReleasePixels()
+		}
+		if a.viewer.Bitmap == a.viewerFullRes.Bmp {
+			a.viewer.Bitmap = nil
+			a.viewer.BitmapOwned = false
+		}
+		a.viewerFullRes = nil
+	}
+	a.viewerFullResKey = ""
+	a.viewer.FullResReady = false
+	a.viewer.FullResLoading = false
+}
+
+func (a *App) adjustViewerZoomForBitmapSwap(oldW, oldH, newW, newH int) {
+	if oldW <= 0 || oldH <= 0 || newW <= 0 || newH <= 0 {
+		return
+	}
+	w, h := a.viewerCanvasSize(nil)
+	oldFit := viewerFitScale(oldW, oldH, a.viewer.Angle, w, h)
+	newFit := viewerFitScale(newW, newH, a.viewer.Angle, w, h)
+	if oldFit <= 0 || newFit <= 0 {
+		return
+	}
+	if a.viewer.OneToOne {
+		a.viewer.Zoom = clampViewerZoom(viewerActualZoom(newFit))
+		return
+	}
+	display := a.viewer.Zoom * oldFit
+	if display <= 0 {
+		return
+	}
+	a.viewer.Zoom = clampViewerZoom(display / newFit)
+}
+
+func (a *App) maybeRequestViewerFullRes() {
+	if a.viewer.Item == nil || a.viewer.Item.Kind != "image" || a.viewer.Bitmap == nil {
+		return
+	}
+	if a.viewer.FullResReady || a.viewer.FullResLoading || a.viewer.FullResUnsupported {
+		return
+	}
+	bw, bh := a.viewer.Bitmap.Size()
+	w, h := a.viewerCanvasSize(nil)
+	if viewerPercentValue(bw, bh, a.viewer.Angle, a.viewer.Zoom, w, h) >= 125 {
+		a.requestViewerFullRes(false)
+	}
+}

@@ -1,0 +1,70 @@
+{
+  "schema": "flowvision.viewer.baseline/v1",
+  "generatedAt": "2026-11-26T05:00:00+08:00",
+  "version": "v1.3.0",
+  "commit": "761b8be",
+  "environment": {
+    "cpu": "12th Gen Intel(R) Core(TM) i7-12700H",
+    "cores": 10,
+    "threads": 20,
+    "memoryBytes": 4293857280,
+    "os": "Windows 11 x64",
+    "storage": "local SSD"
+  },
+  "pipeline": "image.Decode -> draw.CatmullRom 2560 -> jpeg q90 -> ui.DecodeBitmap",
+  "measurements": [
+    {
+      "case": "24mp-cold",
+      "corpus": "testdata/thumb-corpus/dirs/24",
+      "totalMs": 1130,
+      "decodeMs": 184.7,
+      "scaleMs": 885.2,
+      "encodeMs": 61,
+      "bitmapMs": 44
+    },
+    {
+      "case": "real-12mp-cold",
+      "corpus": "testdata/thumb-corpus/real",
+      "totalMsMin": 870,
+      "totalMsMax": 1190,
+      "decodeMs": 193,
+      "scaleMs": 571.4,
+      "encodeMs": 61,
+      "bitmapMs": 44
+    },
+    {
+      "case": "viewer-cold-range",
+      "corpus": "testdata/thumb-corpus/dirs/24 + real",
+      "totalMsMin": 870,
+      "totalMsMax": 1430,
+      "decodeMsMin": 185,
+      "decodeMsMax": 297,
+      "scaleMsMin": 571,
+      "scaleMsMax": 885,
+      "encodeMsMin": 61,
+      "encodeMsMax": 102
+    },
+    {
+      "case": "preview-cache-read",
+      "totalMs": 0.58,
+      "bitmapMs": 44.4,
+      "note": "file read only; then ui.DecodeBitmap"
+    },
+    {
+      "case": "preview-fast-pilot",
+      "totalMs": 95,
+      "note": "draw.ApproxBiLinear scale only"
+    },
+    {
+      "case": "wic-2560",
+      "totalMsMin": 800,
+      "totalMsMax": 1260,
+      "note": "no advantage; rejected"
+    }
+  ],
+  "bottleneck": {
+    "scaleShareMin": 0.60,
+    "scaleShareMax": 0.78,
+    "conclusion": "CatmullRom scale dominates cold viewer open"
+  }
+}
