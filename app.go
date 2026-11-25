@@ -264,12 +264,14 @@ type App struct {
 	contextAtY   float32
 	pending      []func()
 
-	thumbs     map[string]*thumbEntry
-	thumbLoad  map[string]bool
-	thumbOrder []string
-	thumbQueue *thumbQueue
-	thumbFrame uint64
-	thumbOnce  sync.Once
+	thumbs              map[string]*thumbEntry
+	thumbLoad           map[string]bool
+	thumbQueue          *thumbQueue
+	thumbFrame          uint64
+	thumbOnce           sync.Once
+	thumbBytes          int64
+	thumbClock          int64
+	thumbPendingRefresh bool
 
 	treeOpen     map[string]*bool
 	treeRootOpen map[string]*bool
@@ -282,11 +284,16 @@ type App struct {
 }
 
 type thumbEntry struct {
-	Bmp *ui.Bitmap
-	At  int64
+	Bmp     *ui.Bitmap
+	At      int64
+	Bytes   int64
+	Preview bool
 }
 
-const thumbCacheMax = 420
+const (
+	thumbCacheMax      = 420
+	thumbCacheBytesMax = 256 << 20
+)
 
 func newApp() *App {
 	a := &App{
@@ -895,9 +902,14 @@ func (a *App) uiTheme(c *ui.Context) *ui.Theme {
 func (a *App) clearCache() {
 	_, _ = clearThumbCache()
 	a.cacheInfo = thumbCacheInfo()
+	for _, e := range a.thumbs {
+		if e != nil && e.Bmp != nil {
+			e.Bmp.ReleasePixels()
+		}
+	}
 	a.thumbs = map[string]*thumbEntry{}
 	a.thumbLoad = map[string]bool{}
-	a.thumbOrder = nil
+	a.thumbBytes = 0
 	if a.thumbQueue != nil {
 		a.thumbQueue.reset()
 	}
@@ -1695,27 +1707,41 @@ func (a *App) ensureThumb(it *Item, size int, priority float64, frame uint64) {
 	if a.thumbLoad == nil {
 		a.thumbLoad = map[string]bool{}
 	}
-	if _, ok := a.thumbs[key]; ok {
+	if e := a.thumbs[key]; e != nil && !e.Preview {
 		return
 	}
-	if a.thumbLoad[key] {
+	a.submitThumbTask(key+"|f", key, it, size, priority, frame, thumbStageFinal)
+	if e := a.thumbs[key]; e == nil && it.HasThumb {
+		previewSize := size
+		if previewSize > 160 {
+			previewSize = 160
+		}
+		// Preview is closer to the viewport center than the final decode, so
+		// it runs first and paints the card while WIC works on the full image.
+		a.submitThumbTask(key+"|p", key, it, previewSize, priority-1, frame, thumbStagePreview)
+	}
+}
+
+func (a *App) submitThumbTask(taskKey, base string, it *Item, size int, priority float64, frame uint64, stage thumbStage) {
+	if a.thumbLoad[taskKey] {
 		if a.thumbQueue != nil {
-			a.thumbQueue.touch(key, priority, frame)
+			a.thumbQueue.touch(taskKey, priority, frame)
 		}
 		return
 	}
 	if a.thumbQueue == nil {
 		a.thumbQueue = newThumbQueue()
 	}
-	a.thumbLoad[key] = true
+	a.thumbLoad[taskKey] = true
 	a.startThumbWorkers()
-	itCopy := *it
 	a.thumbQueue.submit(&thumbTask{
-		key:      key,
-		item:     itCopy,
+		key:      taskKey,
+		base:     base,
+		item:     it,
 		size:     size,
 		priority: priority,
 		frame:    frame,
+		stage:    stage,
 	})
 }
 
@@ -1749,10 +1775,25 @@ func (a *App) thumbWorker() {
 		if task == nil {
 			return
 		}
-		data, err := getThumb(context.Background(), &task.item, task.size)
+		var data []byte
+		var err error
+		if task.stage == thumbStagePreview {
+			data, err = embeddedThumbPreview(task.item, task.size)
+		} else {
+			data, err = getThumb(context.Background(), task.item, task.size)
+		}
 		var bmp *ui.Bitmap
 		if err == nil {
 			bmp, err = ui.DecodeBitmap(data)
+		}
+		if (err != nil || bmp == nil) && task.stage == thumbStageFinal {
+			if data, e := brokenThumb(task.item, task.size); e == nil {
+				bmp, err = ui.DecodeBitmap(data)
+			}
+		}
+		d := dimInfo{}
+		if err == nil && task.stage == thumbStageFinal && task.item.Kind == "image" {
+			d = imageDims(task.item.Path, task.item.Mtime)
 		}
 		a.update(func() {
 			delete(a.thumbLoad, task.key)
@@ -1760,29 +1801,76 @@ func (a *App) thumbWorker() {
 			if err != nil || bmp == nil {
 				return
 			}
-			a.thumbs[task.key] = &thumbEntry{Bmp: bmp, At: nowUnix()}
-			a.thumbOrder = append(a.thumbOrder, task.key)
+			w, h := bmp.Size()
+			a.thumbClock++
+			e := &thumbEntry{Bmp: bmp, At: a.thumbClock, Bytes: int64(w * h * 4), Preview: task.stage == thumbStagePreview}
+			old := a.thumbs[task.base]
+			if old != nil {
+				if old.Preview == false && e.Preview {
+					// A full image already won; do not replace it with a
+					// late preview.
+					bmp.ReleasePixels()
+					return
+				}
+				a.thumbBytes -= old.Bytes
+				old.Bmp.ReleasePixels()
+			}
+			a.thumbs[task.base] = e
+			a.thumbBytes += e.Bytes
+			if d.W > 0 && (task.item.W == 0 || task.item.H == 0) {
+				task.item.W, task.item.H, task.item.Orient = d.W, d.H, d.Orient
+				task.item.HasThumb = d.Thumb
+			}
 			a.pruneThumbs()
-			a.refresh()
+			a.refreshThumbs()
 		})
 	}
 }
 
+// refreshThumbs coalesces the invalidations from a burst of workers into one
+// redraw per pending frame. A 300-image folder otherwise invalidates the
+// window hundreds of times while the thumbnails arrive.
+func (a *App) refreshThumbs() {
+	if a.thumbPendingRefresh {
+		return
+	}
+	a.thumbPendingRefresh = true
+	a.later(func() {
+		a.thumbPendingRefresh = false
+		a.refresh()
+	})
+}
+
 func (a *App) thumb(it *Item, size int) *ui.Bitmap {
 	if e := a.thumbs[thumbKey(it, size)]; e != nil {
+		// Mark the card as recently used. The cache is tiny, so a monotonic
+		// stamp plus an on-demand scan is cheaper than maintaining an LRU list
+		// on every frame the grid paints.
+		a.thumbClock++
+		e.At = a.thumbClock
 		return e.Bmp
 	}
 	return nil
 }
 
 func (a *App) pruneThumbs() {
-	for len(a.thumbOrder) > thumbCacheMax {
-		key := a.thumbOrder[0]
-		a.thumbOrder = a.thumbOrder[1:]
-		if e := a.thumbs[key]; e != nil {
-			e.Bmp.ReleasePixels()
-			delete(a.thumbs, key)
+	for len(a.thumbs) > thumbCacheMax || a.thumbBytes > thumbCacheBytesMax {
+		var oldestKey string
+		var oldestAt int64 = 1<<63 - 1
+		for key, e := range a.thumbs {
+			if e != nil && e.At < oldestAt {
+				oldestAt, oldestKey = e.At, key
+			}
 		}
+		if oldestKey == "" {
+			break
+		}
+		e := a.thumbs[oldestKey]
+		a.thumbBytes -= e.Bytes
+		if e.Bmp != nil {
+			e.Bmp.ReleasePixels()
+		}
+		delete(a.thumbs, oldestKey)
 	}
 }
 

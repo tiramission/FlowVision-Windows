@@ -1,0 +1,112 @@
+[
+  {
+    "Round": 1,
+    "Ready": 310,
+    "CacheMB": 102.8,
+    "GDI": 46,
+    "USER": 53,
+    "Handles": 672,
+    "WSMB": 347.5,
+    "PrivateMB": 480.5,
+    "RoundMS": 2682.0
+  },
+  {
+    "Round": 2,
+    "Ready": 310,
+    "CacheMB": 102.8,
+    "GDI": 46,
+    "USER": 53,
+    "Handles": 672,
+    "WSMB": 324.5,
+    "PrivateMB": 479.5,
+    "RoundMS": 2434.0
+  },
+  {
+    "Round": 3,
+    "Ready": 310,
+    "CacheMB": 102.8,
+    "GDI": 46,
+    "USER": 53,
+    "Handles": 672,
+    "WSMB": 324.7,
+    "PrivateMB": 484.4,
+    "RoundMS": 2322.0
+  },
+  {
+    "Round": 4,
+    "Ready": 310,
+    "CacheMB": 102.8,
+    "GDI": 46,
+    "USER": 53,
+    "Handles": 672,
+    "WSMB": 311.1,
+    "PrivateMB": 482.4,
+    "RoundMS": 2252.0
+  },
+  {
+    "Round": 5,
+    "Ready": 310,
+    "CacheMB": 102.8,
+    "GDI": 46,
+    "USER": 53,
+    "Handles": 672,
+    "WSMB": 311.6,
+    "PrivateMB": 493.2,
+    "RoundMS": 2321.0
+  },
+  {
+    "Round": 6,
+    "Ready": 310,
+    "CacheMB": 102.8,
+    "GDI": 46,
+    "USER": 53,
+    "Handles": 672,
+    "WSMB": 311.2,
+    "PrivateMB": 482.1,
+    "RoundMS": 2363.0
+  },
+  {
+    "Round": 7,
+    "Ready": 310,
+    "CacheMB": 102.8,
+    "GDI": 46,
+    "USER": 53,
+    "Handles": 668,
+    "WSMB": 313.7,
+    "PrivateMB": 486.6,
+    "RoundMS": 2147.0
+  },
+  {
+    "Round": 8,
+    "Ready": 310,
+    "CacheMB": 102.8,
+    "GDI": 46,
+    "USER": 53,
+    "Handles": 668,
+    "WSMB": 313.8,
+    "PrivateMB": 490.2,
+    "RoundMS": 2157.0
+  },
+  {
+    "Round": 9,
+    "Ready": 310,
+    "CacheMB": 102.8,
+    "GDI": 46,
+    "USER": 53,
+    "Handles": 670,
+    "WSMB": 315.5,
+    "PrivateMB": 488.7,
+    "RoundMS": 2153.0
+  },
+  {
+    "Round": 10,
+    "Ready": 310,
+    "CacheMB": 102.8,
+    "GDI": 46,
+    "USER": 53,
+    "Handles": 670,
+    "WSMB": 316.0,
+    "PrivateMB": 489.0,
+    "RoundMS": 2180.0
+  }
+]

@@ -4,13 +4,22 @@ import "sync"
 
 // thumbTask is one thumbnail load waiting for a worker. priority is the
 // distance from the viewport center in DIP; lower values run first.
+type thumbStage uint8
+
+const (
+	thumbStageFinal thumbStage = iota
+	thumbStagePreview
+)
+
 type thumbTask struct {
 	key      string
-	item     Item
+	base     string
+	item     *Item
 	size     int
 	priority float64
 	frame    uint64
 	seq      uint64
+	stage    thumbStage
 }
 
 // thumbQueue is a small scheduling layer for thumbnail work. The grid updates

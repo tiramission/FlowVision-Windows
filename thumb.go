@@ -90,10 +90,14 @@ func thumbBudget(size int) int {
 }
 
 func thumbPath(it *Item, size int) string {
-	// Include the source version in the cache name: a file replaced within
-	// the same second with a different size must not reuse the old bytes.
-	return filepath.Join(thumbDir, fmt.Sprintf("%s-%d-%d-%d.jpg", it.ID, size, it.Mtime, it.Size))
+	// Include the source version and backend generation in the cache name: a
+	// file replaced within the same second with a different size must not
+	// reuse the old bytes, and a WIC/Shell result must not hide a Go result
+	// after a troubleshooting backend switch.
+	return filepath.Join(thumbDir, fmt.Sprintf("%s-%d-%d-%d-%s.jpg", it.ID, size, it.Mtime, it.Size, thumbCacheVersion))
 }
+
+const thumbCacheVersion = "v2"
 
 // getThumb returns the JPEG bytes of a thumbnail for it, generating and
 // caching them on first use.
@@ -138,6 +142,49 @@ func getThumb(ctx context.Context, it *Item, size int) ([]byte, error) {
 	return data, nil
 }
 
+// brokenThumb draws the card used when every decoder rejects a file. It keeps
+// the card's aspect ratio and shows a muted warning mark instead of a blank
+// hole, without caching the failure to disk.
+func brokenThumb(it *Item, size int) ([]byte, error) {
+	w, h := size, size
+	if it.Kind == "image" {
+		d := imageDims(it.Path, it.Mtime)
+		if d.W > 0 && d.H > 0 {
+			h = size
+			w = int(math.Round(float64(size) * clampF(float64(d.W)/float64(d.H), 0.25, 4)))
+			if w < 8 {
+				w = 8
+			}
+		}
+	}
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			img.SetRGBA(x, y, color.RGBA{thumbSurfaceR, thumbSurfaceG, thumbSurfaceB, 255})
+		}
+	}
+	m := int(math.Min(float64(w), float64(h)) * 0.18)
+	if m < 8 {
+		m = 8
+	}
+	cx, cy := w/2, h/2
+	for i := -m; i <= m; i++ {
+		for t := -2; t <= 2; t++ {
+			if cx+i >= 0 && cx+i < w && cy+i+t >= 0 && cy+i+t < h {
+				img.SetRGBA(cx+i, cy+i+t, color.RGBA{170, 110, 110, 255})
+			}
+			if cx+i >= 0 && cx+i < w && cy-i+t >= 0 && cy-i+t < h {
+				img.SetRGBA(cx+i, cy-i+t, color.RGBA{170, 110, 110, 255})
+			}
+		}
+	}
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 82}); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
 func readFreshCache(p string, srcMtime int64) ([]byte, bool) {
 	st, err := os.Stat(p)
 	if err != nil || st.Size() == 0 {
@@ -160,6 +207,77 @@ func renderThumb(it *Item, size int) ([]byte, error) {
 		}
 		return placeholderThumb(it, size)
 	}
+	return renderStill(it, size)
+}
+
+// renderStill dispatches a still image through the configured backend chain.
+// auto is intentionally conservative: WIC first for normal formats, Shell
+// first only for formats WIC commonly lacks (HEIC/AVIF/JXL/RAW), and the
+// original Go decoder last.
+func renderStill(it *Item, size int) ([]byte, error) {
+	switch thumbBackendMode() {
+	case "go":
+		return renderThumbGo(it, size)
+	case "wic":
+		if data, err := wicThumb(it, size); err == nil {
+			return data, nil
+		}
+		return renderThumbGo(it, size)
+	case "shell":
+		if data, err := shellThumb(it, size); err == nil {
+			return data, nil
+		}
+		return renderThumbGo(it, size)
+	case "embedded":
+		if data, err := embeddedThumb(it, size, 0.75); err == nil {
+			return data, nil
+		}
+		return renderThumbGo(it, size)
+	case "dct":
+		if data, err := dctThumb(it, size); err == nil {
+			return data, nil
+		}
+		return renderThumbGo(it, size)
+	}
+
+	if strings.EqualFold(it.Ext, ".ico") {
+		if data, err := icoThumb(it, size); err == nil {
+			return data, nil
+		}
+	}
+	if shellPreferred(it.Ext) {
+		if data, err := shellThumb(it, size); err == nil {
+			return data, nil
+		}
+	}
+	if data, err := wicThumb(it, size); err == nil {
+		return data, nil
+	}
+	if data, err := shellThumb(it, size); err == nil {
+		return data, nil
+	}
+	return renderThumbGo(it, size)
+}
+
+func shellPreferred(ext string) bool {
+	switch strings.ToLower(ext) {
+	case ".heic", ".heif", ".avif", ".jxl", ".ico",
+		".cr2", ".cr3", ".nef", ".arw", ".dng", ".orf", ".rw2", ".raf", ".pef", ".srw":
+		return true
+	}
+	return false
+}
+
+func thumbBackendMode() string {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("FLOWVISION_THUMB_BACKEND"))) {
+	case "wic", "shell", "go", "embedded", "dct":
+		return strings.ToLower(strings.TrimSpace(os.Getenv("FLOWVISION_THUMB_BACKEND")))
+	}
+	return "auto"
+}
+
+// renderThumbGo is the original pure-Go path and the final fallback.
+func renderThumbGo(it *Item, size int) ([]byte, error) {
 	d := imageDims(it.Path, it.Mtime)
 	if d.W <= 0 || d.H <= 0 {
 		return nil, fmt.Errorf("unsupported image format: %s", it.Ext)

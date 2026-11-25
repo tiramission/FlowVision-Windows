@@ -1,0 +1,35 @@
+[
+  {
+    "name": "baseline-24",
+    "files": 24,
+    "wallMs": 1811.552,
+    "perFileMs": 75.48133333333332,
+    "avgBytes": 19908.833333333332,
+    "totalBytes": 477812,
+    "heapBytes": 1003288,
+    "totalAlloc": 1025412584,
+    "note": "workers=6 maxHeap=376MB"
+  },
+  {
+    "name": "baseline-100",
+    "files": 100,
+    "wallMs": 7282.853,
+    "perFileMs": 72.82853,
+    "avgBytes": 19879.65,
+    "totalBytes": 1987965,
+    "heapBytes": 1117896,
+    "totalAlloc": 4272532640,
+    "note": "workers=6 maxHeap=419MB"
+  },
+  {
+    "name": "baseline-300",
+    "files": 300,
+    "wallMs": 21287.417,
+    "perFileMs": 70.95805666666666,
+    "avgBytes": 19908.833333333332,
+    "totalBytes": 5972650,
+    "heapBytes": 1367640,
+    "totalAlloc": 12817555952,
+    "note": "workers=6 maxHeap=419MB"
+  }
+]

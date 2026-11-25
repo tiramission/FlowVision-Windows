@@ -6,7 +6,7 @@
 
 把本地图片和视频变成可浏览、可沉浸查看的瀑布流。FlowVision for Windows 是 [netdcy/FlowVision](https://github.com/netdcy/FlowVision)（macOS，Swift/AppKit）的 Windows 重写版：**Go + MyGo 原生 `ui` + Onevra**，不使用 WebView2、HTML 或 JavaScript，也不需要 cgo、Swift 或 Xcode。
 
-当前版本 **1.2.14**：主窗口改为真正的左右分栏并设置 900×600 起的最小尺寸；侧栏、标题栏、内容区和底部状态区共用连续的根级发丝线；侧栏文件夹区改为当前文件夹为根的树，支持子目录开合、数量、空/加载状态与完整路径提示。
+当前版本 **1.3.0**：缩略图链路改为 WIC/Shell 原生解码，24 MP 大图单张从约 71–75 ms 降到约 33–40 ms，300 张目录整体吞吐约 2.1x，峰值堆从约 419 MB 降到 15 MB；EXIF 内嵌缩略图先出 160 px 预览，再替换为最终图；缓存增加 256 MB 字节上限和近似 LRU，滚动刷新合并到下一帧。
 
 ## 下载与安装
 
@@ -55,7 +55,7 @@ irm https://github.com/tiramission/FlowVision-Windows/releases/latest/download/i
 
 - **纯 Go 原生窗口**：`ui.View` 构建整个界面；构建 tag `mygo_nowebview` 让 MyGo 进入 native-only 模式，避免引入 WebView 运行时。
 - **虚拟化网格**：`grid.go` 只对可见区域绘制卡片、缩略图、文件名、选中描边和悬停阴影，不为几千张图片创建控件。
-- **缩略图管线**：JPEG 磁盘缓存、EXIF 方向校正、透明底合成、CatmullRom 缩放；同一张图并发生成时按缓存路径串行，避免写文件竞争。
+- **缩略图管线**：Windows Imaging Component（WIC）优先读取 JPEG/PNG/TIFF/BMP/GIF/WebP，内嵌缩略图或 `IWICBitmapScaler`（HighQualityCubic）缩放到目标尺寸；HEIC/RAW/ICO 优先系统 Shell provider，普通 JPEG 不依赖 Shell；WIC/Shell 失败自动回退纯 Go。EXIF IFD1 内嵌缩略图先发 160 px preview，最终图到达后替换；磁盘 JPEG q84、`v2` 后端版本、420 条目 + 256 MB 字节双上限、近似 LRU；透明图预乘后合成到中性底色。
 - **异步媒体信息**：尺寸、EXIF、MP4/MOV sample table、帧率和滚动码率在后台读取；视频先取容器 metadata，再启动播放器，避免文件句柄冲突。
 - **自绘窗口**：`TitleBarHidden` + `HideWindowButtons`，48 DIP 标题栏承担拖动、双击最大化、最小化/最大化/全屏/关闭和 Windows 11 snap layouts；全屏状态由窗口自身维护。
 - **更新链路**：`mygo.json` 配置 GitHub 更新源与公钥；`mygo.Updater.Check` 返回新版本，`Update.Install` 下载并校验签名归档或增量补丁，成功后 `mygo.App.Relaunch()`。
@@ -96,6 +96,16 @@ go build -tags "debug mygo_nowebview" -o fvdebug.exe .
 go test -tags mygo_nowebview ./...
 ```
 
+缩略图性能/格式矩阵需要本地语料，默认不随仓库分发：
+
+```powershell
+python tools/make_thumb_corpus.py --full
+pwsh tools/bench_thumb.ps1 -Go "C:\path\to\go.exe" -Backend auto
+pwsh tools/bench_thumb.ps1 -Go "C:\path\to\go.exe" -Backend go
+```
+
+可以用 `FLOWVISION_THUMB_BACKEND=go|wic|shell|embedded|dct` 单独切换后端；正式应用默认 `auto`。
+
 测试覆盖目录扫描、自然排序、递归与隐藏文件、缩略图缓存与并发生成、EXIF、设置合并、Windows 保留名、文件操作、文件夹卡片、查看器翻页与实际缩放比、**指针锚定缩放**、**长按左/右键缩放与拖动取消**、**侧键翻页**、**沉浸边缘命中**、**指针移动恢复光标**、**独立光标计时**、视频控件与码率、自绘标题栏、Onevra 设置页和 ffmpeg 隐藏窗口进程。
 
 真实窗口回归通过 debug 构建的本地端点完成，覆盖 1320×850 与 760×500 布局、深/浅主题、瀑布流滚动与恢复、多标签、主窗口最大化/全屏、查看器沉浸、设置、重命名/新建/回收站、菜单快捷键和窗口控制。
@@ -106,7 +116,7 @@ go test -tags mygo_nowebview ./...
 |---|---|
 | Finder 标签（xattr） | Windows 没有等价机制，改为应用内“收藏” |
 | HDR | 按 SDR 显示，不做色调映射 |
-| HEIC / AVIF / RAW | Go 标准解码器不支持；查看器提示无法预览，可交系统关联程序打开 |
+| HEIC / AVIF / RAW | 缩略图：有系统 codec 时走 WIC/Shell；当前机器无 HEIC codec 时显示占位。查看器仍主要依赖 Go 解码，无法预览时交系统关联程序打开 |
 | 视频缩略图 | 依赖外部 `ffmpeg.exe`（PATH 或 exe 同级）；缺失时显示渐变占位图 |
 | 视频播放 | 依赖本机解码器；部分 MKV/HEVC 只能外部打开 |
 | 超大图 | 超过 3,000 万像素时使用 2,560 px 预览，避免解码卡顿 |
@@ -143,6 +153,10 @@ docs/            移植说明与发布流程
 ## 版本与文档
 
 - 版本历史：[`CHANGELOG.md`](CHANGELOG.md)
+- 缩略图性能报告：[`docs/缩略图性能报告.md`](docs/缩略图性能报告.md)
+- 缩略图基线：[`docs/缩略图性能基线.md`](docs/缩略图性能基线.md)
+- 后端 spike：[`docs/缩略图WIC-spike.md`](docs/缩略图WIC-spike.md)
+- 测试语料说明：[`docs/缩略图测试语料说明.md`](docs/缩略图测试语料说明.md)
 - 移植说明：[`docs/移植说明.md`](docs/移植说明.md)
 - 发布流程：[`docs/发布流程.md`](docs/发布流程.md)
 

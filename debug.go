@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -49,6 +50,10 @@ type debugState struct {
 	ThumbPending    int      `json:"thumbPending"`
 	ThumbRunning    int      `json:"thumbRunning"`
 	ThumbReady      int      `json:"thumbReady"`
+	ThumbPreview    int      `json:"thumbPreview"`
+	ThumbCacheMB    float64  `json:"thumbCacheMB"`
+	ThumbBackend    string   `json:"thumbBackend"`
+	Goroutines      int      `json:"goroutines"`
 	Sidebar         bool     `json:"sidebar"`
 	Recursive       bool     `json:"recursive"`
 	ShowHidden      bool     `json:"showHidden"`
@@ -94,6 +99,14 @@ func debugSnapshot() debugState {
 		st.ThumbPending, st.ThumbRunning = app.thumbQueue.stats()
 	}
 	st.ThumbReady = len(app.thumbs)
+	for _, e := range app.thumbs {
+		if e.Preview {
+			st.ThumbPreview++
+		}
+	}
+	st.ThumbCacheMB = float64(app.thumbBytes) / (1 << 20)
+	st.ThumbBackend = thumbBackendMode()
+	st.Goroutines = runtime.NumGoroutine()
 	st.Recursive = app.settings.Recursive
 	st.ShowHidden = app.settings.ShowHidden
 	st.ShowCardNames = app.settings.ShowCardNames
@@ -412,6 +425,9 @@ func debugCommand(name, arg string) {
 		}
 	case "reload":
 		app.loadTab(t, false)
+	case "clearcache":
+		app.clearCache()
+		app.refresh()
 	case "back":
 		app.goBack()
 	case "up":

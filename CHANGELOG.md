@@ -2,6 +2,32 @@
 
 全部版本遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的章节格式；更新面板会显示当前版本对应的发布说明。
 
+## [1.3.0] - 2026-11-26
+
+### 变更
+
+- 缩略图默认链路改为 Windows Imaging Component（WIC）：`IWICBitmapScaler` 的 HighQualityCubic 缩放，支持 24/32 位 BGR/BGRA、8 位灰度，透明图预乘后仍合成到中性卡片底色；WIC 失败自动回退纯 Go。峰值堆从 419 MB 降到 15 MB，24 MP 单张约 33–40 ms。
+- 新增 Shell `IShellItemImageFactory` 后端：HEIC/HEIF/AVIF/JXL/ICO/RAW 优先系统 provider；`.ico` 优先 `SIIGBF_ICONONLY`，普通图片使用 `SIIGBF_THUMBNAILONLY | SIIGBF_BIGGERSIZEOK`。Shell 失败回 WIC/Go。
+- 新增纯 Go PNG-compressed ICO 解析：当前 Windows build 上 Shell 拒绝 `.ico` 时仍能出图；DIB-only ICO 继续交给 Shell。
+- EXIF IFD1 内嵌 JPEG 缩略图接入两阶段渲染：只接受 compression=6、2 MiB 以内；带内嵌图的 JPEG 先发 160 px preview，高优先级插队，最终图完成后替换；晚到 preview 不覆盖 final。
+- 缓存改为 420 条目 + 256 MB 字节双上限，`At` 单调时钟近似 LRU，淘汰时释放 bitmap；final 替换 preview 时释放旧 bitmap；`clearcache` 命令和 debug 状态增加缓存字节/预览数/后端/goroutine 字段。
+- 目录扫描 `fillDims` 预算从 900 降到 160，JPEG 尺寸/EXIF 头只 open 一次；超出预算的项在 final 完成后由 worker 回填宽高、方向和内嵌标记。
+- 缩略图 worker 结果合并到下一帧刷新，300 张目录不再每完成一张 `Invalidate`；后端版本写入缓存文件名（`v2`），升级后不会误用旧缓存。
+- 修复刷新按钮路径：`refreshThumbs()` 合并一批 worker 的刷新，不中断进行中的解码。
+
+### 测试
+
+- 新增 24/100/300 张 24 MP 语料基准、格式矩阵、8 个真实照片质量对比、EXIF 方向 1–8 尺寸断言、内嵌缩略图提取、WIC/ICO/RAW 单样本和纯 Go DCT 原型测试。
+- 全目录吞吐：24/100/300 张为 964/3402/10026 ms，旧 Go 为 1812/7283/21287 ms（约 1.9x/2.1x/2.1x）；峰值堆 9/13/15 MB vs 376/419/419 MB。
+- 真实应用首屏 12 张可见卡片：24/100/300 目录 305/376/374 ms，旧 Go 749/965/686 ms；全部预取 WIC 952/1002/998 ms，旧 Go 3243/3110/2155 ms。300 张 220/480 桶各 10 轮完整滚动 GDI 46–47、句柄稳定，480 桶字节缓存 233.7 MB。
+- `go test -count=1 -tags mygo_nowebview ./...`、debug 构建通过；`go vet` 仅保留 COM vtable 的两条 `unsafe.Pointer` 既有告警，未新增其他告警。损坏/0 字节/无 codec HEIC 显示占位不崩溃。
+
+### 已知限制
+
+- 当前测试机没有系统 HEIC codec，HEIC 缩略图只能显示占位；有 codec 的机器走 Shell provider。
+- 外接 USB HDD、SMB 网络盘和 ICC 广色域未在本机做像素级验收；保留发布后回归项。
+- 质量对比平均 MAE 2.35/255，略高于计划暂定的 2/255；差异主要来自 WIC 与 Go 的 YCbCr 转换/缩放核，实机并排无明显偏色或拉伸。
+
 ## [1.2.17] - 2026-11-25
 
 ### 修复

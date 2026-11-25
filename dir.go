@@ -53,18 +53,19 @@ func classify(name string) (kind, ext string) {
 
 // Item is one file or subfolder in a folder, as the grid sees it.
 type Item struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
-	Path   string `json:"path"`
-	Kind   string `json:"kind"`
-	Ext    string `json:"ext"`
-	Size   int64  `json:"size"`
-	Mtime  int64  `json:"mtime"`
-	W      int    `json:"w"`
-	H      int    `json:"h"`
-	Orient int    `json:"orient,omitempty"`
-	Video  bool   `json:"video"`
-	Play   bool   `json:"play"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Path     string `json:"path"`
+	Kind     string `json:"kind"`
+	Ext      string `json:"ext"`
+	Size     int64  `json:"size"`
+	Mtime    int64  `json:"mtime"`
+	W        int    `json:"w"`
+	H        int    `json:"h"`
+	Orient   int    `json:"orient,omitempty"`
+	HasThumb bool   `json:"-"`
+	Video    bool   `json:"video"`
+	Play     bool   `json:"play"`
 }
 
 // Store keeps every item the page may ask about by a short id, so that image
@@ -180,6 +181,7 @@ func forgetDims(path string) {
 type dimInfo struct {
 	W, H   int
 	Orient int
+	Thumb  bool
 }
 
 // fillDims reads image headers for the first budget items, concurrently.
@@ -211,6 +213,7 @@ func fillDims(list []*Item, budget int) {
 				d := imageDims(it.Path, it.Mtime)
 				if d.W > 0 {
 					it.W, it.H, it.Orient = d.W, d.H, d.Orient
+					it.HasThumb = d.Thumb
 				}
 			}
 		}()
@@ -377,8 +380,10 @@ func (FS) Browse(req BrowseRequest) DirResult {
 
 	res.Items = list
 	res.Total = len(list)
-	// Read image headers for the first screenfuls so the layout settles fast.
-	fillDims(list, 900)
+	// Read image headers for the first few screenfuls so the layout settles
+	// fast. The rest are filled lazily when their thumbnails are requested;
+	// a 900-item synchronous probe used to delay every folder open.
+	fillDims(list, 160)
 	res.ElapsedMS = time.Since(started).Milliseconds()
 	return res
 }

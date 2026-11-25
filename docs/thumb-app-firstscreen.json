@@ -1,0 +1,35 @@
+[
+  {
+    "Folder": "24",
+    "Backend": "auto",
+    "Total": 24,
+    "Ready": 27,
+    "Preview": 0,
+    "First12MS": 305.0,
+    "AllMS": 952.0,
+    "CacheMB": 9.3,
+    "ThumbSize": 220
+  },
+  {
+    "Folder": "100",
+    "Backend": "auto",
+    "Total": 100,
+    "Ready": 27,
+    "Preview": 0,
+    "First12MS": 376.0,
+    "AllMS": 1002.0,
+    "CacheMB": 9.3,
+    "ThumbSize": 220
+  },
+  {
+    "Folder": "300",
+    "Backend": "auto",
+    "Total": 300,
+    "Ready": 27,
+    "Preview": 0,
+    "First12MS": 374.0,
+    "AllMS": 998.0,
+    "CacheMB": 9.3,
+    "ThumbSize": 220
+  }
+]

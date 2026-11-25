@@ -17,7 +17,9 @@ type KV struct {
 	V string `json:"v"`
 }
 
-// probeImageDims reads an image header, honouring EXIF orientation.
+// probeImageDims reads an image header, honouring EXIF orientation. It opens
+// the file once and reuses the handle for the EXIF scan; the old version
+// opened the same JPEG twice for every directory item.
 func probeImageDims(path string) dimInfo {
 	f, err := os.Open(path)
 	if err != nil {
@@ -30,7 +32,9 @@ func probeImageDims(path string) dimInfo {
 	}
 	d := dimInfo{W: cfg.Width, H: cfg.Height}
 	if isJPEG(path) {
-		if o := readExif(path).Orientation; o > 1 && o < 9 {
+		ex := readExifFile(f)
+		d.Thumb = len(ex.Thumb) > 0
+		if o := ex.Orientation; o > 1 && o < 9 {
 			d.Orient = o
 			if o >= 5 {
 				d.W, d.H = cfg.Height, cfg.Width
@@ -53,6 +57,7 @@ func isJPEG(path string) bool {
 type exifData struct {
 	Orientation int
 	Values      []KV
+	Thumb       []byte
 }
 
 var exifTags = map[uint16]string{
@@ -85,6 +90,16 @@ func readExif(path string) exifData {
 		return exifData{}
 	}
 	defer f.Close()
+	return readExifFile(f)
+}
+
+// readExifFile parses EXIF from an already-open JPEG. It seeks back to the
+// beginning because callers such as probeImageDims may have read the image
+// header first.
+func readExifFile(f *os.File) exifData {
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return exifData{}
+	}
 	// EXIF lives in the first APP1 segment in nearly every JPEG. Reading a
 	// 128 KiB head keeps directory scans cheap; a larger APP1 is read from
 	// its own offset instead of pulling half a megabyte per image.
@@ -163,6 +178,21 @@ func parseTIFF(t []byte) exifData {
 			res.Orientation = n
 		}
 	}
+	// IFD1 holds the optional embedded JPEG thumbnail. Camera JPEGs often
+	// carry a 160/320px version that is far cheaper to decode than the full
+	// frame and is perfect as a first-paint preview.
+	if ifd1 := nextIFDOffset(t, bo, ifd0); ifd1 > 0 {
+		thumbVals := map[uint16]string{}
+		readIFD(t, bo, ifd1, thumbVals, 0)
+		if comp, _ := strconv.Atoi(thumbVals[0x0103]); comp == 6 {
+			off, err1 := strconv.Atoi(thumbVals[0x0201])
+			length, err2 := strconv.Atoi(thumbVals[0x0202])
+			if err1 == nil && err2 == nil && off > 0 && length > 0 && length <= 2<<20 &&
+				off+length <= len(t) {
+				res.Thumb = append([]byte(nil), t[off:off+length]...)
+			}
+		}
+	}
 	for _, tag := range orderedExifTags {
 		if v, ok := vals[tag]; ok && v != "" && tag != 0x0112 {
 			res.Values = append(res.Values, KV{K: exifTags[tag], V: v})
@@ -222,6 +252,18 @@ func readIFD(t []byte, bo binary.ByteOrder, offset int, vals map[uint16]string, 
 			}
 		}
 	}
+}
+
+func nextIFDOffset(t []byte, bo binary.ByteOrder, offset int) int {
+	if offset <= 0 || offset+2 > len(t) {
+		return 0
+	}
+	n := int(bo.Uint16(t[offset : offset+2]))
+	next := offset + 2 + n*12
+	if next+4 > len(t) {
+		return 0
+	}
+	return int(bo.Uint32(t[next : next+4]))
 }
 
 func typeSize(typ uint16) int {
