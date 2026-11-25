@@ -191,14 +191,19 @@ func (a *App) gridView(c *ui.Context, tab *Tab) {
 	layout := buildWaterfall(tab.Items, width, a.settings.ThumbSize, a.settings.GridGap, a.settings.ShowCardNames)
 	viewTop := tab.Scroll.Y
 	viewBottom := viewTop + windowH
+	viewCenter := viewTop + windowH/2
+	a.thumbFrame++
+	frame := a.thumbFrame
 	for _, cell := range layout.Cells {
 		if cell.Y+cell.height() < viewTop-160 || cell.Y > viewBottom+160 {
 			continue
 		}
 		if cell.It.Kind == "image" || cell.It.Kind == "video" {
-			a.ensureThumb(cell.It, a.settings.ThumbSize)
+			cardCenter := cell.Y + cell.height()/2
+			a.ensureThumb(cell.It, a.settings.ThumbSize, math.Abs(float64(cardCenter-viewCenter)), frame)
 		}
 	}
+	a.endThumbFrame(frame)
 
 	scroll := ui.Scroll(c).Fill().TrackScroll(&tab.Scroll).Padding(16).Gap(0)
 	scroll.Children(func() {

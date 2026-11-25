@@ -49,6 +49,14 @@ func lockThumb(path string) func() {
 }
 
 func initThumbs() {
+	n := runtime.NumCPU()
+	if n > 6 {
+		n = 6
+	}
+	if n < 2 {
+		n = 2
+	}
+	thumbSlots = make(chan struct{}, n)
 	cacheDir, err := mygo.App.Path(mygo.PathCache)
 	if err != nil {
 		logf("thumbs: cache dir: %v", err)
@@ -58,14 +66,6 @@ func initThumbs() {
 	if err := os.MkdirAll(thumbDir, 0o755); err != nil {
 		logf("thumbs: mkdir: %v", err)
 	}
-	n := runtime.NumCPU()
-	if n > 6 {
-		n = 6
-	}
-	if n < 2 {
-		n = 2
-	}
-	thumbSlots = make(chan struct{}, n)
 	go trimThumbCache()
 }
 
@@ -176,23 +176,7 @@ func renderThumb(it *Item, size int) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if o := d.Orient; o > 1 && o < 9 {
-		src = orientImage(src, o)
-	}
-	aspect := float64(src.Bounds().Dx()) / float64(src.Bounds().Dy())
-	tw := int(math.Round(float64(size) * clampF(aspect, 0.25, 4)))
-	if tw < 8 {
-		tw = 8
-	}
-	dst := image.NewRGBA(image.Rect(0, 0, tw, size))
-	// Composite onto a neutral surface so transparency reads in both themes.
-	for i := 0; i < len(dst.Pix); i += 4 {
-		dst.Pix[i+0] = 0x2a
-		dst.Pix[i+1] = 0x2a
-		dst.Pix[i+2] = 0x2e
-		dst.Pix[i+3] = 0xff
-	}
-	draw.CatmullRom.Scale(dst, dst.Bounds(), src, src.Bounds(), draw.Over, nil)
+	dst := thumbnailImage(src, d, size)
 	var buf bytes.Buffer
 	if err := jpeg.Encode(&buf, dst, &jpeg.Options{Quality: 84}); err != nil {
 		return nil, err

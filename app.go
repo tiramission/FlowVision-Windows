@@ -254,6 +254,9 @@ type App struct {
 	thumbs     map[string]*thumbEntry
 	thumbLoad  map[string]bool
 	thumbOrder []string
+	thumbQueue *thumbQueue
+	thumbFrame uint64
+	thumbOnce  sync.Once
 
 	treeOpen     map[string]*bool
 	treeRootOpen map[string]*bool
@@ -278,6 +281,7 @@ func newApp() *App {
 		sidebar:      getSettings().Sidebar,
 		thumbs:       map[string]*thumbEntry{},
 		thumbLoad:    map[string]bool{},
+		thumbQueue:   newThumbQueue(),
 		treeOpen:     map[string]*bool{},
 		treeRootOpen: map[string]*bool{},
 		treeLoaded:   map[string]bool{},
@@ -869,6 +873,9 @@ func (a *App) clearCache() {
 	a.thumbs = map[string]*thumbEntry{}
 	a.thumbLoad = map[string]bool{}
 	a.thumbOrder = nil
+	if a.thumbQueue != nil {
+		a.thumbQueue.reset()
+	}
 	a.refresh()
 }
 
@@ -1619,32 +1626,85 @@ func thumbKey(it *Item, size int) string {
 	return fmt.Sprintf("%s-%d-%d-%d", it.ID, thumbBudget(size), it.Mtime, it.Size)
 }
 
-// ensureThumb loads the thumbnail of an item if it is not in memory yet.
+// ensureThumb queues the thumbnail of an item if it is not in memory yet.
+// priority is the card's distance from the viewport center; lower loads first.
 // It must be called on the main thread.
-func (a *App) ensureThumb(it *Item, size int) {
+func (a *App) ensureThumb(it *Item, size int, priority float64, frame uint64) {
 	key := thumbKey(it, size)
-	if _, ok := a.thumbs[key]; ok || a.thumbLoad[key] {
+	if a.thumbLoad == nil {
+		a.thumbLoad = map[string]bool{}
+	}
+	if _, ok := a.thumbs[key]; ok {
 		return
 	}
+	if a.thumbLoad[key] {
+		if a.thumbQueue != nil {
+			a.thumbQueue.touch(key, priority, frame)
+		}
+		return
+	}
+	if a.thumbQueue == nil {
+		a.thumbQueue = newThumbQueue()
+	}
 	a.thumbLoad[key] = true
+	a.startThumbWorkers()
 	itCopy := *it
-	go func() {
-		data, err := getThumb(context.Background(), &itCopy, size)
+	a.thumbQueue.submit(&thumbTask{
+		key:      key,
+		item:     itCopy,
+		size:     size,
+		priority: priority,
+		frame:    frame,
+	})
+}
+
+func (a *App) startThumbWorkers() {
+	a.thumbOnce.Do(func() {
+		n := cap(thumbSlots)
+		if n < 1 {
+			n = 6
+		}
+		for i := 0; i < n; i++ {
+			go a.thumbWorker()
+		}
+	})
+}
+
+// endThumbFrame drops queued loads that the latest grid frame did not mark
+// visible. Running loads finish, so at most the workers' current tasks delay
+// a newly visible card.
+func (a *App) endThumbFrame(frame uint64) {
+	if a.thumbQueue == nil {
+		return
+	}
+	for _, key := range a.thumbQueue.retain(frame) {
+		delete(a.thumbLoad, key)
+	}
+}
+
+func (a *App) thumbWorker() {
+	for {
+		task := a.thumbQueue.next()
+		if task == nil {
+			return
+		}
+		data, err := getThumb(context.Background(), &task.item, task.size)
 		var bmp *ui.Bitmap
 		if err == nil {
 			bmp, err = ui.DecodeBitmap(data)
 		}
 		a.update(func() {
-			delete(a.thumbLoad, key)
+			delete(a.thumbLoad, task.key)
+			a.thumbQueue.done(task.key)
 			if err != nil || bmp == nil {
 				return
 			}
-			a.thumbs[key] = &thumbEntry{Bmp: bmp, At: nowUnix()}
-			a.thumbOrder = append(a.thumbOrder, key)
+			a.thumbs[task.key] = &thumbEntry{Bmp: bmp, At: nowUnix()}
+			a.thumbOrder = append(a.thumbOrder, task.key)
 			a.pruneThumbs()
 			a.refresh()
 		})
-	}()
+	}
 }
 
 func (a *App) thumb(it *Item, size int) *ui.Bitmap {

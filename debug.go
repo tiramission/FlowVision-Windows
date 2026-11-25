@@ -46,6 +46,9 @@ type debugState struct {
 	ViewerErr       string   `json:"viewerError,omitempty"`
 	HasBitmap       bool     `json:"hasBitmap"`
 	ThumbSize       int      `json:"thumbSize"`
+	ThumbPending    int      `json:"thumbPending"`
+	ThumbRunning    int      `json:"thumbRunning"`
+	ThumbReady      int      `json:"thumbReady"`
 	Sidebar         bool     `json:"sidebar"`
 	Recursive       bool     `json:"recursive"`
 	ShowHidden      bool     `json:"showHidden"`
@@ -83,6 +86,10 @@ func debugSnapshot() debugState {
 	st := debugState{Version: appVersion(), Active: app.active}
 	st.Sidebar = app.sidebar
 	st.ThumbSize = app.settings.ThumbSize
+	if app.thumbQueue != nil {
+		st.ThumbPending, st.ThumbRunning = app.thumbQueue.stats()
+	}
+	st.ThumbReady = len(app.thumbs)
 	st.Recursive = app.settings.Recursive
 	st.ShowHidden = app.settings.ShowHidden
 	st.ShowCardNames = app.settings.ShowCardNames
