@@ -7,8 +7,8 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// SideBinding is one physical mouse side button as Windows reports it to the
-// window. Side buttons arrive as keyboard events, so a binding keeps both the
+// SideBinding is one shortcut that can trigger a viewer direction. Windows
+// mouse side buttons arrive as keyboard events, so a binding keeps both the
 // named key and the modifiers held with it (usually none).
 type SideBinding struct {
 	Key  ui.Key       `json:"key"`
@@ -18,15 +18,31 @@ type SideBinding struct {
 func defaultSidePrev() SideBinding { return SideBinding{Key: ui.KeyBack} }
 func defaultSideNext() SideBinding { return SideBinding{Key: ui.KeyForward} }
 
-// viewerSideShortcuts registers the two calibrated viewer directions on the
-// window, where they work regardless of which canvas control has focus.
+// viewerBindings returns the four configured ways to move through the viewer:
+// a short press and a long press for each direction. A missing click binding
+// falls back to the side buttons; missing hold bindings stay unset.
+func (a *App) viewerBindings() (prevClick, nextClick, prevHold, nextHold SideBinding) {
+	return mergeViewerBindings(a.settings.SidePrev, a.settings.SideNext, a.settings.SidePrevHold, a.settings.SideNextHold)
+}
+
+// viewerSideShortcuts keeps the keyboard part of the bindings working without
+// the native side-button hook. Physical side buttons are handled by
+// viewerSideMouse because MyGo reports them only when they are released.
 func (a *App) viewerSideShortcuts(c *ui.Context) {
-	prev, next := mergeSideBindings(a.settings.SidePrev, a.settings.SideNext, defaultSidePrev(), defaultSideNext())
-	if prev.Key != ui.KeyUnknown {
-		c.OnWindowShortcut(prev.Mods, prev.Key, func() { a.viewerStep(-1) })
-	}
-	if next.Key != ui.KeyUnknown {
-		c.OnWindowShortcut(next.Mods, next.Key, func() { a.viewerStep(1) })
+	prev, next, prevHold, nextHold := a.viewerBindings()
+	seen := map[SideBinding]bool{}
+	for _, b := range []SideBinding{prev, next, prevHold, nextHold} {
+		if b.Key == ui.KeyUnknown || seen[b] {
+			continue
+		}
+		if a.sideMouseHook != 0 && (b.Key == ui.KeyBack || b.Key == ui.KeyForward) {
+			continue
+		}
+		seen[b] = true
+		binding := b
+		c.OnWindowShortcut(binding.Mods, binding.Key, func() {
+			a.beginViewerShortcut(binding)
+		})
 	}
 }
 
@@ -37,15 +53,31 @@ func normalizeSideBinding(b, fallback SideBinding) SideBinding {
 	return b
 }
 
-// mergeSideBindings keeps the two viewer directions usable after an older or
-// hand-edited settings file, and never lets both directions share one key.
-func mergeSideBindings(prev, next, defPrev, defNext SideBinding) (SideBinding, SideBinding) {
-	prev = normalizeSideBinding(prev, defPrev)
-	next = normalizeSideBinding(next, defNext)
+// mergeViewerBindings keeps old settings usable and prevents two click
+// actions (or two hold actions) from sharing one shortcut. A click and a hold
+// may share a key on purpose: that is how one side button gets two actions.
+func mergeViewerBindings(prev, next, prevHold, nextHold SideBinding) (SideBinding, SideBinding, SideBinding, SideBinding) {
+	prev = normalizeSideBinding(prev, defaultSidePrev())
+	next = normalizeSideBinding(next, defaultSideNext())
 	if prev == next {
-		prev, next = defPrev, defNext
+		prev, next = defaultSidePrev(), defaultSideNext()
 	}
-	return prev, next
+	if !viewerSideBindingAllowed(prev) {
+		prev = defaultSidePrev()
+	}
+	if !viewerSideBindingAllowed(next) {
+		next = defaultSideNext()
+	}
+	if prevHold.Key != ui.KeyUnknown && !viewerSideBindingAllowed(prevHold) {
+		prevHold = SideBinding{}
+	}
+	if nextHold.Key != ui.KeyUnknown && !viewerSideBindingAllowed(nextHold) {
+		nextHold = SideBinding{}
+	}
+	if prevHold == nextHold {
+		nextHold = SideBinding{}
+	}
+	return prev, next, prevHold, nextHold
 }
 
 // viewerSideBindingAllowed rejects keys already used by the viewer. A side
@@ -62,26 +94,37 @@ func viewerSideBindingAllowed(b SideBinding) bool {
 	return true
 }
 
-// applySideBinding assigns a captured key to one direction and keeps the
-// other direction on a different key.
-func applySideBinding(prev, next *SideBinding, target string, b SideBinding) {
-	if target == "prev" {
+func oppositeSideBinding(b SideBinding) SideBinding {
+	if b.Key == ui.KeyForward {
+		return SideBinding{Key: ui.KeyBack}
+	}
+	return SideBinding{Key: ui.KeyForward}
+}
+
+// assignViewerBinding updates one of the four draft bindings. Click bindings
+// move a duplicate click to the opposite default; hold bindings simply clear
+// the other hold, since unset is a normal long-press state.
+func assignViewerBinding(prev, next, prevHold, nextHold *SideBinding, target string, b SideBinding) {
+	switch target {
+	case "prevClick":
 		*prev = b
 		if *next == b {
-			if b.Key == ui.KeyForward {
-				*next = SideBinding{Key: ui.KeyBack}
-			} else {
-				*next = SideBinding{Key: ui.KeyForward}
-			}
+			*next = oppositeSideBinding(b)
 		}
-		return
-	}
-	*next = b
-	if *prev == b {
-		if b.Key == ui.KeyBack {
-			*prev = SideBinding{Key: ui.KeyForward}
-		} else {
-			*prev = SideBinding{Key: ui.KeyBack}
+	case "nextClick":
+		*next = b
+		if *prev == b {
+			*prev = oppositeSideBinding(b)
+		}
+	case "prevHold":
+		*prevHold = b
+		if *nextHold == b {
+			*nextHold = SideBinding{}
+		}
+	case "nextHold":
+		*nextHold = b
+		if *prevHold == b {
+			*prevHold = SideBinding{}
 		}
 	}
 }
@@ -144,4 +187,14 @@ func sideKeyLabel(key ui.Key) string {
 		return fmt.Sprintf("F%d", int(key-ui.KeyF1)+1)
 	}
 	return fmt.Sprintf("按键 %d", key)
+}
+
+func sideBindingDirection(b SideBinding) int {
+	if b.Key == ui.KeyBack {
+		return -1
+	}
+	if b.Key == ui.KeyForward {
+		return 1
+	}
+	return 0
 }

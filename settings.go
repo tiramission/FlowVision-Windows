@@ -38,8 +38,11 @@ type Settings struct {
 	Tabs          []TabState  `json:"tabs"`
 	ActiveTab     int         `json:"activeTab"`
 	CacheLimitMB  int         `json:"cacheLimitMB"`
+	ViewerPreload int         `json:"viewerPreload"`
 	SidePrev      SideBinding `json:"sidePrev"`
 	SideNext      SideBinding `json:"sideNext"`
+	SidePrevHold  SideBinding `json:"sidePrevHold"`
+	SideNextHold  SideBinding `json:"sideNextHold"`
 }
 
 func defaultSettings() Settings {
@@ -59,6 +62,7 @@ func defaultSettings() Settings {
 		PlayVideo:     true,
 		LoopVideo:     false,
 		CacheLimitMB:  1500,
+		ViewerPreload: 2,
 		SidePrev:      defaultSidePrev(),
 		SideNext:      defaultSideNext(),
 	}
@@ -88,11 +92,20 @@ func initSettings() {
 // parseSettings merges a stored document over the defaults, so a file written
 // by an older build (or edited by hand) keeps sane values for omitted fields.
 func parseSettings(data []byte) (Settings, bool) {
-	s := defaultSettings()
+	def := defaultSettings()
+	s := def
 	if json.Unmarshal(data, &s) != nil {
 		return defaultSettings(), false
 	}
-	return mergeSettings(defaultSettings(), s), true
+	// Older settings have no preload field. Keep the default instead of
+	// treating the zero value as an explicit "off" choice.
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(data, &fields) == nil {
+		if _, ok := fields["viewerPreload"]; !ok {
+			s.ViewerPreload = def.ViewerPreload
+		}
+	}
+	return mergeSettings(def, s), true
 }
 
 func mergeSettings(def, s Settings) Settings {
@@ -124,13 +137,20 @@ func mergeSettings(def, s Settings) Settings {
 	if s.CacheLimitMB > 20000 {
 		s.CacheLimitMB = 20000
 	}
+	if s.ViewerPreload < 0 {
+		s.ViewerPreload = 0
+	}
+	if s.ViewerPreload > 8 {
+		s.ViewerPreload = 8
+	}
 	if s.Favorites == nil {
 		s.Favorites = []string{}
 	}
 	if s.Tabs == nil {
 		s.Tabs = []TabState{}
 	}
-	s.SidePrev, s.SideNext = mergeSideBindings(s.SidePrev, s.SideNext, def.SidePrev, def.SideNext)
+	s.SidePrev, s.SideNext, s.SidePrevHold, s.SideNextHold = mergeViewerBindings(
+		s.SidePrev, s.SideNext, s.SidePrevHold, s.SideNextHold)
 	return s
 }
 

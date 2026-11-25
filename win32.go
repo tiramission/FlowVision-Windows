@@ -14,25 +14,31 @@ const (
 )
 
 var (
-	user32               = syscall.NewLazyDLL("user32.dll")
-	procOpenClipboard    = user32.NewProc("OpenClipboard")
-	procEmptyClipboard   = user32.NewProc("EmptyClipboard")
-	procSetClipboardData = user32.NewProc("SetClipboardData")
-	procCloseClipboard   = user32.NewProc("CloseClipboard")
-	procGetCursorPos     = user32.NewProc("GetCursorPos")
-	procGetWindowRect    = user32.NewProc("GetWindowRect")
-	procGetClientRect    = user32.NewProc("GetClientRect")
-	procScreenToClient   = user32.NewProc("ScreenToClient")
-	procGetCursorInfo    = user32.NewProc("GetCursorInfo")
-	procSetCursor        = user32.NewProc("SetCursor")
-	procLoadCursorW      = user32.NewProc("LoadCursorW")
-	procGetDpiForWindow  = user32.NewProc("GetDpiForWindow")
-	kernel32             = syscall.NewLazyDLL("kernel32.dll")
-	procGlobalAlloc      = kernel32.NewProc("GlobalAlloc")
-	procGlobalLock       = kernel32.NewProc("GlobalLock")
-	procGlobalUnlock     = kernel32.NewProc("GlobalUnlock")
-	procGlobalFree       = kernel32.NewProc("GlobalFree")
-	procRtlMoveMemory    = kernel32.NewProc("RtlMoveMemory")
+	user32                = syscall.NewLazyDLL("user32.dll")
+	procOpenClipboard     = user32.NewProc("OpenClipboard")
+	procEmptyClipboard    = user32.NewProc("EmptyClipboard")
+	procSetClipboardData  = user32.NewProc("SetClipboardData")
+	procCloseClipboard    = user32.NewProc("CloseClipboard")
+	procGetCursorPos      = user32.NewProc("GetCursorPos")
+	procGetWindowRect     = user32.NewProc("GetWindowRect")
+	procGetClientRect     = user32.NewProc("GetClientRect")
+	procScreenToClient    = user32.NewProc("ScreenToClient")
+	procGetCursorInfo     = user32.NewProc("GetCursorInfo")
+	procSetCursor         = user32.NewProc("SetCursor")
+	procLoadCursorW       = user32.NewProc("LoadCursorW")
+	procGetDpiForWindow   = user32.NewProc("GetDpiForWindow")
+	procGetAsyncKeyState  = user32.NewProc("GetAsyncKeyState")
+	procGetForegroundWnd  = user32.NewProc("GetForegroundWindow")
+	procSetWindowsHookEx  = user32.NewProc("SetWindowsHookExW")
+	procUnhookWindowsHook = user32.NewProc("UnhookWindowsHookEx")
+	procCallNextHookEx    = user32.NewProc("CallNextHookEx")
+	kernel32              = syscall.NewLazyDLL("kernel32.dll")
+	procGetModuleHandleW  = kernel32.NewProc("GetModuleHandleW")
+	procGlobalAlloc       = kernel32.NewProc("GlobalAlloc")
+	procGlobalLock        = kernel32.NewProc("GlobalLock")
+	procGlobalUnlock      = kernel32.NewProc("GlobalUnlock")
+	procGlobalFree        = kernel32.NewProc("GlobalFree")
+	procRtlMoveMemory     = kernel32.NewProc("RtlMoveMemory")
 )
 
 func procErr(err error) error {
@@ -269,4 +275,25 @@ type shFileOpStruct struct {
 	_pad2                 uint32
 	hNameMappings         uintptr
 	lpszProgressTitle     *uint16
+}
+
+// windowForeground reports whether hwnd is the window receiving the user's
+// keyboard and pointer input. Viewer shortcuts are suppressed in the
+// background so a held key cannot change images while another app is active.
+func windowForeground(hwnd uintptr) bool {
+	if hwnd == 0 {
+		return false
+	}
+	fg, _, _ := procGetForegroundWnd.Call()
+	return fg == hwnd
+}
+
+// asyncKeyDown reads the physical key state. It is used for keyboard shortcuts
+// with long-press semantics, and for mouse side buttons only as a fallback.
+func asyncKeyDown(vk int) bool {
+	if vk <= 0 {
+		return false
+	}
+	state, _, _ := procGetAsyncKeyState.Call(uintptr(vk))
+	return uint16(state)&0x8000 != 0
 }

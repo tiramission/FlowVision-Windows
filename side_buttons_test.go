@@ -16,32 +16,72 @@ func TestSideBindingsDefaultForOldSettings(t *testing.T) {
 	if s.SidePrev != defaultSidePrev() || s.SideNext != defaultSideNext() {
 		t.Fatalf("side bindings = %+v / %+v, want defaults", s.SidePrev, s.SideNext)
 	}
+	if s.SidePrevHold.Key != ui.KeyUnknown || s.SideNextHold.Key != ui.KeyUnknown {
+		t.Fatalf("old settings invented long-press bindings: %+v / %+v", s.SidePrevHold, s.SideNextHold)
+	}
+	if s.ViewerPreload != 2 {
+		t.Fatalf("old settings preload = %d, want default 2", s.ViewerPreload)
+	}
 }
 
-func TestSideBindingsNeverShareOneKey(t *testing.T) {
-	prev, next := mergeSideBindings(
+func TestViewerPreloadAllowsExplicitOff(t *testing.T) {
+	raw := []byte(`{"viewerPreload":0}`)
+	s, ok := parseSettings(raw)
+	if !ok {
+		t.Fatal("settings with preload 0 did not parse")
+	}
+	if s.ViewerPreload != 0 {
+		t.Fatalf("explicit preload 0 became %d", s.ViewerPreload)
+	}
+}
+
+func TestViewerBindingsNeverShareOneClickOrHold(t *testing.T) {
+	prev, next, prevHold, nextHold := mergeViewerBindings(
 		SideBinding{Key: ui.KeyBack},
 		SideBinding{Key: ui.KeyBack},
-		defaultSidePrev(),
-		defaultSideNext(),
+		SideBinding{Key: ui.KeyPageUp},
+		SideBinding{Key: ui.KeyPageUp},
 	)
 	if prev == next {
-		t.Fatalf("bindings still share %v", prev)
+		t.Fatalf("click bindings still share %v", prev)
 	}
 	if prev != defaultSidePrev() || next != defaultSideNext() {
-		t.Fatalf("duplicate bindings did not reset to defaults: %+v %+v", prev, next)
+		t.Fatalf("duplicate click bindings did not reset: %+v %+v", prev, next)
+	}
+	if prevHold.Key != ui.KeyPageUp || nextHold.Key != ui.KeyUnknown {
+		t.Fatalf("duplicate hold bindings not cleared: %+v %+v", prevHold, nextHold)
 	}
 }
 
-func TestApplySideBindingAssignsAndMovesTheOtherDirection(t *testing.T) {
+func TestViewerBindingsLetClickAndHoldShareSideKey(t *testing.T) {
+	prev, next, prevHold, nextHold := mergeViewerBindings(
+		SideBinding{Key: ui.KeyBack},
+		SideBinding{Key: ui.KeyForward},
+		SideBinding{Key: ui.KeyForward},
+		SideBinding{Key: ui.KeyBack},
+	)
+	if prev != (SideBinding{Key: ui.KeyBack}) || next != (SideBinding{Key: ui.KeyForward}) {
+		t.Fatalf("click bindings changed: %+v %+v", prev, next)
+	}
+	if prevHold != (SideBinding{Key: ui.KeyForward}) || nextHold != (SideBinding{Key: ui.KeyBack}) {
+		t.Fatalf("click and hold sharing a side key was rejected: %+v %+v", prevHold, nextHold)
+	}
+}
+
+func TestApplyViewerBindingMovesDuplicateClick(t *testing.T) {
 	prev, next := defaultSidePrev(), defaultSideNext()
-	applySideBinding(&prev, &next, "prev", SideBinding{Key: ui.KeyForward})
+	prevHold, nextHold := SideBinding{}, SideBinding{}
+	assignViewerBinding(&prev, &next, &prevHold, &nextHold, "prevClick", SideBinding{Key: ui.KeyForward})
 	if prev.Key != ui.KeyForward || next.Key != ui.KeyBack {
 		t.Fatalf("after assigning forward to previous: prev=%+v next=%+v", prev, next)
 	}
-	applySideBinding(&prev, &next, "next", SideBinding{Key: ui.KeyPageUp})
+	assignViewerBinding(&prev, &next, &prevHold, &nextHold, "nextClick", SideBinding{Key: ui.KeyPageUp})
 	if next.Key != ui.KeyPageUp || prev.Key != ui.KeyForward {
 		t.Fatalf("after assigning PageUp to next: prev=%+v next=%+v", prev, next)
+	}
+	assignViewerBinding(&prev, &next, &prevHold, &nextHold, "prevHold", SideBinding{Key: ui.KeyForward})
+	if prevHold.Key != ui.KeyForward || nextHold.Key != ui.KeyUnknown {
+		t.Fatalf("hold assignment = %+v %+v", prevHold, nextHold)
 	}
 }
 
@@ -76,60 +116,49 @@ func TestViewerReservedSideBindings(t *testing.T) {
 	}
 }
 
-func TestSideCalibrationRecalibrateRestoresCaptureFocus(t *testing.T) {
+func TestSettingsInlineBindingCapture(t *testing.T) {
 	a := newViewTestApp()
 	a.settings = defaultSettings()
 	a.draft = a.settings
 	a.showSettings = true
-	a.beginSideCalibration("next")
+	a.settingsUI.Category = "control"
+	a.beginBindingCapture("prevClick")
 	tt := ui.NewTester(a.view, 1200, 900)
 	tt.Frame()
-	tt.KeyDown(ui.KeyBack)
+	tt.KeyDown(ui.KeyPageUp)
 	tt.Frame()
-	tt.KeyUp(ui.KeyBack)
+	tt.KeyUp(ui.KeyPageUp)
 	tt.Frame()
-	if err := tt.Click("重新识别"); err != nil {
-		t.Fatal(err)
+	if a.draft.SidePrev.Key != ui.KeyPageUp {
+		t.Fatalf("captured key = %d, want PageUp", a.draft.SidePrev.Key)
 	}
-	tt.Frame()
-	tt.KeyDown(ui.KeyPageDown)
-	tt.Frame()
-	if a.sideCaptureBinding.Key != ui.KeyPageDown {
-		t.Fatalf("recalibration captured key = %d, want PageDown", a.sideCaptureBinding.Key)
+	if a.bindingCapture != "" {
+		t.Fatalf("capture stayed on %q after applying", a.bindingCapture)
 	}
 }
 
-func TestSideCalibrationModalCapturesBackKey(t *testing.T) {
+func TestSettingsInlineBindingCaptureRejectsViewerKey(t *testing.T) {
 	a := newViewTestApp()
 	a.settings = defaultSettings()
 	a.draft = a.settings
 	a.showSettings = true
-	a.beginSideCalibration("prev")
-	tt := ui.NewTester(a.view, 1200, 900)
-	tt.Frame()
-	tt.KeyDown(ui.KeyBack)
-	tt.Frame()
-	tt.KeyUp(ui.KeyBack)
-	tt.Frame()
-	if a.sideCaptureBinding.Key != ui.KeyBack {
-		t.Fatalf("captured key = %d, want KeyBack", a.sideCaptureBinding.Key)
+	a.settingsUI.Category = "control"
+	a.applyBindingCapture("prevClick", SideBinding{Key: ui.KeyRight})
+	if a.draft.SidePrev != defaultSidePrev() {
+		t.Fatalf("reserved key changed binding to %+v", a.draft.SidePrev)
 	}
-	if err := tt.Click("应用侧键"); err != nil {
-		t.Fatal(err)
-	}
-	tt.Frame()
-	if a.sideCalibrationOpen {
-		t.Fatal("calibration modal stayed open after applying")
-	}
-	if a.draft.SidePrev.Key != ui.KeyBack || a.draft.SideNext.Key != ui.KeyForward {
-		t.Fatalf("draft bindings = %+v / %+v", a.draft.SidePrev, a.draft.SideNext)
+	if a.bindingCaptureNote == "" {
+		t.Fatal("reserved key produced no explanation")
 	}
 }
 
-func TestSettingsJSONKeepsSideBindings(t *testing.T) {
+func TestSettingsJSONKeepsViewerBindings(t *testing.T) {
 	s := defaultSettings()
 	s.SidePrev = SideBinding{Key: ui.KeyPageUp, Mods: ui.Ctrl}
 	s.SideNext = SideBinding{Key: ui.KeyPageDown}
+	s.SidePrevHold = SideBinding{Key: ui.KeyForward}
+	s.SideNextHold = SideBinding{Key: ui.KeyBack}
+	s.ViewerPreload = 4
 	data, err := json.Marshal(s)
 	if err != nil {
 		t.Fatal(err)
@@ -138,7 +167,77 @@ func TestSettingsJSONKeepsSideBindings(t *testing.T) {
 	if !ok {
 		t.Fatal("serialized settings did not parse")
 	}
-	if got.SidePrev != s.SidePrev || got.SideNext != s.SideNext {
-		t.Fatalf("round trip lost bindings: %+v / %+v", got.SidePrev, got.SideNext)
+	if got.SidePrev != s.SidePrev || got.SideNext != s.SideNext ||
+		got.SidePrevHold != s.SidePrevHold || got.SideNextHold != s.SideNextHold {
+		t.Fatalf("round trip lost bindings: %+v %+v %+v %+v", got.SidePrev, got.SideNext, got.SidePrevHold, got.SideNextHold)
+	}
+	if got.ViewerPreload != 4 {
+		t.Fatalf("round trip preload = %d, want 4", got.ViewerPreload)
+	}
+}
+
+func TestViewerSideMouseClickAndHold(t *testing.T) {
+	a := newViewerGestureApp(t)
+	defer a.closeViewer()
+	a.settings.SidePrev = SideBinding{Key: ui.KeyBack}
+	a.settings.SideNext = SideBinding{Key: ui.KeyForward}
+	a.settings.SidePrevHold = SideBinding{}
+	a.settings.SideNextHold = SideBinding{Key: ui.KeyBack}
+	a.viewer.Index = 0
+	a.viewer.Item = a.tab().Items[0]
+
+	// A short back-button press still moves to the previous item.
+	a.viewer.Index = 1
+	a.viewer.Item = a.tab().Items[1]
+	a.viewerSideMouseEvent(1, true)
+	a.viewerSideMouseEvent(1, false)
+	if a.viewer.Index != 0 {
+		t.Fatalf("short click went to index %d, want 0", a.viewer.Index)
+	}
+
+	// Holding the same back button runs its long-press action instead, which is
+	// configured as next here. Release must not also run the short action.
+	a.viewer.Index = 0
+	a.viewer.Item = a.tab().Items[0]
+	a.viewerSideMouseEvent(1, true)
+	a.fireSideMouseHold(1)
+	a.viewerSideMouseEvent(1, false)
+	if a.viewer.Index != 1 {
+		t.Fatalf("long press went to index %d, want 1", a.viewer.Index)
+	}
+}
+
+func TestViewerSideMouseIgnoresRepeatedDown(t *testing.T) {
+	a := newViewerGestureApp(t)
+	defer a.closeViewer()
+	a.settings.SideNextHold = SideBinding{Key: ui.KeyBack}
+	a.viewer.Index = 0
+	a.viewer.Item = a.tab().Items[0]
+	a.viewerSideMouseEvent(1, true)
+	a.viewerSideMouseEvent(1, true)
+	a.fireSideMouseHold(1)
+	a.viewerSideMouseEvent(1, false)
+	if a.viewer.Index != 1 {
+		t.Fatalf("repeated down moved to index %d, want one step", a.viewer.Index)
+	}
+}
+
+func TestViewerSideMouseIgnoredOverSettings(t *testing.T) {
+	a := newViewerGestureApp(t)
+	defer a.closeViewer()
+	a.settings.SidePrev = SideBinding{Key: ui.KeyBack}
+	a.viewer.Index = 1
+	a.viewer.Item = a.tab().Items[1]
+	a.showSettings = true
+	a.viewerSideMouseEvent(1, true)
+	a.viewerSideMouseEvent(1, false)
+	if a.viewer.Index != 1 {
+		t.Fatalf("side button navigated behind settings to index %d", a.viewer.Index)
+	}
+	a.showSettings = false
+	a.viewerSideMouseEvent(1, true)
+	a.viewerSideMouseEvent(1, false)
+	if a.viewer.Index != 0 {
+		t.Fatalf("side button stopped working after settings closed: index %d", a.viewer.Index)
 	}
 }

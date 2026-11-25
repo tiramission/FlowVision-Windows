@@ -212,8 +212,8 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 					Items: []components.SettingsItem{
 						{
 							ID: "side-map", Title: "查看器侧键",
-							Description: "侧键在查看器里切换上一张 / 下一张；可按下实体侧键校准方向",
-							Keywords:    []string{"mouse", "side", "button", "back", "forward", "侧键", "鼠标", "校准"},
+							Description: "侧键在查看器里切换上一张 / 下一张；单击和长按可分别配置快捷键",
+							Keywords:    []string{"mouse", "side", "button", "back", "forward", "侧键", "鼠标", "快捷键", "单击", "长按"},
 							Leading:     settingsIcon(lucide.MousePointer2()),
 							Stacked:     true,
 							Build:       a.sideButtonSetting,
@@ -230,6 +230,23 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 							Leading:     settingsIcon(lucide.Info()),
 							Build: func(c *ui.Context) {
 								components.Switch(c, &a.draft.InfoPanel, "默认显示信息面板", components.SwitchOptions{HideLabel: true, Compact: true})
+							},
+						},
+						{
+							ID: "viewer-preload", Title: "预加载相邻图片",
+							Description: "打开图片时预先解码前后各若干张，切换更快；0 关闭",
+							Keywords:    []string{"preload", "cache", "预加载", "缓存", "相邻"},
+							Leading:     settingsIcon(lucide.Images()),
+							Stacked:     true,
+							Build: func(c *ui.Context) {
+								th := c.Theme()
+								ui.Row(c).Gap(8).Children(func() {
+									components.NumberInput(c.Key("settings-viewer-preload"), &a.draftPreload, 0, 8, 1).
+										Label("前后各预加载（张）").Width(180)
+									components.Text(c, "张").FontSize(10.5).TextColor(th.TextMuted)
+									ui.Spacer(c)
+									components.Text(c, "默认 2 张").FontSize(10).TextColor(th.TextMuted)
+								})
 							},
 						},
 					},

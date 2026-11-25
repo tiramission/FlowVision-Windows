@@ -256,9 +256,9 @@ func (a *App) viewerHeader(c *ui.Context, it *Item, th *ui.Theme, floating bool)
 func (a *App) viewerShortcuts(c *ui.Context, it *Item) {
 	c.OnWindowShortcut(0, ui.KeyLeft, func() { a.viewerStep(-1) })
 	c.OnWindowShortcut(0, ui.KeyRight, func() { a.viewerStep(1) })
-	// Windows mouse side buttons arrive as back/forward keys. Their mapping is
-	// calibrated in settings because vendors can swap the two physical buttons
-	// or send a different named key.
+	// Windows mouse side buttons arrive as back/forward keys. The settings page
+	// records each direction's click and long-press shortcut, including vendor
+	// drivers that send a different named key.
 	a.viewerSideShortcuts(c)
 	if !a.viewerImmersive() {
 		// The info panel is deliberately absent in immersive viewer mode; F11
@@ -461,9 +461,10 @@ func (a *App) endViewerHold(button int, canceled bool) {
 	}
 }
 
-// finishViewerHold turns a stationary long press into the same zoom shortcuts
-// upstream FlowVision offers: primary for actual size, secondary for fit.
-func (a *App) finishViewerHold(c *ui.Context) {
+// finishViewerHold turns a stationary long press into a pointer-anchored jump
+// to 100% on the primary button, and a recenter on the secondary button. If
+// the image already displays at 100% or more, the primary gesture does nothing.
+func (a *App) finishViewerHold(c *ui.Context, w, h float32) {
 	if !a.viewer.HoldActive {
 		return
 	}
@@ -472,12 +473,12 @@ func (a *App) finishViewerHold(c *ui.Context) {
 		c.After(viewerHoldDelay - elapsed)
 		return
 	}
-	button := a.viewer.HoldButton
+	button, x, y := a.viewer.HoldButton, a.viewer.HoldX, a.viewer.HoldY
 	a.cancelViewerHold()
 	if button == 0 {
-		a.viewerActualSize()
+		a.viewerActualSizeAt(x, y, w, h)
 	} else if button == 1 {
-		a.viewerFit()
+		a.viewerCenter()
 	}
 }
 
@@ -521,7 +522,7 @@ func (a *App) viewerCanvas(c *ui.Context, it *Item, th *ui.Theme) {
 	ui.Box(c).Grow(1).FillHeight().Clip().Children(func() {
 		canvasW, canvasH := a.viewerCanvasSize(c)
 		box := ui.Box(c).Fill().Focusable().Label("媒体查看器")
-		a.finishViewerHold(c)
+		a.finishViewerHold(c, canvasW, canvasH)
 		if a.viewerImmersive() && !a.viewer.CursorVisible {
 			box.Cursor(ui.CursorNone)
 		}

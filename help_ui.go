@@ -85,13 +85,13 @@ func (a *App) helpSections() []helpSection {
 			title: "图片查看器", icon: lucide.Image(), filter: helpFilterImage,
 			items: []helpShortcut{
 				{"左 / 右", "上一张 / 下一张"},
-				{"鼠标侧键", "上一张 / 下一张（可在设置校准）"},
+				{"鼠标侧键", "单击 / 长按切换上一张或下一张（可在设置配置）"},
 				{"+ / -", "放大 / 缩小"},
 				{"R / Shift+R", "顺时针 / 逆时针旋转"},
 				{"0", "适合窗口"},
 				{"1", "100% 原始像素"},
 				{"C", "图片居中"},
-				{"长按左 / 右键", "100% / 适合窗口"},
+				{"长按左 / 右键", "按指针位置到 100% / 恢复居中；已到 100% 不再放大"},
 				{"I", "显示 / 隐藏信息面板"},
 				{"双击画面", "进入 / 退出沉浸"},
 			},
@@ -200,7 +200,7 @@ func (a *App) helpModal(c *ui.Context) {
 			ui.Divider(c)
 			ui.Row(c).Gap(9).AlignItems(ui.Center).Children(func() {
 				components.Icon(c, lucide.Info()).Size(14, 14).TextColor(th.TextMuted)
-				components.Text(c, "侧键方向可在 设置 → 控制 中校准；查看器沉浸在主窗口内，浮层只在鼠标到达上下边缘时出现。").
+				components.Text(c, "侧键单击和长按可在 设置 → 控制 中分别配置；查看器沉浸在主窗口内，浮层只在鼠标到达上下边缘时出现。").
 					FontSize(10.5).TextColor(th.TextMuted).Grow(1)
 				if components.Button(c, "关闭", components.ButtonPrimary).Clicked() {
 					a.showHelp = false

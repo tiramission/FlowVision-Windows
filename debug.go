@@ -55,11 +55,15 @@ type debugState struct {
 	ShowCardNames   bool     `json:"showCardNames"`
 	ShowSettings    bool     `json:"showSettings"`
 	SettingsCat     string   `json:"settingsCategory"`
-	SideCalOpen     bool     `json:"sideCalibrationOpen"`
-	SideCalTarget   string   `json:"sideCalibrationTarget"`
-	SideCalCapture  string   `json:"sideCalibrationCapture"`
+	BindingCapture  string   `json:"bindingCapture"`
 	SidePrev        string   `json:"sidePrev"`
 	SideNext        string   `json:"sideNext"`
+	SidePrevHold    string   `json:"sidePrevHold"`
+	SideNextHold    string   `json:"sideNextHold"`
+	SideMouseHook   bool     `json:"sideMouseHook"`
+	ViewerCanAct    bool     `json:"viewerCanAct"`
+	ViewerPreload   int      `json:"viewerPreload"`
+	ViewerCached    int      `json:"viewerPreloadCached"`
 	ShowHelp        bool     `json:"showHelp"`
 	ShowAbout       bool     `json:"showAbout"`
 	UpdateOpen      bool     `json:"updateOpen"`
@@ -95,11 +99,15 @@ func debugSnapshot() debugState {
 	st.ShowCardNames = app.settings.ShowCardNames
 	st.ShowSettings = app.showSettings
 	st.SettingsCat = app.settingsUI.Category
-	st.SideCalOpen = app.sideCalibrationOpen
-	st.SideCalTarget = app.sideCalibrationTarget
-	st.SideCalCapture = sideBindingLabel(app.sideCaptureBinding)
 	st.SidePrev = sideBindingLabel(app.settings.SidePrev)
 	st.SideNext = sideBindingLabel(app.settings.SideNext)
+	st.SidePrevHold = sideBindingLabel(app.settings.SidePrevHold)
+	st.SideNextHold = sideBindingLabel(app.settings.SideNextHold)
+	st.SideMouseHook = app.sideMouseHook != 0
+	st.ViewerCanAct = app.viewerCanAct()
+	st.BindingCapture = app.bindingCapture
+	st.ViewerPreload = app.settings.ViewerPreload
+	st.ViewerCached = app.viewerPreloadCount()
 	st.ShowHelp = app.showHelp
 	st.ShowAbout = app.showAbout
 	st.UpdateOpen = app.updateOpen
@@ -417,18 +425,17 @@ func debugCommand(name, arg string) {
 			app.settingsUI.Category = arg
 			app.refresh()
 		}
-	case "sidecalib":
+	case "sidebinding":
 		if arg == "" {
-			arg = "prev"
+			arg = "prevClick"
 		}
-		app.beginSideCalibration(arg)
+		app.beginBindingCapture(arg)
 	case "closeui":
 		app.closeViewer()
 		app.showSettings = false
 		app.showHelp = false
 		app.showAbout = false
 		app.updateOpen = false
-		app.sideCalibrationOpen = false
 		app.refresh()
 	case "applysettings":
 		app.applySettings()

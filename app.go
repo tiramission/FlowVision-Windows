@@ -192,6 +192,7 @@ type App struct {
 	draftGridGap    float64
 	draftSidebarW   float64
 	draftCacheLimit float64
+	draftPreload    float64
 	draftTheme      string
 	draftSort       string
 	cacheInfo       CacheInfo
@@ -207,11 +208,16 @@ type App struct {
 	showAbout  bool
 	errorMsg   string
 
-	sideCalibrationOpen   bool
-	sideCalibrationTarget string
-	sideCalibrationGen    int
-	sideCaptureBinding    SideBinding
-	sideCaptureNote       string
+	bindingCapture     string
+	bindingCaptureGen  int
+	bindingCaptureNote string
+
+	sideMouseDown  [2]bool
+	sideMouseAt    [2]time.Time
+	sideMouseHold  [2]bool
+	sideMouseTimer [2]*time.Timer
+	sideMouseHook  uintptr
+	viewerKeysDown map[SideBinding]bool
 
 	updateOpen        bool
 	updatePhase       UpdatePhase
@@ -239,8 +245,15 @@ type App struct {
 	confirmDeleteOpen bool
 	confirmPermanent  bool
 
-	viewer    Viewer
-	viewerGen int
+	viewer               Viewer
+	viewerGen            int
+	viewerPreload        map[string]*viewerPreloadEntry
+	viewerPreloadLoading map[string]bool
+	viewerPreloadDesired map[string]bool
+	viewerPreloadQueue   []viewerPreloadJob
+	viewerPreloadWorker  int
+	viewerPreloadEpoch   int
+	viewerPreloadMu      sync.Mutex
 
 	themeDetected bool
 	systemDark    bool
@@ -277,16 +290,19 @@ const thumbCacheMax = 420
 
 func newApp() *App {
 	a := &App{
-		settings:     getSettings(),
-		sidebar:      getSettings().Sidebar,
-		thumbs:       map[string]*thumbEntry{},
-		thumbLoad:    map[string]bool{},
-		thumbQueue:   newThumbQueue(),
-		treeOpen:     map[string]*bool{},
-		treeRootOpen: map[string]*bool{},
-		treeLoaded:   map[string]bool{},
-		treeLoading:  map[string]bool{},
-		treeKids:     map[string][]TreeEntry{},
+		settings:             getSettings(),
+		sidebar:              getSettings().Sidebar,
+		thumbs:               map[string]*thumbEntry{},
+		thumbLoad:            map[string]bool{},
+		thumbQueue:           newThumbQueue(),
+		treeOpen:             map[string]*bool{},
+		treeRootOpen:         map[string]*bool{},
+		treeLoaded:           map[string]bool{},
+		treeLoading:          map[string]bool{},
+		treeKids:             map[string][]TreeEntry{},
+		viewerPreload:        map[string]*viewerPreloadEntry{},
+		viewerPreloadLoading: map[string]bool{},
+		viewerPreloadDesired: map[string]bool{},
 	}
 	a.sidebarWidth = a.settings.SidebarWidth
 	a.places = (FS{}).Places()
@@ -750,6 +766,8 @@ func (a *App) openSettings() {
 	a.fillSettingsDraft(a.settings)
 	a.settingsUI.Query = ""
 	a.cacheInfo = thumbCacheInfo()
+	a.bindingCapture = ""
+	a.bindingCaptureNote = ""
 	a.showSettings = true
 	a.refresh()
 }
@@ -768,6 +786,7 @@ func (a *App) fillSettingsDraft(s Settings) {
 	a.draftGridGap = float64(s.GridGap)
 	a.draftSidebarW = float64(s.SidebarWidth)
 	a.draftCacheLimit = float64(s.CacheLimitMB)
+	a.draftPreload = float64(s.ViewerPreload)
 }
 
 // commitSettingsDraft writes values owned by controls that need a numeric or
@@ -779,6 +798,7 @@ func (a *App) commitSettingsDraft() Settings {
 	a.draft.GridGap = int(math.Round(a.draftGridGap))
 	a.draft.SidebarWidth = int(math.Round(a.draftSidebarW))
 	a.draft.CacheLimitMB = int(math.Round(a.draftCacheLimit))
+	a.draft.ViewerPreload = int(math.Round(a.draftPreload))
 	return a.draft
 }
 
@@ -804,6 +824,11 @@ func (a *App) applySettings() {
 	_ = saveSettings(s)
 	a.syncWindowMinimum()
 	a.showSettings = false
+	a.bindingCapture = ""
+	a.bindingCaptureNote = ""
+	if a.viewer.Open {
+		a.scheduleViewerPreload()
+	}
 	a.applyTheme()
 	if t := a.tab(); t != nil {
 		t.Sort = s.Sort
@@ -1147,6 +1172,7 @@ func (a *App) openViewer(it *Item) {
 		// opening is recognized instead of being consumed as the initial sample.
 		a.viewer.CursorX, a.viewer.CursorY, a.viewer.CursorTracked = x, y, true
 	}
+	a.installViewerSideMouseHook()
 	a.loadViewerMedia(it)
 	a.refresh()
 }
@@ -1197,6 +1223,7 @@ func (a *App) loadViewerMedia(it *Item) {
 			}()
 		}
 	}
+	thisFramePreloaded := false
 	switch it.Kind {
 	case "video":
 		player, err := mvideo.Open(it.Path)
@@ -1223,17 +1250,14 @@ func (a *App) loadViewerMedia(it *Item) {
 			a.refresh()
 		})
 	default:
+		if bmp := a.takeViewerPreload(it); bmp != nil {
+			a.viewer.Loading = false
+			a.viewer.Bitmap = bmp
+			thisFramePreloaded = true
+			break
+		}
 		go func() {
-			data, err := previewBytes(it)
-			if err != nil {
-				if raw, rerr := os.ReadFile(it.Path); rerr == nil {
-					data, err = raw, nil
-				}
-			}
-			var bmp *ui.Bitmap
-			if err == nil {
-				bmp, err = ui.DecodeBitmap(data)
-			}
+			bmp, err := decodeViewerImage(it)
 			a.update(func() {
 				if a.viewer.Gen != gen || a.viewer.Item != it {
 					return
@@ -1243,10 +1267,15 @@ func (a *App) loadViewerMedia(it *Item) {
 					a.viewer.Err = err.Error()
 				} else {
 					a.viewer.Bitmap = bmp
+					a.storeViewerPreload(it, bmp)
 				}
 				a.refresh()
 			})
 		}()
+	}
+	a.scheduleViewerPreload()
+	if thisFramePreloaded {
+		a.refresh()
 	}
 }
 
@@ -1328,6 +1357,9 @@ func (a *App) startViewerChromeTicker(gen int) {
 
 func (a *App) closeViewer() {
 	wasOpen := a.viewer.Open
+	a.stopViewerSideMouseHook()
+	a.clearViewerPreloadCache()
+	a.viewerKeysDown = nil
 	if a.viewer.Player != nil {
 		a.viewer.Player.Close()
 		a.viewer.Player = nil
@@ -1512,6 +1544,8 @@ func (a *App) viewerReset() {
 
 // viewerActualSize sets the image to 100%: one bitmap pixel per display pixel.
 // Zoom is stored relative to the fit scale, so it is the reciprocal of that fit.
+// Unlike the long-press gesture, the explicit action always recenters the image
+// and keeps working after the image has already reached 100%.
 func (a *App) viewerActualSize() {
 	if a.viewer.Bitmap == nil || a.viewer.Item == nil || a.viewer.Item.Kind != "image" {
 		return
@@ -1522,9 +1556,36 @@ func (a *App) viewerActualSize() {
 	if fit <= 0 {
 		return
 	}
-	a.viewer.Zoom = viewerActualZoom(fit)
+	a.viewer.Zoom = clampViewerZoom(viewerActualZoom(fit))
 	a.viewer.PanX = 0
 	a.viewer.PanY = 0
+	a.refresh()
+}
+
+// viewerActualSizeAt jumps to 100% while keeping the bitmap point under the
+// pointer fixed. Once the display is already at 100% or beyond, it leaves the
+// image alone so repeated long presses cannot keep enlarging it.
+func (a *App) viewerActualSizeAt(x, y, w, h float32) {
+	if a.viewer.Bitmap == nil || a.viewer.Item == nil || a.viewer.Item.Kind != "image" {
+		return
+	}
+	bw, bh := a.viewer.Bitmap.Size()
+	if w <= 0 || h <= 0 {
+		w, h = a.viewerCanvasSize(nil)
+	}
+	fit := viewerFitScale(bw, bh, a.viewer.Angle, w, h)
+	if fit <= 0 {
+		return
+	}
+	actual := clampViewerZoom(viewerActualZoom(fit))
+	if a.viewer.Zoom >= actual {
+		return
+	}
+	if x < 0 || y < 0 {
+		x, y = w/2, h/2
+	}
+	a.viewer.Zoom, a.viewer.PanX, a.viewer.PanY = viewerZoomAtPoint(
+		a.viewer.Zoom, a.viewer.PanX, a.viewer.PanY, actual/a.viewer.Zoom, x, y, w, h)
 	a.refresh()
 }
 

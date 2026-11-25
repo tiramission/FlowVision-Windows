@@ -59,38 +59,82 @@ func canvasPoint(t *testing.T, tt *ui.Tester) (float32, float32) {
 	return r.X + r.W/2, r.Y + r.H/2
 }
 
-func TestViewerLongPressLeftActualSize(t *testing.T) {
+func canvasLocalPoint(t *testing.T, tt *ui.Tester) (float32, float32, float32, float32) {
+	t.Helper()
+	r, ok := tt.Find("媒体查看器")
+	if !ok {
+		t.Fatal("viewer canvas missing")
+	}
+	return r.W / 2, r.H / 2, r.W, r.H
+}
+
+func TestViewerLongPressLeftZoomsAtPointer(t *testing.T) {
 	a := newViewerGestureApp(t)
 	defer a.closeViewer()
 	tt := ui.NewTester(a.view, 900, 700)
 	tt.Frame()
-	x, y := canvasPoint(t, tt)
+	_, _, w, h := canvasLocalPoint(t, tt)
+	x, y := w/4, h/3
+	a.viewer.Zoom = 0.1
+	a.viewer.PanX, a.viewer.PanY = 0, 0
+	bw, bh := a.viewer.Bitmap.Size()
+	actual := viewerActualZoom(viewerFitScale(bw, bh, a.viewer.Angle, w, h))
+	wantZoom, wantPanX, wantPanY := viewerZoomAtPoint(a.viewer.Zoom, 0, 0, actual/a.viewer.Zoom, x, y, w, h)
 	a.beginViewerHold(0, x, y, tt.Now().Add(-viewerHoldDelay))
 	tt.Frame()
 	if a.viewer.HoldActive {
 		t.Fatal("long-press still armed after firing")
 	}
-	if a.viewer.Zoom >= 0.5 || a.viewer.PanX != 0 || a.viewer.PanY != 0 {
-		t.Fatalf("left hold zoom = %.3f pan = %.1f,%.1f, want actual size",
+	if absFloat(a.viewer.Zoom-wantZoom) > 0.001 ||
+		absFloat(a.viewer.PanX-wantPanX) > 0.5 ||
+		absFloat(a.viewer.PanY-wantPanY) > 0.5 {
+		t.Fatalf("left hold zoom = %.3f pan = %.1f,%.1f; want %.3f %.1f,%.1f",
+			a.viewer.Zoom, a.viewer.PanX, a.viewer.PanY, wantZoom, wantPanX, wantPanY)
+	}
+	if a.viewer.PanX == 0 && a.viewer.PanY == 0 {
+		t.Fatal("pointer-anchored zoom did not move the image")
+	}
+}
+
+func TestViewerLongPressLeftStopsAtHundredPercent(t *testing.T) {
+	a := newViewerGestureApp(t)
+	defer a.closeViewer()
+	tt := ui.NewTester(a.view, 900, 700)
+	tt.Frame()
+	x, y, _, _ := canvasLocalPoint(t, tt)
+	a.viewer.Zoom = 1
+	a.viewer.PanX, a.viewer.PanY = 24, -16
+	before := a.viewer
+	a.beginViewerHold(0, x, y, tt.Now().Add(-viewerHoldDelay))
+	tt.Frame()
+	if a.viewer.Zoom != before.Zoom || a.viewer.PanX != before.PanX || a.viewer.PanY != before.PanY {
+		t.Fatalf("long press at 100%% changed zoom/pan: %.3f %.1f,%.1f",
 			a.viewer.Zoom, a.viewer.PanX, a.viewer.PanY)
 	}
 }
 
-func TestViewerLongPressRightFit(t *testing.T) {
+func TestViewerLongPressRightRecentersWithoutChangingZoom(t *testing.T) {
 	a := newViewerGestureApp(t)
 	defer a.closeViewer()
-	a.viewer.Zoom = 0.2
+	a.viewer.Zoom = 0.4
 	a.viewer.Angle = 90
 	a.viewer.PanX, a.viewer.PanY = 100, -40
 	tt := ui.NewTester(a.view, 900, 700)
 	tt.Frame()
-	x, y := canvasPoint(t, tt)
+	x, y, _, _ := canvasLocalPoint(t, tt)
 	a.beginViewerHold(1, x, y, tt.Now().Add(-viewerHoldDelay))
 	tt.Frame()
-	if a.viewer.Zoom != 1 || a.viewer.Angle != 90 || a.viewer.PanX != 0 || a.viewer.PanY != 0 {
-		t.Fatalf("right hold zoom = %.3f angle = %.1f pan = %.1f,%.1f, want fit",
+	if a.viewer.Zoom != 0.4 || a.viewer.Angle != 90 || a.viewer.PanX != 0 || a.viewer.PanY != 0 {
+		t.Fatalf("right hold zoom = %.3f angle = %.1f pan = %.1f,%.1f, want recenter",
 			a.viewer.Zoom, a.viewer.Angle, a.viewer.PanX, a.viewer.PanY)
 	}
+}
+
+func absFloat(v float32) float32 {
+	if v < 0 {
+		return -v
+	}
+	return v
 }
 
 func TestViewerHoldCancelsOnDrag(t *testing.T) {

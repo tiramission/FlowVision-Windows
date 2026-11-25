@@ -1,187 +1,166 @@
 package main
 
 import (
-	"fmt"
-
 	"github.com/egoist/mygo/ui"
 	"github.com/oneo-me/onevra/source/components"
 	"github.com/oneo-me/onevra/source/icons/lucide"
 )
 
-func (a *App) beginSideCalibration(target string) {
-	a.sideCalibrationTarget = target
-	a.sideCalibrationGen++
-	a.sideCaptureBinding = SideBinding{}
-	a.sideCaptureNote = ""
-	a.sideCalibrationOpen = true
+// beginBindingCapture puts one shortcut field into listening mode. Unlike the
+// old side-button calibration dialog, this records the next key press directly
+// in the settings row, including mouse side buttons and modifier chords.
+func (a *App) beginBindingCapture(target string) {
+	a.bindingCapture = target
+	a.bindingCaptureGen++
+	a.bindingCaptureNote = ""
 	a.refresh()
 }
 
-func (a *App) applySideCalibration() {
-	if !a.sideCalibrationOpen || a.sideCaptureBinding.Key == ui.KeyUnknown {
-		return
-	}
-	if !viewerSideBindingAllowed(a.sideCaptureBinding) {
-		return
-	}
-	applySideBinding(&a.draft.SidePrev, &a.draft.SideNext, a.sideCalibrationTarget, a.sideCaptureBinding)
-	a.sideCaptureBinding = SideBinding{}
-	a.sideCaptureNote = ""
-	a.sideCalibrationOpen = false
+func (a *App) cancelBindingCapture() {
+	a.bindingCapture = ""
+	a.bindingCaptureNote = ""
 	a.refresh()
 }
 
-func (a *App) sideCalibrationModal(c *ui.Context) {
-	if !a.sideCalibrationOpen {
-		return
-	}
+func (a *App) applyBindingCapture(target string, b SideBinding) {
 	if !a.showSettings {
-		a.sideCalibrationOpen = false
+		a.cancelBindingCapture()
 		return
 	}
-	th := c.Theme()
-	target := "上一张"
-	if a.sideCalibrationTarget == "next" {
-		target = "下一张"
+	if b.Key == ui.KeyUnknown || !viewerSideBindingAllowed(b) {
+		a.bindingCaptureNote = "该按键已被查看器占用，请换一个键或先清除对应快捷键。"
+		a.refresh()
+		return
 	}
-	valid := a.sideCaptureBinding.Key != ui.KeyUnknown && viewerSideBindingAllowed(a.sideCaptureBinding)
-	ui.Modal(c, &a.sideCalibrationOpen, func() {
-		ui.Column(c).Width(440).Gap(12).Children(func() {
-			dialogHeader(c, lucide.MousePointerClick(), "校准鼠标侧键", "按下侧键即可识别，用来对应查看器的上一张或下一张")
-			ui.Column(c).Gap(6).Children(func() {
-				components.Text(c, "要分配给「"+target+"」的按键").FontSize(11).TextColor(th.TextMuted)
-				box := ui.Box(c).Key(fmt.Sprintf("side-capture-%d", a.sideCalibrationGen)).
-					FillWidth().Height(82).Radius(12).
-					Background(th.SurfaceHover.Alpha(.28)).BorderWidth(1).
-					Focusable().AutoFocus().TabStop(false).Label("侧键按键捕获").Center()
-				if valid {
-					box.BorderColor(th.Accent.Alpha(.65)).Background(th.Accent.Alpha(.08))
-				} else {
-					box.BorderColor(th.Border.Alpha(.8))
-				}
-				box.Children(func() {
-					if a.sideCaptureBinding.Key == ui.KeyUnknown {
-						components.Text(c, "请按下鼠标侧键…").FontSize(14).FontWeight(600)
-						components.Text(c, "通常为后退 / 前进键，也支持鼠标驱动映射出的具名按键").
-							FontSize(10).TextColor(th.TextMuted).SingleLine().Ellipsis("…")
-					} else {
-						components.Text(c, sideBindingLabel(a.sideCaptureBinding)).FontSize(20).Bold().
-							TextColor(func() ui.Color {
-								if valid {
-									return th.Accent
-								}
-								return th.Text
-							}())
-						note := "已识别，确认后更新设置"
-						if !valid {
-							note = "该按键已被查看器或应用快捷键占用，请换一个侧键"
-						}
-						components.Text(c, note).FontSize(10).TextColor(func() ui.Color {
-							if valid {
-								return th.TextMuted
-							}
-							return th.Danger
-						}())
-					}
-				})
-				if a.sideCaptureNote != "" {
-					components.Text(c, a.sideCaptureNote).FontSize(10.5).TextColor(th.Danger)
-				}
-				box.HandleInput(func(ev ui.InputEvent) bool {
-					switch ev.Kind {
-					case ui.InputKeyUp:
-						return true
-					case ui.InputKeyDown:
-						if ev.Repeat {
-							return true
-						}
-						if ev.Key == ui.KeyEscape {
-							return false // let the modal handle its own close key
-						}
-						if ev.Key == ui.KeyTab {
-							return false // keep keyboard focus traversal working
-						}
-						if ev.Key == ui.KeyUnknown {
-							a.sideCaptureBinding = SideBinding{}
-							a.sideCaptureNote = "只能识别具名按键；请先在鼠标驱动里把该侧键映射为后退 / 前进。"
-							a.refresh()
-							return true
-						}
-						a.sideCaptureBinding = SideBinding{Key: ev.Key, Mods: ev.Mods}
-						a.sideCaptureNote = ""
-						a.refresh()
-						return true
-					}
-					return false
-				})
-			})
-			components.Text(c, "应用后仍需在设置页点击“保存”；若侧键方向相反，可用设置页的“交换方向”。").
-				FontSize(10).TextColor(th.TextMuted)
-			ui.Row(c).Gap(8).Children(func() {
-				if components.Button(c, "取消", components.ButtonGhost).Clicked() {
-					a.sideCalibrationOpen = false
-				}
-				ui.Spacer(c)
-				if a.sideCaptureBinding.Key != ui.KeyUnknown {
-					if components.Button(c, "重新识别", components.ButtonOutline).Clicked() {
-						a.beginSideCalibration(a.sideCalibrationTarget)
-					}
-				}
-				apply := components.Button(c, "应用侧键", components.ButtonPrimary)
-				apply.Disabled(!valid)
-				if apply.Clicked() {
-					a.applySideCalibration()
-				}
-			})
-		})
-	})
+	assignViewerBinding(&a.draft.SidePrev, &a.draft.SideNext, &a.draft.SidePrevHold, &a.draft.SideNextHold, target, b)
+	a.bindingCapture = ""
+	a.bindingCaptureNote = ""
+	a.refresh()
+}
+
+func (a *App) clearBinding(target string) {
+	switch target {
+	case "prevHold":
+		a.draft.SidePrevHold = SideBinding{}
+	case "nextHold":
+		a.draft.SideNextHold = SideBinding{}
+	}
+	a.bindingCapture = ""
+	a.bindingCaptureNote = ""
+	a.refresh()
 }
 
 func (a *App) sideButtonSetting(c *ui.Context) {
 	th := c.Theme()
 	ui.Column(c).FillWidth().Gap(8).Children(func() {
-		a.sideMappingRow(c, "上一张", a.draft.SidePrev, "prev", th)
-		a.sideMappingRow(c, "下一张", a.draft.SideNext, "next", th)
+		a.sideDirectionRow(c, "上一张", lucide.ArrowLeft(), "prev", th)
+		a.sideDirectionRow(c, "下一张", lucide.ArrowRight(), "next", th)
+		if a.bindingCaptureNote != "" {
+			components.Text(c, a.bindingCaptureNote).FontSize(10).TextColor(th.Danger)
+		}
 		ui.Row(c).Gap(8).Wrap().Children(func() {
 			if components.Button(c, "交换方向", components.ButtonOutline).Clicked() {
 				a.swapSideBindings()
 			}
-			components.Text(c, "侧键只在查看器内生效；方向反了可以交换，也可以分别按一次实体侧键重新校准。").
+			components.Text(c, "侧键只在查看器内生效；点击方框后按下按键即可录制，单击和长按可分别指向上一张或下一张。").
 				FontSize(10.5).TextColor(th.TextMuted).Grow(1)
 		})
 	})
 }
 
-func (a *App) sideMappingRow(c *ui.Context, title string, binding SideBinding, target string, th *ui.Theme) {
-	ui.Row(c).FillWidth().Padding(8, 10).Radius(10).Gap(10).
+func (a *App) sideDirectionRow(c *ui.Context, title string, icon *ui.SVG, prefix string, th *ui.Theme) {
+	ui.Column(c).FillWidth().Padding(8, 10).Radius(10).Gap(7).
 		Background(th.Background.Alpha(.55)).BorderWidth(1).BorderColor(th.Border.Alpha(.55)).Children(func() {
-		icon := lucide.ArrowLeft()
-		if target == "next" {
-			icon = lucide.ArrowRight()
-		}
-		ui.Box(c).Size(26, 26).Radius(7).Background(th.Accent.Alpha(.1)).Center().Children(func() {
-			components.Icon(c, icon).Size(14, 14).TextColor(th.Accent)
-		})
-		ui.Column(c).Grow(1).MinWidth(0).Gap(1).Children(func() {
+		ui.Row(c).Gap(8).Children(func() {
+			ui.Box(c).Size(26, 26).Radius(7).Background(th.Accent.Alpha(.1)).Center().Children(func() {
+				components.Icon(c, icon).Size(14, 14).TextColor(th.Accent)
+			})
 			components.Text(c, title).FontSize(11.5).FontWeight(600).SingleLine()
-			components.Text(c, "鼠标侧键").FontSize(10).TextColor(th.TextMuted).SingleLine().Ellipsis("…")
+			ui.Spacer(c)
+			components.Text(c, "查看器").FontSize(10).TextColor(th.TextMuted)
 		})
-		keyBox := ui.Box(c).Padding(4, 9).Radius(6).Background(th.SurfaceHover).
-			BorderWidth(1).BorderColor(th.Border.Alpha(.7))
-		if !viewerSideBindingAllowed(binding) {
-			keyBox.BorderColor(th.Danger.Alpha(.6))
-		}
-		keyBox.Children(func() {
-			components.Text(c, sideBindingLabel(binding)).FontSize(11).FontWeight(600).SingleLine()
+		ui.Row(c).Gap(8).Wrap().Children(func() {
+			components.Text(c, "单击").FontSize(10).TextColor(th.TextMuted).Width(30)
+			a.sideBindingField(c, title, "单击", prefix+"Click", a.draftBinding(prefix+"Click"), th)
+			components.Text(c, "长按").FontSize(10).TextColor(th.TextMuted).Width(30)
+			a.sideBindingField(c, title, "长按", prefix+"Hold", a.draftBinding(prefix+"Hold"), th)
+			if hold := a.draftBinding(prefix + "Hold"); hold.Key != ui.KeyUnknown {
+				if components.IconButton(c, lucide.X(), "清除"+title+"长按", components.IconButtonPlain).Clicked() {
+					a.clearBinding(prefix + "Hold")
+				}
+			}
 		})
-		if components.Button(c, "校准", components.ButtonGhost).Clicked() {
-			a.beginSideCalibration(target)
+	})
+}
+
+func (a *App) draftBinding(target string) SideBinding {
+	switch target {
+	case "prevClick":
+		return a.draft.SidePrev
+	case "nextClick":
+		return a.draft.SideNext
+	case "prevHold":
+		return a.draft.SidePrevHold
+	case "nextHold":
+		return a.draft.SideNextHold
+	}
+	return SideBinding{}
+}
+
+func (a *App) sideBindingField(c *ui.Context, title, role, target string, binding SideBinding, th *ui.Theme) {
+	capturing := a.bindingCapture == target
+	box := ui.Box(c).Key("side-binding-"+target).Width(176).Height(30).Padding(4, 9).Radius(7).
+		Background(th.SurfaceHover.Alpha(.7)).BorderWidth(1).BorderColor(th.Border.Alpha(.7)).
+		Focusable().TabStop(false)
+	if capturing {
+		box.BorderColor(th.Accent.Alpha(.7)).Background(th.Accent.Alpha(.08)).AutoFocus()
+	}
+	if box.Clicked() && !capturing {
+		a.beginBindingCapture(target)
+	}
+	box.Label(title + role + "快捷键")
+	box.Children(func() {
+		label := sideBindingLabel(binding)
+		if capturing {
+			label = "按下快捷键…"
 		}
+		components.Text(c, label).FontSize(10.5).FontWeight(600).SingleLine().Ellipsis("…")
+	})
+	box.HandleInput(func(ev ui.InputEvent) bool {
+		if a.bindingCapture != target {
+			return false
+		}
+		switch ev.Kind {
+		case ui.InputKeyUp:
+			return true
+		case ui.InputKeyDown:
+			if ev.Repeat {
+				return true
+			}
+			if ev.Key == ui.KeyEscape {
+				a.cancelBindingCapture()
+				return true
+			}
+			if ev.Key == ui.KeyTab {
+				return false
+			}
+			if ev.Key == ui.KeyUnknown {
+				a.bindingCaptureNote = "只识别具名按键；按下鼠标侧键或键盘按键。"
+				a.refresh()
+				return true
+			}
+			a.applyBindingCapture(target, SideBinding{Key: ev.Key, Mods: ev.Mods})
+			return true
+		}
+		return false
 	})
 }
 
 func (a *App) swapSideBindings() {
 	a.draft.SidePrev, a.draft.SideNext = a.draft.SideNext, a.draft.SidePrev
+	a.draft.SidePrevHold, a.draft.SideNextHold = a.draft.SideNextHold, a.draft.SidePrevHold
+	a.bindingCapture = ""
+	a.bindingCaptureNote = ""
 	a.refresh()
 }
 

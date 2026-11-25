@@ -11,7 +11,6 @@ import (
 
 func (a *App) overlays(c *ui.Context) {
 	a.settingsModal(c)
-	a.sideCalibrationModal(c)
 	a.renameModal(c)
 	a.newFolderModal(c)
 	a.deleteModal(c)
