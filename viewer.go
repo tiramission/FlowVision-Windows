@@ -462,8 +462,9 @@ func (a *App) endViewerHold(button int, canceled bool) {
 }
 
 // finishViewerHold turns a stationary long press into a pointer-anchored jump
-// to 100% on the primary button, and a recenter on the secondary button. If
-// the image already displays at 100% or more, the primary gesture does nothing.
+// to 100% on the primary button, and a fit-and-center reset on the secondary
+// button. If the image already displays at 100% or more, the primary gesture
+// does nothing. The secondary gesture ignores the pointer position entirely.
 func (a *App) finishViewerHold(c *ui.Context, w, h float32) {
 	if !a.viewer.HoldActive {
 		return
@@ -478,7 +479,7 @@ func (a *App) finishViewerHold(c *ui.Context, w, h float32) {
 	if button == 0 {
 		a.viewerActualSizeAt(x, y, w, h)
 	} else if button == 1 {
-		a.viewerCenter()
+		a.viewerFit()
 	}
 }
 

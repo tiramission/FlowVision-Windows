@@ -113,7 +113,7 @@ func TestViewerLongPressLeftStopsAtHundredPercent(t *testing.T) {
 	}
 }
 
-func TestViewerLongPressRightRecentersWithoutChangingZoom(t *testing.T) {
+func TestViewerLongPressRightFitsAndCenters(t *testing.T) {
 	a := newViewerGestureApp(t)
 	defer a.closeViewer()
 	a.viewer.Zoom = 0.4
@@ -121,11 +121,12 @@ func TestViewerLongPressRightRecentersWithoutChangingZoom(t *testing.T) {
 	a.viewer.PanX, a.viewer.PanY = 100, -40
 	tt := ui.NewTester(a.view, 900, 700)
 	tt.Frame()
-	x, y, _, _ := canvasLocalPoint(t, tt)
-	a.beginViewerHold(1, x, y, tt.Now().Add(-viewerHoldDelay))
+	// The pointer is deliberately off-center; the right gesture must still
+	// fit the image and center it without anchoring to this position.
+	a.beginViewerHold(1, 12, 13, tt.Now().Add(-viewerHoldDelay))
 	tt.Frame()
-	if a.viewer.Zoom != 0.4 || a.viewer.Angle != 90 || a.viewer.PanX != 0 || a.viewer.PanY != 0 {
-		t.Fatalf("right hold zoom = %.3f angle = %.1f pan = %.1f,%.1f, want recenter",
+	if a.viewer.Zoom != 1 || a.viewer.Angle != 90 || a.viewer.PanX != 0 || a.viewer.PanY != 0 {
+		t.Fatalf("right hold zoom = %.3f angle = %.1f pan = %.1f,%.1f, want fit and center",
 			a.viewer.Zoom, a.viewer.Angle, a.viewer.PanX, a.viewer.PanY)
 	}
 }
