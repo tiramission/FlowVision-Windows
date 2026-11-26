@@ -704,27 +704,43 @@ func (a *App) toolbar(c *ui.Context) {
 	buildViewMenu := func() {
 		more := components.IconButton(c, lucide.Ellipsis(), "更多视图选项", components.IconButtonPlain)
 		components.MenuButton(c, more, func(m *components.Menu) {
-			rec := m.Item(menuToggleLabel("递归扫描子文件夹", a.settings.Recursive))
-			if rec.Chosen() {
-				a.settings.Recursive = !a.settings.Recursive
-				_ = saveSettings(a.settings)
-				a.loadTab(tab, true)
-			}
-			names := m.Item(menuToggleLabel("显示卡片文件名", a.settings.ShowCardNames))
-			if names.Chosen() {
-				a.settings.ShowCardNames = !a.settings.ShowCardNames
-				_ = saveSettings(a.settings)
-				a.refresh()
-			}
-			hidden := m.Item(menuToggleLabel("显示隐藏文件", a.settings.ShowHidden))
-			if hidden.Chosen() {
-				a.settings.ShowHidden = !a.settings.ShowHidden
-				_ = saveSettings(a.settings)
-				a.treeGen++
-				a.treeLoaded = map[string]bool{}
-				a.treeKids = map[string][]TreeEntry{}
-				a.loadTab(tab, true)
-			}
+			m.Group("显示内容", func(m *components.Menu) {
+				all := m.Item("图片和视频").Checked(tab.Filter == "" || tab.Filter == "all")
+				if all.Chosen() {
+					a.setMediaFilter(tab, "all")
+				}
+				images := m.Item("仅展示图片").Checked(tab.Filter == "image")
+				if images.Chosen() {
+					a.setMediaFilter(tab, "image")
+				}
+				videos := m.Item("仅展示视频").Checked(tab.Filter == "video")
+				if videos.Chosen() {
+					a.setMediaFilter(tab, "video")
+				}
+			})
+			m.Group("显示选项", func(m *components.Menu) {
+				rec := m.Item("递归扫描子文件夹").Checked(a.settings.Recursive)
+				if rec.Chosen() {
+					a.settings.Recursive = !a.settings.Recursive
+					_ = saveSettings(a.settings)
+					a.loadTab(tab, true)
+				}
+				names := m.Item("显示卡片文件名").Checked(a.settings.ShowCardNames)
+				if names.Chosen() {
+					a.settings.ShowCardNames = !a.settings.ShowCardNames
+					_ = saveSettings(a.settings)
+					a.refresh()
+				}
+				hidden := m.Item("显示隐藏文件").Checked(a.settings.ShowHidden)
+				if hidden.Chosen() {
+					a.settings.ShowHidden = !a.settings.ShowHidden
+					_ = saveSettings(a.settings)
+					a.treeGen++
+					a.treeLoaded = map[string]bool{}
+					a.treeKids = map[string][]TreeEntry{}
+					a.loadTab(tab, true)
+				}
+			})
 		})
 	}
 
@@ -770,11 +786,15 @@ func (a *App) toolbar(c *ui.Context) {
 	})
 }
 
-func menuToggleLabel(label string, on bool) string {
-	if on {
-		return "✓ " + label
+func (a *App) setMediaFilter(tab *Tab, filter string) {
+	filter = validMediaFilter(filter)
+	if tab == nil || tab.Filter == filter {
+		return
 	}
-	return label
+	tab.Filter = filter
+	tab.refilter()
+	a.persist()
+	a.refresh()
 }
 
 func sortLabel(key string) string {
@@ -887,6 +907,14 @@ func (a *App) statusBar(c *ui.Context) {
 			ui.Spacer(c)
 			if a.settings.Recursive {
 				components.Badge(c, "递归", components.BadgeOptions{Tone: components.BadgeWarning}).
+					AlignSelf(ui.Center)
+			}
+			switch tab.Filter {
+			case "image":
+				components.Badge(c, "仅图片", components.BadgeOptions{Tone: components.BadgeNeutral}).
+					AlignSelf(ui.Center)
+			case "video":
+				components.Badge(c, "仅视频", components.BadgeOptions{Tone: components.BadgeNeutral}).
 					AlignSelf(ui.Center)
 			}
 			if a.settings.ShowHidden {

@@ -806,62 +806,93 @@ func (a *App) viewerCanvas(c *ui.Context, it *Item, th *ui.Theme) {
 func (a *App) viewerInfoPanel(c *ui.Context, it *Item, th *ui.Theme) {
 	ui.Column(c).Width(300).FillHeight().Background(th.Surface).
 		BorderStartWidth(1).BorderColor(th.Border.Alpha(.7)).
-		Padding(12, 14).Gap(7).Children(func() {
-		ui.Row(c).Gap(7).Children(func() {
-			components.Icon(c, lucide.SlidersHorizontal()).Size(14, 14).TextColor(th.TextMuted)
-			components.Text(c, "信息").FontSize(12).Bold()
+		Padding(12, 14).Gap(10).Children(func() {
+		ui.Row(c).Gap(7).AlignItems(ui.Center).Children(func() {
+			components.Icon(c, lucide.Info()).Size(14, 14).TextColor(th.TextMuted)
+			components.Text(c, "信息").FontSize(12).FontWeight(600)
+			ui.Spacer(c)
+			components.IconButton(c, lucide.X(), "隐藏信息 (I)", components.IconButtonPlain).
+				OnClick(a.viewerToggleInfo)
 		})
-		components.Text(c, it.Name).FontSize(11.5).FontWeight(600).SingleLine().Ellipsis("…")
-		components.Text(c, it.Path).FontSize(9.5).TextColor(th.TextMuted).SingleLine().Ellipsis("…")
-		ext := stringsUpper(it.Ext)
-		if ext == "" {
-			ext = "文件"
-		}
-		components.Text(c, ext+" · "+(MediaSvc{}).FormatSize(it.Size)).FontSize(10).TextColor(th.TextMuted).SingleLine().Ellipsis("…")
-		components.Text(c, "修改于 "+(AppSvc{}).FormatTime(it.Mtime)).FontSize(9.5).TextColor(th.TextMuted).SingleLine().Ellipsis("…")
+
+		ui.Column(c).Gap(3).Children(func() {
+			components.Text(c, it.Name).FontSize(13.5).FontWeight(600).SingleLine().Ellipsis("…").Tooltip(it.Name)
+			components.Text(c, it.Path).FontSize(9.5).TextColor(th.TextMuted).SingleLine().Ellipsis("…").Tooltip(it.Path)
+		})
+
+		// A glanceable summary replaces the old stack of identical label/value
+		// paragraphs. Dimensions and weight are the two facts a viewer reads
+		// before opening the disclosure sections below.
+		ui.Row(c).Gap(16).Children(func() {
+			if it.Kind == "video" {
+				_, _, dur := a.viewerVideoSummary()
+				infoMetric(c, "时长", formatClock(dur))
+				infoMetric(c, "大小", (MediaSvc{}).FormatSize(it.Size))
+			} else {
+				infoMetric(c, "尺寸", a.viewerImageDimensions(it))
+				infoMetric(c, "大小", (MediaSvc{}).FormatSize(it.Size))
+			}
+		})
 		ui.Divider(c)
+
 		ui.Scroll(c).Grow(1).Scrollbars(true).Children(func() {
-			ui.Column(c).Gap(5).Children(func() {
+			ui.Column(c).Gap(11).Children(func() {
+				infoSection(c, "文件")
+				infoDetailRow(c, "格式", infoFormat(it))
+				infoDetailRow(c, "修改时间", (AppSvc{}).FormatTime(it.Mtime))
 				if it.Kind == "video" {
-					a.videoInfoRows(c, it)
+					a.viewerVideoInfoDetails(c)
 				} else if a.viewer.InfoReady {
-					if a.viewer.Info.Width > 0 {
-						infoRow(c, "尺寸", fmt.Sprintf("%d × %d", a.viewer.Info.Width, a.viewer.Info.Height))
-					}
+					infoSection(c, "图像")
 					switch {
 					case a.viewer.FullResUnsupported:
-						infoRow(c, "1:1", "原图载入失败，当前为 2560 预览")
+						infoDetailRow(c, "清晰度", "2560 预览")
 					case a.viewer.FullResReady:
-						infoRow(c, "1:1", "已载入全分辨率")
+						infoDetailRow(c, "清晰度", "全分辨率")
 					case a.viewer.FullResLoading:
-						infoRow(c, "1:1", "正在载入全分辨率…")
+						infoDetailRow(c, "清晰度", "正在载入全分辨率…")
+					}
+					if len(a.viewer.Info.Exif) == 0 {
+						components.Text(c, "没有可读取的拍摄参数").FontSize(10).TextColor(th.TextMuted)
 					}
 					for _, kv := range a.viewer.Info.Exif {
-						infoRow(c, kv.K, kv.V)
+						infoDetailRow(c, kv.K, kv.V)
 					}
 				} else {
 					components.Text(c, "正在读取元数据…").FontSize(10.5).TextColor(th.TextMuted)
 				}
 			})
 		})
+
 		ui.Divider(c)
-		if components.Button(c, "用默认应用打开", components.ButtonSecondary).FillWidth().Clicked() {
-			_ = (AppSvc{}).OpenExternal(it.Path)
-		}
-		if components.Button(c, "在资源管理器中显示", components.ButtonOutline).FillWidth().Clicked() {
-			_ = (AppSvc{}).Reveal(it.Path)
-		}
-		if components.Button(c, "复制完整路径", components.ButtonGhost).FillWidth().Clicked() {
-			_ = (AppSvc{}).CopyText(it.Path)
-		}
+		ui.Row(c).Gap(6).Children(func() {
+			viewerInfoAction(c, th, "打开", lucide.ExternalLink, true, func() {
+				_ = (AppSvc{}).OpenExternal(it.Path)
+			}).Grow(1)
+			viewerInfoAction(c, th, "定位", lucide.FolderOpen, false, func() {
+				_ = (AppSvc{}).Reveal(it.Path)
+			}).Grow(1)
+			viewerInfoAction(c, th, "复制路径", lucide.Copy, false, func() {
+				_ = (AppSvc{}).CopyText(it.Path)
+			}).Grow(1)
+		})
 	})
 }
 
-func (a *App) videoInfoRows(c *ui.Context, it *Item) {
+func (a *App) viewerImageDimensions(it *Item) string {
+	w, h := it.W, it.H
+	if a.viewer.InfoReady && a.viewer.Info.Width > 0 && a.viewer.Info.Height > 0 {
+		w, h = a.viewer.Info.Width, a.viewer.Info.Height
+	}
+	if w <= 0 || h <= 0 {
+		return "—"
+	}
+	return fmt.Sprintf("%d × %d", w, h)
+}
+
+func (a *App) viewerVideoSummary() (w, h int, dur time.Duration) {
 	p := a.viewer.Player
 	meta := a.viewer.Video
-	w, h := 0, 0
-	dur := time.Duration(0)
 	if p != nil {
 		if p.Ready() {
 			w, h = p.Size()
@@ -874,14 +905,17 @@ func (a *App) videoInfoRows(c *ui.Context, it *Item) {
 	if dur <= 0 && meta.DurationMS > 0 {
 		dur = time.Duration(meta.DurationMS) * time.Millisecond
 	}
+	return w, h, dur
+}
+
+func (a *App) viewerVideoInfoDetails(c *ui.Context) {
+	w, h, dur := a.viewerVideoSummary()
+	meta := a.viewer.Video
 	res := "—"
 	if w > 0 && h > 0 {
 		res = fmt.Sprintf("%d × %d", w, h)
 	}
-	infoRow(c, "分辨率", res)
-	if dur > 0 {
-		infoRow(c, "时长", formatClock(dur))
-	}
+	infoDetailRow(c, "分辨率", res)
 	if !a.viewer.VideoReady {
 		components.Text(c, "正在读取视频元数据…").FontSize(10.5).TextColor(c.Theme().TextMuted)
 		return
@@ -890,15 +924,15 @@ func (a *App) videoInfoRows(c *ui.Context, it *Item) {
 	if meta.FPS > 0 {
 		fps = fmt.Sprintf("%.1f fps", meta.FPS)
 	}
-	infoRow(c, "帧率", fps)
+	infoDetailRow(c, "帧率", fps)
 	label, bitrate := "实时码率", 0
-	if meta.LiveBitrate && p != nil {
-		bitrate = meta.BitrateAtMS(p.Position().Milliseconds(), 2*time.Second)
+	if meta.LiveBitrate && a.viewer.Player != nil {
+		bitrate = meta.BitrateAtMS(a.viewer.Player.Position().Milliseconds(), 2*time.Second)
 	} else {
 		label = "平均码率"
 		bitrate = meta.BitrateKbps
 		if bitrate <= 0 && dur > 0 {
-			bitrate = int(math.Round(float64(it.Size) * 8 / dur.Seconds() / 1000))
+			bitrate = int(math.Round(float64(a.viewer.Item.Size) * 8 / dur.Seconds() / 1000))
 		}
 	}
 	value := "—"
@@ -909,14 +943,66 @@ func (a *App) videoInfoRows(c *ui.Context, it *Item) {
 			value = fmt.Sprintf("%d kbps", bitrate)
 		}
 	}
-	infoRow(c, label, value)
+	infoDetailRow(c, label, value)
 }
 
-func infoRow(c *ui.Context, key, value string) {
-	ui.Column(c).Gap(1).Children(func() {
-		components.Text(c, key).FontSize(9.5).TextColor(c.Theme().TextMuted)
-		components.Text(c, value).FontSize(11).TextColor(c.Theme().Text)
+func infoFormat(it *Item) string {
+	ext := stringsUpper(it.Ext)
+	if ext == "" {
+		return "文件"
+	}
+	return ext
+}
+
+func infoMetric(c *ui.Context, label, value string) {
+	ui.Column(c).Grow(1).Gap(2).Children(func() {
+		components.Text(c, label).FontSize(9.5).TextColor(c.Theme().TextMuted)
+		components.Text(c, value).FontSize(16.5).FontWeight(600).SingleLine().Ellipsis("…")
 	})
+}
+
+func infoSection(c *ui.Context, label string) {
+	components.Text(c, label).FontSize(9.5).FontWeight(600).
+		TextColor(c.Theme().TextMuted).Margin(2, 0, 0, 0)
+}
+
+// infoDetailRow is a compact key/value row: a short label column and one line
+// of value, instead of the old stacked paragraph that made six EXIF fields
+// fill an entire panel.
+func infoDetailRow(c *ui.Context, key, value string) {
+	ui.Row(c).Gap(8).AlignItems(ui.Start).Children(func() {
+		components.Text(c, key).FontSize(9.5).TextColor(c.Theme().TextMuted).Width(62).SingleLine()
+		components.Text(c, value).FontSize(10.5).TextColor(c.Theme().Text).Grow(1).SingleLine().Ellipsis("…")
+	})
+}
+
+// viewerInfoAction is a darkroom-native button. Onevra's shared button styles
+// resolve against the app's light theme, which makes their labels nearly
+// invisible on a #141416 panel; these colors come from the viewer palette.
+func viewerInfoAction(c *ui.Context, th *ui.Theme, label string, icon func() *ui.SVG, primary bool, onClick func()) ui.Element {
+	b := ui.ButtonBase(c).Label(label).Radius(7).Height(30).Padding(0, 8)
+	bg, hover, pressed := th.Surface, th.SurfaceHover, th.SurfacePressed
+	fg, border := th.Text, th.Border.Alpha(.65)
+	if primary {
+		bg, hover, pressed = th.Text, th.Text.Alpha(.88), th.Text.Alpha(.78)
+		fg, border = th.Background, th.Text
+	}
+	if b.Pressed() {
+		bg = pressed
+	} else if b.Hovered() {
+		bg = hover
+	}
+	b.Background(bg).TextColor(fg).Border(1, border)
+	b.Children(func() {
+		ui.Row(c).Gap(5).AlignItems(ui.Center).Children(func() {
+			components.Icon(c, icon).Size(13, 13).TextColor(fg)
+			components.Text(c, label).FontSize(10.5).FontWeight(600).TextColor(fg).SingleLine()
+		})
+	})
+	if b.Clicked() {
+		onClick()
+	}
+	return b
 }
 
 func formatClock(d time.Duration) string {

@@ -14,59 +14,62 @@ type TabState struct {
 	Path   string  `json:"path"`
 	Sort   string  `json:"sort"`
 	Desc   bool    `json:"desc"`
+	Filter string  `json:"filter,omitempty"`
 	Scroll float64 `json:"scroll"`
 }
 
 // Settings is the app's preferences, stored as settings.json in user data.
 type Settings struct {
-	Theme         string      `json:"theme"` // system | dark | light
-	ThumbSize     int         `json:"thumbSize"`
-	GridGap       int         `json:"gridGap"`
-	ShowCardNames bool        `json:"showCardNames"`
-	Sort          string      `json:"sort"` // name | date | size | type
-	Desc          bool        `json:"desc"`
-	ShowHidden    bool        `json:"showHidden"`
-	ShowOther     bool        `json:"showOther"`
-	Recursive     bool        `json:"recursive"`
-	Sidebar       bool        `json:"sidebar"`
-	SidebarWidth  int         `json:"sidebarWidth"`
-	InfoPanel     bool        `json:"infoPanel"`
-	PlayVideo     bool        `json:"playVideo"`
-	LoopVideo     bool        `json:"loopVideo"`
-	LastPath      string      `json:"lastPath"`
-	Favorites     []string    `json:"favorites"`
-	Tabs          []TabState  `json:"tabs"`
-	ActiveTab     int         `json:"activeTab"`
-	CacheLimitMB  int         `json:"cacheLimitMB"`
-	ViewerPreload int         `json:"viewerPreload"`
-	ViewerHUD     string      `json:"viewerHUD"` // off | auto | always
-	SidePrev      SideBinding `json:"sidePrev"`
-	SideNext      SideBinding `json:"sideNext"`
-	SidePrevHold  SideBinding `json:"sidePrevHold"`
-	SideNextHold  SideBinding `json:"sideNextHold"`
+	Theme               string      `json:"theme"` // system | dark | light
+	ThumbSize           int         `json:"thumbSize"`
+	GridGap             int         `json:"gridGap"`
+	ShowCardNames       bool        `json:"showCardNames"`
+	Sort                string      `json:"sort"` // name | date | size | type
+	Desc                bool        `json:"desc"`
+	ShowHidden          bool        `json:"showHidden"`
+	ShowOther           bool        `json:"showOther"`
+	Recursive           bool        `json:"recursive"`
+	Sidebar             bool        `json:"sidebar"`
+	SidebarWidth        int         `json:"sidebarWidth"`
+	InfoPanel           bool        `json:"infoPanel"`
+	ViewerAutoImmersive bool        `json:"viewerAutoImmersive"`
+	PlayVideo           bool        `json:"playVideo"`
+	LoopVideo           bool        `json:"loopVideo"`
+	LastPath            string      `json:"lastPath"`
+	Favorites           []string    `json:"favorites"`
+	Tabs                []TabState  `json:"tabs"`
+	ActiveTab           int         `json:"activeTab"`
+	CacheLimitMB        int         `json:"cacheLimitMB"`
+	ViewerPreload       int         `json:"viewerPreload"`
+	ViewerHUD           string      `json:"viewerHUD"` // off | auto | always
+	SidePrev            SideBinding `json:"sidePrev"`
+	SideNext            SideBinding `json:"sideNext"`
+	SidePrevHold        SideBinding `json:"sidePrevHold"`
+	SideNextHold        SideBinding `json:"sideNextHold"`
 }
 
 func defaultSettings() Settings {
 	return Settings{
-		Theme:         "system",
-		ThumbSize:     220,
-		GridGap:       8,
-		ShowCardNames: false,
-		Sort:          "name",
-		Desc:          false,
-		ShowHidden:    false,
-		ShowOther:     false,
-		Recursive:     false,
-		Sidebar:       true,
-		SidebarWidth:  248,
-		InfoPanel:     true,
-		PlayVideo:     true,
-		LoopVideo:     false,
-		CacheLimitMB:  1500,
-		ViewerPreload: 2,
-		ViewerHUD:     "auto",
-		SidePrev:      defaultSidePrev(),
-		SideNext:      defaultSideNext(),
+		Theme:               "system",
+		ThumbSize:           220,
+		GridGap:             8,
+		ShowCardNames:       false,
+		Sort:                "name",
+		Desc:                false,
+		ShowHidden:          false,
+		ShowOther:           false,
+		Recursive:           false,
+		Sidebar:             true,
+		SidebarWidth:        248,
+		InfoPanel:           true,
+		ViewerAutoImmersive: true,
+		PlayVideo:           true,
+		LoopVideo:           false,
+		CacheLimitMB:        1500,
+		ViewerPreload:       2,
+		ViewerHUD:           "auto",
+		SidePrev:            defaultSidePrev(),
+		SideNext:            defaultSideNext(),
 	}
 }
 

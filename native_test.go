@@ -254,9 +254,84 @@ func TestNativeToolbarViewMenuRecursive(t *testing.T) {
 	}
 }
 
+func TestNativeToolbarViewMenuMediaFilter(t *testing.T) {
+	a := newViewTestApp()
+	tab := a.tab()
+	tab.All = []*Item{
+		{ID: "folder", Name: "2024", Kind: "folder"},
+		{ID: "image", Name: "photo.jpg", Kind: "image"},
+		{ID: "video", Name: "clip.mp4", Kind: "video"},
+		{ID: "other", Name: "notes.txt", Kind: "other"},
+	}
+	tab.Items = tab.All
+	tt := ui.NewTester(a.view, 1280, 800)
+	tt.Frame()
+	more, ok := tt.AccessByRole(ui.RoleMenuButton, "更多视图选项")
+	if !ok {
+		t.Fatalf("view options menu missing: %q", tt.Texts())
+	}
+	tt.ClickAt(more.Bounds.X+more.Bounds.W/2, more.Bounds.Y+more.Bounds.H/2)
+	tt.Frame()
+	if err := tt.Click("仅展示图片"); err != nil {
+		t.Fatalf("media filter menu item: %v", err)
+	}
+	tt.Frame()
+	if tab.Filter != "image" {
+		t.Fatalf("media filter menu wrote %q, want image", tab.Filter)
+	}
+	if len(tab.Items) != 2 || tab.Items[0].ID != "folder" || tab.Items[1].ID != "image" {
+		t.Fatalf("image filter produced %v", tab.Items)
+	}
+}
+
 func TestDefaultSettingsHideCardCaptions(t *testing.T) {
 	if defaultSettings().ShowCardNames {
 		t.Fatal("new galleries should open with card captions hidden")
+	}
+}
+
+func TestDefaultSettingsViewerAutoImmersive(t *testing.T) {
+	if !defaultSettings().ViewerAutoImmersive {
+		t.Fatal("new installs should enter the viewer in immersive mode")
+	}
+	s, ok := parseSettings([]byte(`{"theme":"light"}`))
+	if !ok || !s.ViewerAutoImmersive {
+		t.Fatal("older settings without the field should keep auto-immersive on")
+	}
+}
+
+func TestMediaFilterKeepsFoldersAndMatchingKind(t *testing.T) {
+	tab := newTab(1, `C:\Pictures`)
+	tab.All = []*Item{
+		{ID: "folder", Name: "2024", Kind: "folder"},
+		{ID: "image", Name: "photo.jpg", Kind: "image"},
+		{ID: "video", Name: "clip.mp4", Kind: "video"},
+		{ID: "other", Name: "notes.txt", Kind: "other"},
+	}
+	tab.Items = tab.All
+	for filter, want := range map[string]string{
+		"image": "2024|photo.jpg",
+		"video": "2024|clip.mp4",
+		"all":   "2024|photo.jpg|clip.mp4|notes.txt",
+	} {
+		tab.Filter = filter
+		tab.refilter()
+		var got string
+		for i, it := range tab.Items {
+			if i > 0 {
+				got += "|"
+			}
+			got += it.Name
+		}
+		if got != want {
+			t.Fatalf("filter %q produced %q, want %q", filter, got, want)
+		}
+	}
+	tab.Filter = "image"
+	tab.Query = "photo"
+	tab.refilter()
+	if len(tab.Items) != 1 || tab.Items[0].Name != "photo.jpg" {
+		t.Fatalf("query should combine with filter: %v", tab.Items)
 	}
 }
 

@@ -22,12 +22,15 @@ import (
 // Tab is one folder open in the window. The grid, the search field and the
 // scroll position all belong to a tab, so switching tabs restores them.
 type Tab struct {
-	ID    int
-	Path  string
-	Name  string
-	Sort  string
-	Desc  bool
-	Query string
+	ID   int
+	Path string
+	Name string
+	Sort string
+	Desc bool
+	// Filter narrows the grid to images or videos while keeping folders
+	// navigable. "" and "all" show every kind.
+	Filter string
+	Query  string
 	// AppliedQuery is the query the filtered Items were built from. The search
 	// field writes Query as the user types; comparing the two catches an edit
 	// even when a widget's Changed flag has already been consumed.
@@ -54,6 +57,7 @@ func newTab(id int, path string) *Tab {
 		Path:     path,
 		Name:     displayName(path),
 		Sort:     "name",
+		Filter:   "all",
 		Selected: map[string]bool{},
 	}
 }
@@ -61,14 +65,19 @@ func newTab(id int, path string) *Tab {
 func (t *Tab) refilter() {
 	q := strings.ToLower(strings.TrimSpace(t.Query))
 	t.AppliedQuery = t.Query
-	if q == "" {
+	mediaOnly := t.Filter == "image" || t.Filter == "video"
+	if q == "" && !mediaOnly {
 		t.Items = t.All
 	} else {
 		itemsOut := make([]*Item, 0, len(t.All))
 		for _, it := range t.All {
-			if strings.Contains(strings.ToLower(it.Name), q) {
-				itemsOut = append(itemsOut, it)
+			if q != "" && !strings.Contains(strings.ToLower(it.Name), q) {
+				continue
 			}
+			if !mediaFilterMatch(it, t.Filter) {
+				continue
+			}
+			itemsOut = append(itemsOut, it)
 		}
 		t.Items = itemsOut
 	}
@@ -369,6 +378,7 @@ func (a *App) restoreTabs() {
 			t.Sort = st.Sort
 		}
 		t.Desc = st.Desc
+		t.Filter = validMediaFilter(st.Filter)
 		if st.Scroll > 0 {
 			t.Scroll.Y = float32(st.Scroll)
 		}
@@ -527,6 +537,9 @@ func (a *App) newTab(path string) {
 	a.nextID++
 	t.Sort = a.settings.Sort
 	t.Desc = a.settings.Desc
+	if cur := a.tab(); cur != nil {
+		t.Filter = validMediaFilter(cur.Filter)
+	}
 	a.tabs = append(a.tabs, t)
 	a.active = len(a.tabs) - 1
 	a.scrollActiveTab = true
@@ -1162,6 +1175,27 @@ func isMediaKind(kind string) bool {
 	return kind == "image" || kind == "video"
 }
 
+func mediaFilterMatch(it *Item, filter string) bool {
+	if it == nil {
+		return false
+	}
+	if filter != "image" && filter != "video" {
+		return true
+	}
+	// Folders stay visible in either solo mode so the browser never becomes a
+	// dead end: the folder remains the way to reach more media.
+	return it.Kind == "folder" || it.Kind == filter
+}
+
+func validMediaFilter(filter string) string {
+	switch filter {
+	case "image", "video":
+		return filter
+	default:
+		return "all"
+	}
+}
+
 // activateItem is the one place a grid tile is opened: folders navigate,
 // images/videos enter the viewer, and other files go to their default app.
 func (a *App) activateItem(it *Item) {
@@ -1201,7 +1235,7 @@ func (a *App) openViewer(it *Item) {
 		Item:          it,
 		Zoom:          1,
 		ShowInfo:      a.settings.InfoPanel,
-		Immersive:     true,
+		Immersive:     a.settings.ViewerAutoImmersive,
 		CursorVisible: true,
 		CursorUntil:   now.Add(viewerCursorIdle),
 	}
@@ -1839,7 +1873,7 @@ func (a *App) persist() {
 		if t.Path == "" {
 			continue
 		}
-		tabs = append(tabs, TabState{Path: t.Path, Sort: t.Sort, Desc: t.Desc, Scroll: float64(t.Scroll.Y)})
+		tabs = append(tabs, TabState{Path: t.Path, Sort: t.Sort, Desc: t.Desc, Filter: validMediaFilter(t.Filter), Scroll: float64(t.Scroll.Y)})
 	}
 	a.settings.Tabs = tabs
 	a.settings.ActiveTab = a.active

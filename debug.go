@@ -61,6 +61,8 @@ type debugState struct {
 	Recursive                bool     `json:"recursive"`
 	ShowHidden               bool     `json:"showHidden"`
 	ShowCardNames            bool     `json:"showCardNames"`
+	MediaFilter              string   `json:"mediaFilter"`
+	ViewerAutoImmersive      bool     `json:"viewerAutoImmersive"`
 	ShowSettings             bool     `json:"showSettings"`
 	SettingsCat              string   `json:"settingsCategory"`
 	BindingCapture           string   `json:"bindingCapture"`
@@ -140,6 +142,11 @@ func debugSnapshot() debugState {
 	st.Recursive = app.settings.Recursive
 	st.ShowHidden = app.settings.ShowHidden
 	st.ShowCardNames = app.settings.ShowCardNames
+	st.MediaFilter = "all"
+	if t := app.tab(); t != nil {
+		st.MediaFilter = t.Filter
+	}
+	st.ViewerAutoImmersive = app.settings.ViewerAutoImmersive
 	st.ShowSettings = app.showSettings
 	st.SettingsCat = app.settingsUI.Category
 	st.SidePrev = sideBindingLabel(app.settings.SidePrev)
@@ -411,6 +418,18 @@ func debugCommand(name, arg string) {
 			t.refilter()
 			app.refresh()
 		}
+	case "filter":
+		if t != nil {
+			app.setMediaFilter(t, arg)
+		}
+	case "autoimmersive":
+		if arg == "" {
+			app.settings.ViewerAutoImmersive = !app.settings.ViewerAutoImmersive
+		} else {
+			app.settings.ViewerAutoImmersive = arg != "off"
+		}
+		_ = saveSettings(app.settings)
+		app.refresh()
 	case "find":
 		app.focusSearch = true
 		app.refresh()
@@ -495,6 +514,10 @@ func debugCommand(name, arg string) {
 			app.settingsUI.Category = arg
 			app.refresh()
 		}
+	case "settingsquery":
+		app.openSettings()
+		app.settingsUI.Query = arg
+		app.refresh()
 	case "sidebinding":
 		if arg == "" {
 			arg = "prevClick"

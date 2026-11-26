@@ -224,6 +224,15 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 					ID: "viewer-info", Title: "查看器",
 					Items: []components.SettingsItem{
 						{
+							ID: "viewer-auto-immersive", Title: "打开时自动沉浸",
+							Description: "直接铺满窗口看图；关闭后以带标题栏的窗口打开，仍可按 F11 切换",
+							Keywords:    []string{"immersive", "fullscreen", "auto", "沉浸", "全屏", "自动"},
+							Leading:     settingsIcon(lucide.Fullscreen()),
+							Build: func(c *ui.Context) {
+								components.Switch(c, &a.draft.ViewerAutoImmersive, "打开时自动沉浸", components.SwitchOptions{HideLabel: true, Compact: true})
+							},
+						},
+						{
 							ID: "info-panel", Title: "默认显示信息面板",
 							Description: "窗口化查看器显示尺寸、路径和元数据；沉浸时隐藏",
 							Keywords:    []string{"info", "metadata", "信息", "元数据"},
