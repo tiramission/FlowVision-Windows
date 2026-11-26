@@ -2,6 +2,16 @@
 
 全部版本遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的章节格式；更新面板会显示当前版本对应的发布说明。
 
+## [1.4.6] - 2026-11-26
+
+### 修复
+
+- 修正等待原图后 100% 的非中心指针偏移：1.4.5 只修正了指针相对画布中心的口径，平移换算仍使用 bitmap 的 fit 缩放比；2560 预览与真原图的像素宽度不同，必须按显示宽度（`fit * zoom * bitmapWidth`）换算。现在长按后指针下方保持同一图像内容，与“原图已加载时直接长按 100%”一致。
+
+### 测试
+
+- 新增 `TestViewerPendingActualAnchorKeepsContentUnderPointer`；全量 `go test -tags mygo_nowebview ./...` 与 `go test -tags "debug mygo_nowebview" ./...` 通过。
+
 ## [1.4.5] - 2026-11-26
 
 ### 修复

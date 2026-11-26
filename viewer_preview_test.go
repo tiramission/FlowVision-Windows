@@ -296,6 +296,37 @@ func TestViewerPendingActualAnchorUsesCanvasCenter(t *testing.T) {
 	}
 }
 
+func TestViewerPendingActualAnchorKeepsContentUnderPointer(t *testing.T) {
+	a := newViewerGestureApp(t)
+	defer a.closeViewer()
+	a.viewer.Bitmap.ReleasePixels()
+	a.viewer.Bitmap = ui.NewBitmap(image.NewRGBA(image.Rect(0, 0, 100, 100)))
+	a.viewer.Zoom = 1
+	a.viewer.OneToOne = false
+	a.viewerPendingActual = true
+	a.viewerPendingActualAt = true
+	a.viewerPendingActualX = 800
+	a.viewerPendingActualY = 500
+	a.viewerPendingActualW = 1280
+	a.viewerPendingActualH = 800
+	a.viewerPendingActualOldW = 50
+	a.viewerPendingActualOldH = 50
+	w, h := a.viewerCanvasSize(nil)
+	newFit := viewerFitScale(100, 100, 0, w, h)
+	actual := clampViewerZoom(viewerActualZoom(newFit))
+	// This is the transform a long press would apply once the original is
+	// already loaded: the image is shown at the same display size as the
+	// preview, with Zoom=1 for this 100x100 bitmap.
+	wantZoom, wantX, wantY := viewerZoomAtPoint(1, 0, 0, actual, 800, 500, w, h)
+	a.applyViewerPendingActualSize()
+	if absFloat(a.viewer.Zoom-wantZoom) > 0.001 ||
+		absFloat(a.viewer.PanX-wantX) > 0.5 ||
+		absFloat(a.viewer.PanY-wantY) > 0.5 {
+		t.Fatalf("pending anchor = %.3f pan %.1f,%.1f; direct actual = %.3f pan %.1f,%.1f",
+			a.viewer.Zoom, a.viewer.PanX, a.viewer.PanY, wantZoom, wantX, wantY)
+	}
+}
+
 func TestViewerPointInImageRejectsLetterbox(t *testing.T) {
 	a := newViewerGestureApp(t)
 	defer a.closeViewer()

@@ -296,12 +296,14 @@ func (a *App) applyViewerPendingActualSize() {
 		if oldW > 0 && oldH > 0 {
 			oldFit = viewerFitScale(oldW, oldH, a.viewer.Angle, w, h)
 		}
-		oldDisplay := oldFit * current
-		newDisplay := fit * actual
-		if oldDisplay > 0 {
-			// The bitmap changed from the preview to the original, so the
-			// anchor ratio must use display scales, not the relative zooms.
-			ratio := newDisplay / oldDisplay
+		// The pointer must stay over the same image content, not the same
+		// preview pixel. The preview and original have different pixel
+		// widths, so the anchor ratio is the ratio of displayed widths
+		// (fit * zoom * bitmap width), not the ratio of fit scales alone.
+		oldDisplayW := oldFit * current * float32(oldW)
+		newDisplayW := fit * actual * float32(bw)
+		if oldDisplayW > 0 && newDisplayW > 0 {
+			ratio := newDisplayW / oldDisplayW
 			a.viewer.PanX, a.viewer.PanY = viewerAnchorPan(
 				px, py, w, h, a.viewer.PanX, a.viewer.PanY, ratio)
 		} else {
