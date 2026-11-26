@@ -640,14 +640,6 @@ func (a *App) toolbar(c *ui.Context) {
 	if tab == nil {
 		return
 	}
-	colW, _ := c.Size()
-	if a.sidebar {
-		colW -= float32(a.sidebarWidth)
-	}
-	// Use the workbench's own width, not the whole window: with the split
-	// sidebar open the search/sort row has substantially less room than the
-	// title bar. Below this width the switches move to a second row.
-	compact := colW < 840
 
 	buildSearch := func() {
 		ui.Box(c.Key(fmt.Sprintf("search-%d", tab.ID))).Grow(1).MinWidth(0).MaxWidth(420).Children(func() {
@@ -706,22 +698,34 @@ func (a *App) toolbar(c *ui.Context) {
 			})
 	}
 
-	buildToggles := func() {
-		if components.Switch(c, &a.settings.Recursive, "递归", components.SwitchOptions{Compact: true}).Changed() {
-			_ = saveSettings(a.settings)
-			a.loadTab(tab, true)
-		}
-		if components.Switch(c, &a.settings.ShowCardNames, "文件名", components.SwitchOptions{Compact: true}).Changed() {
-			_ = saveSettings(a.settings)
-			a.refresh()
-		}
-		if components.Switch(c, &a.settings.ShowHidden, "隐藏", components.SwitchOptions{Compact: true}).Changed() {
-			_ = saveSettings(a.settings)
-			a.treeGen++
-			a.treeLoaded = map[string]bool{}
-			a.treeKids = map[string][]TreeEntry{}
-			a.loadTab(tab, true)
-		}
+	// Recursive scanning, card captions and hidden files are set-and-forget
+	// view options. Keeping them behind one menu leaves search and sort as the
+	// only always-visible controls in the workbench.
+	buildViewMenu := func() {
+		more := components.IconButton(c, lucide.Ellipsis(), "更多视图选项", components.IconButtonPlain)
+		components.MenuButton(c, more, func(m *components.Menu) {
+			rec := m.Item(menuToggleLabel("递归扫描子文件夹", a.settings.Recursive))
+			if rec.Chosen() {
+				a.settings.Recursive = !a.settings.Recursive
+				_ = saveSettings(a.settings)
+				a.loadTab(tab, true)
+			}
+			names := m.Item(menuToggleLabel("显示卡片文件名", a.settings.ShowCardNames))
+			if names.Chosen() {
+				a.settings.ShowCardNames = !a.settings.ShowCardNames
+				_ = saveSettings(a.settings)
+				a.refresh()
+			}
+			hidden := m.Item(menuToggleLabel("显示隐藏文件", a.settings.ShowHidden))
+			if hidden.Chosen() {
+				a.settings.ShowHidden = !a.settings.ShowHidden
+				_ = saveSettings(a.settings)
+				a.treeGen++
+				a.treeLoaded = map[string]bool{}
+				a.treeKids = map[string][]TreeEntry{}
+				a.loadTab(tab, true)
+			}
+		})
 	}
 
 	divider := func() {
@@ -760,16 +764,17 @@ func (a *App) toolbar(c *ui.Context) {
 		ui.Row(c).Gap(6).Children(func() {
 			buildSearch()
 			buildSort()
-			if compact {
-				return
-			}
 			divider()
-			buildToggles()
+			buildViewMenu()
 		})
-		if compact {
-			ui.Row(c).Gap(6).Wrap().Children(buildToggles)
-		}
 	})
+}
+
+func menuToggleLabel(label string, on bool) string {
+	if on {
+		return "✓ " + label
+	}
+	return label
 }
 
 func sortLabel(key string) string {

@@ -234,19 +234,29 @@ func TestNativeToolbarSortBinding(t *testing.T) {
 	}
 }
 
-func TestNativeToolbarRecursiveSwitch(t *testing.T) {
+func TestNativeToolbarViewMenuRecursive(t *testing.T) {
 	a := newViewTestApp()
 	a.settings.Recursive = false
 	tt := ui.NewTester(a.view, 1280, 800)
 	tt.Frame()
-	info, ok := tt.AccessByRole(ui.RoleSwitch, "递归")
+	more, ok := tt.AccessByRole(ui.RoleMenuButton, "更多视图选项")
 	if !ok {
-		t.Fatalf("recursive switch missing: %q", tt.Texts())
+		t.Fatalf("view options menu missing: %q", tt.Texts())
 	}
-	tt.ClickAt(info.Bounds.X+info.Bounds.W/2, info.Bounds.Y+info.Bounds.H/2)
+	tt.ClickAt(more.Bounds.X+more.Bounds.W/2, more.Bounds.Y+more.Bounds.H/2)
+	tt.Frame()
+	if err := tt.Click("递归扫描子文件夹"); err != nil {
+		t.Fatalf("recursive menu item: %v", err)
+	}
 	tt.Frame()
 	if !a.settings.Recursive {
-		t.Fatal("toolbar recursive switch did not write settings")
+		t.Fatal("view options menu did not write recursive settings")
+	}
+}
+
+func TestDefaultSettingsHideCardCaptions(t *testing.T) {
+	if defaultSettings().ShowCardNames {
+		t.Fatal("new galleries should open with card captions hidden")
 	}
 }
 
