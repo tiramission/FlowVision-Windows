@@ -678,7 +678,7 @@ func (a *App) viewerInfoPanel(c *ui.Context, it *Item, th *ui.Theme) {
 					}
 					switch {
 					case a.viewer.FullResUnsupported:
-						infoRow(c, "1:1", "原图超过 50MP，只用 2560 预览")
+						infoRow(c, "1:1", "原图载入失败，当前为 2560 预览")
 					case a.viewer.FullResReady:
 						infoRow(c, "1:1", "已载入全分辨率")
 					case a.viewer.FullResLoading:

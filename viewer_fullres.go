@@ -9,11 +9,10 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-const (
-	viewerFullResMaxPixels   = 50_000_000
-	viewerFullResBudgetBytes = 256 << 20
-)
-
+// viewerFullResEntry keeps the decoded original while the viewer stays on the
+// current image. There is deliberately no pixel-count gate: 100% must always
+// mean the decoded original. The preview remains visible until the decode
+// completes, and failures keep that preview instead of a blank canvas.
 type viewerFullResEntry struct {
 	Key   string
 	Bmp   *ui.Bitmap
@@ -26,13 +25,6 @@ func viewerFullResKey(it *Item) string {
 		return ""
 	}
 	return fmt.Sprintf("%s|%d|%d", it.ID, it.Mtime, it.Size)
-}
-
-func viewerFullResWithinLimit(w, h int) bool {
-	if w <= 0 || h <= 0 {
-		return true
-	}
-	return int64(w)*int64(h) <= viewerFullResMaxPixels
 }
 
 // requestViewerFullRes decodes and keeps one full-resolution bitmap. The
@@ -71,12 +63,6 @@ func (a *App) requestViewerFullRes(oneToOne bool) {
 		d := imageDims(it.Path, it.Mtime)
 		w, h = d.W, d.H
 	}
-	if w > 0 && h > 0 && !viewerFullResWithinLimit(w, h) {
-		a.viewer.FullResUnsupported = true
-		a.notifyViewer("fullres-limit", "原图超过 50MP，只显示 2560 预览", viewerNoticeLimit, 3*time.Second)
-		a.refresh()
-		return
-	}
 	// A preview at or below 2560 is already the full image; decoding it again
 	// would only add memory and change nothing on screen.
 	if w > 0 && h > 0 && w <= viewerPreviewMaxDim && h <= viewerPreviewMaxDim {
@@ -103,18 +89,8 @@ func (a *App) requestViewerFullRes(oneToOne bool) {
 				if bmp != nil {
 					bmp.ReleasePixels()
 				}
-				if err == errViewerFullResTooLarge {
-					a.viewer.FullResUnsupported = true
-					a.notifyViewer("fullres-limit", "原图超过 50MP，只显示 2560 预览", viewerNoticeLimit, 3*time.Second)
-				} else {
-					a.notifyViewer("fullres", "原图载入失败："+err.Error(), viewerNoticeError, 4*time.Second)
-				}
-				a.refresh()
-				return
-			}
-			if bytes > viewerFullResBudgetBytes {
-				bmp.ReleasePixels()
-				a.notifyViewer("fullres-limit", "原图超出 256MB 内存预算", viewerNoticeLimit, 3*time.Second)
+				a.viewer.FullResUnsupported = true
+				a.notifyViewer("fullres", "原图载入失败："+err.Error(), viewerNoticeError, 4*time.Second)
 				a.refresh()
 				return
 			}
@@ -156,14 +132,9 @@ func decodeViewerFullRes(it *Item) (*ui.Bitmap, int64, error) {
 		src = orientImage(src, d.Orient)
 	}
 	b := src.Bounds()
-	if int64(b.Dx())*int64(b.Dy()) > viewerFullResMaxPixels {
-		return nil, 0, errViewerFullResTooLarge
-	}
 	bmp := ui.NewBitmap(src)
 	return bmp, int64(b.Dx()) * int64(b.Dy()) * 4, nil
 }
-
-var errViewerFullResTooLarge = fmt.Errorf("image exceeds 50MP")
 
 func (a *App) startViewerFullTimer(gen int) {
 	a.stopViewerFullTimer()

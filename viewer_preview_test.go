@@ -177,19 +177,16 @@ func TestViewerFullResSkipsSmallImage(t *testing.T) {
 	}
 }
 
-func TestViewerFullResRejectsOverFiftyMP(t *testing.T) {
+func TestViewerFullResLargeImageStartsDecode(t *testing.T) {
 	a := newViewerGestureApp(t)
 	defer a.closeViewer()
 	a.viewer.Item.W, a.viewer.Item.H = 9000, 7000
 	a.requestViewerFullRes(false)
-	if a.viewer.FullResLoading {
-		t.Fatal("over-50MP image started decoding")
+	if !a.viewer.FullResLoading {
+		t.Fatal("large image did not start full-resolution decoding")
 	}
-	if !a.viewer.FullResUnsupported {
-		t.Fatal("over-50MP image was not marked unsupported")
-	}
-	if a.viewer.Notice.Text == "" {
-		t.Fatal("expected a limit notice")
+	if a.viewer.FullResUnsupported {
+		t.Fatal("large image was marked unsupported")
 	}
 }
 
@@ -258,18 +255,12 @@ func TestViewerHUDModesAndPersistentNotice(t *testing.T) {
 	}
 }
 
-func TestViewerLimitsAtBoundaries(t *testing.T) {
+func TestViewerPreviewLimitsAtBoundaries(t *testing.T) {
 	if !viewerPreviewWithinLimit(10000, 8000) {
 		t.Fatal("exactly 80MP preview should be allowed")
 	}
 	if viewerPreviewWithinLimit(10000, 8001) {
 		t.Fatal("over 80MP preview should be rejected")
-	}
-	if !viewerFullResWithinLimit(8333, 6000) {
-		t.Fatal("under 50MP should allow 1:1")
-	}
-	if viewerFullResWithinLimit(8660, 5774) {
-		t.Fatal("over 50MP should not allow 1:1")
 	}
 }
 
