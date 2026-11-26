@@ -15,6 +15,7 @@ import (
 
 const (
 	viewerPreviewMaxDim     = 2560
+	viewerPreviewMaxPixels  = 80_000_000
 	viewerPreviewQuality    = 90
 	viewerPreviewCacheVer   = "v3"
 	viewerPreviewFastMode   = "fast"
@@ -70,7 +71,53 @@ func viewerPreviewWithinLimit(w, h int) bool {
 	if w <= 0 || h <= 0 {
 		return true
 	}
-	return int64(w)*int64(h) <= 80_000_000
+	return int64(w)*int64(h) <= viewerPreviewMaxPixels
+}
+
+// viewerPreviewFallbackHeight keeps the longest edge at 2560 for the system
+// thumbnail path. It uses height because both WIC and Shell thumbnail helpers
+// take a target height and preserve the source aspect ratio.
+func viewerPreviewFallbackHeight(w, h int) int {
+	if w <= 0 || h <= 0 {
+		return viewerPreviewMaxDim
+	}
+	if w <= h {
+		return viewerPreviewMaxDim
+	}
+	height := viewerPreviewMaxDim * h / w
+	if height < 8 {
+		height = 8
+	}
+	return height
+}
+
+// loadViewerPreviewFallback handles images above the safe Go-decoder limit.
+// Explorer's thumbnail provider is asked first because it keeps the native
+// bitmap bounded (4096 px) while a 100 MP JPEG can otherwise cost the Go heap
+// several hundred megabytes. WIC/Shell backends are the fallback when Explorer
+// has no provider for this format.
+func loadViewerPreviewFallback(it *Item, d dimInfo, cachePath string) (*viewerPreviewResult, error) {
+	start := time.Now()
+	size := viewerPreviewFallbackHeight(d.W, d.H)
+	data, err := shellThumb(it, size)
+	if err != nil {
+		data, err = renderStill(it, size)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("图片像素 %d×%d 超过预览上限（8000 万），系统无法生成缩略图", d.W, d.H)
+	}
+	img, err := jpeg.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("超大图预览解码失败（%d×%d）", d.W, d.H)
+	}
+	if cachePath != "" && strings.ToLower(strings.TrimSpace(os.Getenv("FLOWVISION_VIEWER_CACHE"))) != "off" {
+		go writePreviewCache(cachePath, data)
+	}
+	return &viewerPreviewResult{
+		Img:      img,
+		Bytes:    int64(len(data)),
+		DecodeMs: time.Since(start).Milliseconds(),
+	}, nil
 }
 
 func viewerPreviewCachePath(it *Item, mode string) string {
@@ -158,7 +205,7 @@ func loadViewerPreviewData(it *Item) (*viewerPreviewResult, error) {
 
 	d := imageDims(it.Path, it.Mtime)
 	if !viewerPreviewWithinLimit(d.W, d.H) {
-		return nil, fmt.Errorf("image too large to preview")
+		return loadViewerPreviewFallback(it, d, p)
 	}
 
 	f, err := os.Open(it.Path)

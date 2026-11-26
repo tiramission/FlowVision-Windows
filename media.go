@@ -74,8 +74,8 @@ func previewBytes(it *Item) ([]byte, error) {
 		return data, nil
 	}
 	d := imageDims(it.Path, it.Mtime)
-	if d.W > 0 && d.H > 0 && d.W*d.H > 80_000_000 {
-		return nil, fmt.Errorf("image too large to preview")
+	if d.W > 0 && d.H > 0 && d.W*d.H > viewerPreviewMaxPixels {
+		return nil, fmt.Errorf("图片像素 %d×%d 超过预览上限（8000 万）", d.W, d.H)
 	}
 	f, err := os.Open(it.Path)
 	if err != nil {

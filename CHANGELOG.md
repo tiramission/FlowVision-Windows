@@ -2,6 +2,19 @@
 
 全部版本遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的章节格式；更新面板会显示当前版本对应的发布说明。
 
+## [1.4.1] - 2026-11-26
+
+### 修复
+
+- 查看器打开超过 8000 万像素的图片时不再直接报 `image too large to preview`：超过 Go 解码安全线后先请求 Explorer/系统缩略图 provider，失败再回退 WIC/Shell，仍生成最长边 2560 的预览，避免 100 MP 级 JPEG 在 Go 堆里展开数百 MB。
+- 系统缩略图 provider 也不可用时改为中文提示“图片像素 … 超过预览上限（8000 万），系统无法生成缩略图”，不再把内部英文错误直接显示给用户；旧 legacy 预览路径同步改为中文错误。
+- 超大图回退生成的 JPEG 会写入查看器预览缓存，后续打开直接走缓存。
+
+### 测试
+
+- 新增超大图回退单元测试与系统缩略图 80 MP 样本测试；手工 90 MP 合成 JPEG 实机验证得到 2560×2304 预览、约 987 ms，无 `image too large to preview`。
+- 全量 `go test -tags mygo_nowebview ./...` 通过。
+
 ## [1.4.0] - 2026-11-26
 
 ### 变更

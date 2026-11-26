@@ -6,7 +6,7 @@
 
 把本地图片和视频变成可浏览、可沉浸查看的瀑布流。FlowVision for Windows 是 [netdcy/FlowVision](https://github.com/netdcy/FlowVision)（macOS，Swift/AppKit）的 Windows 重写版：**Go + MyGo 原生 `ui` + Onevra**，不使用 WebView2、HTML 或 JavaScript，也不需要 cgo、Swift 或 Xcode。
 
-当前版本 **1.4.0**：查看器 2560 预览改用 `ApproxBiLinear` 快缩放并直接上屏，24 MP 冷开 P50 从 0.87–1.43 s 降到 418 ms，热缓存 P50 72 ms；打开先用网格缩略图占位（6–9 ms 可见），邻图预加载、悬停预取、按需 1:1 全分辨率（≤50 MP）和非侵入式 HUD 全部落地；连续 50 次开关内存增长 26 MB。
+当前版本 **1.4.1**：查看器 2560 预览改用 `ApproxBiLinear` 快缩放并直接上屏，24 MP 冷开 P50 从 0.87–1.43 s 降到 418 ms，热缓存 P50 72 ms；打开先用网格缩略图占位（6–9 ms 可见），邻图预加载、悬停预取、按需 1:1 全分辨率（≤50 MP）和非侵入式 HUD 全部落地；连续 50 次开关内存增长 26 MB；超过 80 MP 的图片改走系统缩略图/WIC 回退，不再直接拒绝预览。
 
 ## 下载与安装
 
@@ -131,7 +131,7 @@ go test -run '^$' -bench BenchmarkViewerPreview -benchtime=20x -count=1 .
 | HEIC / AVIF / RAW | 缩略图：有系统 codec 时走 WIC/Shell；当前机器无 HEIC codec 时显示占位。查看器仍主要依赖 Go 解码，无法预览时交系统关联程序打开 |
 | 视频缩略图 | 依赖外部 `ffmpeg.exe`（PATH 或 exe 同级）；缺失时显示渐变占位图 |
 | 视频播放 | 依赖本机解码器；部分 MKV/HEVC 只能外部打开 |
-| 超大图 | 默认显示最长边 2,560 px 预览；>80 MP 拒绝生成预览；1:1 只对 ≤50 MP 的单图按需启用，>50 MP 显示预览并在 HUD/信息面板提示 |
+| 超大图 | 默认显示最长边 2,560 px 预览；>80 MP 优先走系统缩略图 provider，失败再回退 WIC/Shell，provider 不可用时显示中文提示；1:1 只对 ≤50 MP 的单图按需启用，>50 MP 显示预览并在 HUD/信息面板提示 |
 | 右键八向手势 | 未迁移；右键用于原生上下文菜单 |
 | 系统主题实时跟随 | 启动时检测系统深浅色；运行中可在设置里立即切换主题 |
 

@@ -273,6 +273,50 @@ func TestViewerLimitsAtBoundaries(t *testing.T) {
 	}
 }
 
+func TestViewerOversizePreviewFallback(t *testing.T) {
+	srcPath := filepath.Join("testdata", "thumb-corpus", "viewer", "80mp.jpg")
+	st, err := os.Stat(srcPath)
+	if err != nil {
+		t.Skipf("oversize fixture unavailable: %v", err)
+	}
+	thumbDir = t.TempDir()
+	t.Setenv("FLOWVISION_VIEWER_CACHE", "off")
+	it := &Item{
+		ID: "oversize-preview-test", Name: "80mp.jpg", Kind: "image",
+		Path: srcPath, Ext: ".jpg", Size: st.Size(), Mtime: st.ModTime().Unix(),
+	}
+	res, err := loadViewerPreviewFallback(it, dimInfo{W: 10000, H: 8000}, "")
+	if err != nil {
+		t.Fatalf("oversize fallback failed: %v", err)
+	}
+	if res == nil || res.Img == nil {
+		t.Fatal("oversize fallback returned no image")
+	}
+	b := res.Img.Bounds()
+	if b.Dx() > viewerPreviewMaxDim || b.Dy() > viewerPreviewMaxDim {
+		t.Fatalf("fallback image %dx%d exceeds %d", b.Dx(), b.Dy(), viewerPreviewMaxDim)
+	}
+	if res.Bytes == 0 {
+		t.Fatal("fallback produced no cached JPEG")
+	}
+}
+
+func TestViewerPreviewFallbackHeight(t *testing.T) {
+	cases := []struct {
+		w, h, want int
+	}{
+		{10000, 8000, 2048},
+		{8000, 10000, 2560},
+		{10000, 10000, 2560},
+		{10000, 1000, 256},
+	}
+	for _, tc := range cases {
+		if got := viewerPreviewFallbackHeight(tc.w, tc.h); got != tc.want {
+			t.Errorf("fallback height(%d,%d) = %d, want %d", tc.w, tc.h, got, tc.want)
+		}
+	}
+}
+
 func TestViewerHUDSettingIsInSettings(t *testing.T) {
 	a := newViewTestApp()
 	cats := a.settingsCategories()
