@@ -420,26 +420,31 @@ func (a *App) drawGrid(p *ui.Painter, r ui.Rect, layout gridLayout, th *ui.Theme
 		if t := a.tab(); t != nil {
 			selected = t.Selected[it.ID]
 		}
-
-		// Each tile is a Onevra surface card: a warm face, a hairline border and
-		// a caption that stays inside the card rather than floating on the page.
+		// Photographs are the tile. Only folders and file placeholders need a
+		// card face; images/videos sit directly on the gallery canvas so the
+		// eye reads the picture, not a white rectangle around it.
+		imageTile := it.Kind == "image" || it.Kind == "video"
 		cardFace := th.Surface
-		cardBorder := th.Border.Alpha(.75)
+		cardBorder := th.Border.Alpha(.72)
 		borderWidth := float32(1)
 		if selected {
-			// A two-pixel ring around the whole card plus a check mark reads
-			// cleaner than the old heavy stroke around the thumbnail alone.
-			cardBorder = th.Accent.Alpha(.9)
+			cardBorder = th.Accent.Alpha(.92)
 			borderWidth = 2
 		}
 		if i == hover {
-			cardFace = th.SurfaceHover
-			if !selected {
-				cardBorder = th.Accent.Alpha(.55)
+			if imageTile {
+				p.Shadow(imgR, 14, 0, 4, 16, 0, ui.RGBA(0, 0, 0, .13))
+			} else {
+				cardFace = th.SurfaceHover
+				p.Shadow(card, 10, 0, 3, 10, 0, ui.RGBA(0, 0, 0, .10))
 			}
-			p.Shadow(card, 10, 0, 3, 10, 0, ui.RGBA(0, 0, 0, .10))
+			if !selected {
+				cardBorder = th.Accent.Alpha(.35)
+			}
 		}
-		p.Fill(card, cardFace, 10)
+		if !imageTile {
+			p.Fill(card, cardFace, 9)
+		}
 
 		if it.Kind == "folder" {
 			p.Fill(imgR, th.SurfaceHover, 9)
@@ -451,11 +456,11 @@ func (a *App) drawGrid(p *ui.Painter, r ui.Rect, layout gridLayout, th *ui.Theme
 		} else if it.Kind == "image" || it.Kind == "video" {
 			bmp := a.thumb(it, a.settings.ThumbSize)
 			if bmp != nil {
-				p.Clip(imgR, 9, func() {
+				p.Clip(imgR, 8, func() {
 					p.Image(bmp, imgR, ui.Cover)
 				})
 			} else {
-				p.Fill(imgR, th.SurfaceHover, 9)
+				p.Fill(imgR, th.SurfaceHover, 8)
 				icon := lucide.ImageOff()
 				if it.Kind == "video" {
 					icon = lucide.Video()
@@ -483,12 +488,12 @@ func (a *App) drawGrid(p *ui.Painter, r ui.Rect, layout gridLayout, th *ui.Theme
 		}
 		captionY := imgR.Y + imgR.H + 8
 		if layout.Captions || it.Kind == "folder" {
-			p.Clip(ui.Rect{X: imgR.X + 9, Y: captionY, W: max(0, imgR.W-18), H: 18}, 0, func() {
-				color := th.Text
-				if i == hover {
+			p.Clip(ui.Rect{X: imgR.X + 7, Y: captionY, W: max(0, imgR.W-14), H: 18}, 0, func() {
+				color := th.Text.Alpha(.88)
+				if selected {
 					color = th.Accent
 				}
-				p.Text(imgR.X+9, captionY, it.Name, 11.5, color)
+				p.Text(imgR.X+7, captionY, it.Name, 11, color)
 			})
 		} else if i == hover {
 			// With captions hidden the wall stays clean, but a hovered tile
@@ -497,17 +502,29 @@ func (a *App) drawGrid(p *ui.Painter, r ui.Rect, layout gridLayout, th *ui.Theme
 			textW, _ := p.MeasureText(0, ui.Span{Text: label, Size: 11, Weight: 500})
 			pillW := min(imgR.W-16, textW+20)
 			pill := ui.Rect{X: imgR.X + 8, Y: imgR.Y + imgR.H - 34, W: max(0, pillW), H: 25}
-			p.Fill(pill, ui.RGBA(0, 0, 0, 168), 8)
+			p.Fill(pill, ui.RGBA(10, 10, 11, 176), 8)
 			p.Clip(ui.Rect{X: pill.X + 10, Y: pill.Y + 5, W: max(0, pill.W-20), H: 16}, 0, func() {
 				p.Text(pill.X+10, pill.Y+5, label, 11, ui.RGBA(255, 255, 255, 240))
 			})
 		}
+
+		if imageTile {
+			// Selection hugs the picture, not an invisible caption card.
+			if selected {
+				p.Stroke(imgR, th.Accent.Alpha(.92), 8, 2)
+			}
+		} else {
+			p.Stroke(card, cardBorder, 9, borderWidth)
+		}
 		if selected {
-			badge := ui.Rect{X: card.X + card.W - 28, Y: card.Y + 8, W: 22, H: 22}
-			p.Fill(badge, th.Accent, 11)
+			badgeBase := card
+			if imageTile {
+				badgeBase = imgR
+			}
+			badge := ui.Rect{X: badgeBase.X + badgeBase.W - 28, Y: badgeBase.Y + 8, W: 22, H: 22}
+			p.Fill(badge, th.Accent, 10)
 			p.Icon(lucide.Check(), ui.Rect{X: badge.X + 6, Y: badge.Y + 6, W: 10, H: 10}, ui.RGBA(255, 255, 255, 255))
 		}
-		p.Stroke(card, cardBorder, 10, borderWidth)
 	}
 }
 

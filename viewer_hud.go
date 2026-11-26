@@ -175,33 +175,35 @@ func (a *App) drawViewerStatusPill(p *ui.Painter, r ui.Rect, th *ui.Theme, text 
 	size := float32(11)
 	span := ui.Span{Text: text, Size: size, Weight: 500}
 	w, _ := p.MeasureText(0, span)
-	h := float32(26)
-	if w+24 > r.W*0.62 && r.W > 0 {
+	if w+26 > r.W*0.62 && r.W > 0 {
 		text = truncateViewerNotice(text, 38)
 		span.Text = text
 		w, _ = p.MeasureText(0, span)
 	}
-	pad := float32(12)
+	pad := float32(13)
 	pillW := w + pad*2
 	if pillW > r.W-32 {
 		pillW = r.W - 32
 	}
+	h := float32(28)
 	y := r.Y + r.H - 20 - h
 	if a.viewer.Immersive && a.viewer.ChromeVisible {
 		y = r.Y + r.H - 64 - h
 	}
 	x := r.X + (r.W-pillW)/2
-	bg := ui.RGBA(16, 16, 20, 0.78*alpha)
-	fg := ui.RGBA(238, 238, 244, alpha)
+	pill := ui.Rect{X: x, Y: y, W: pillW, H: h}
+	bg := th.Surface.Alpha(.88 * alpha)
+	fg := th.Text.Alpha(alpha)
 	switch kind {
 	case viewerNoticeWarn:
-		fg = ui.RGBA(255, 214, 140, alpha)
+		fg = th.Warning.Alpha(alpha)
 	case viewerNoticeError:
-		fg = ui.RGBA(255, 140, 140, alpha)
+		fg = th.Danger.Alpha(alpha)
 	case viewerNoticeLimit:
-		fg = ui.RGBA(255, 196, 120, alpha)
+		fg = th.Warning.Alpha(alpha)
 	}
-	p.Fill(ui.Rect{X: x, Y: y, W: pillW, H: h}, bg, 13)
+	p.Fill(pill, bg, 10)
+	p.Stroke(pill, th.Border.Alpha(.72*alpha), 10, 1)
 	p.Text(x+pad, y+7, text, size, fg)
 }
 

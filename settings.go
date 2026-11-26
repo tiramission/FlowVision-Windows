@@ -51,7 +51,7 @@ func defaultSettings() Settings {
 		Theme:         "system",
 		ThumbSize:     220,
 		GridGap:       8,
-		ShowCardNames: true,
+		ShowCardNames: false,
 		Sort:          "name",
 		Desc:          false,
 		ShowHidden:    false,

@@ -434,7 +434,7 @@ func (a *App) folderTreeRow(c *ui.Context, tree ui.TreeParts, path, name string,
 		Radius(6).PaddingStart(8 + 12*float32(item.Depth())).PaddingEnd(8).
 		Label(name).Selected(selected).FocusRing(true).TextColor(th.Text)
 	if selected {
-		row.Background(th.Text.Alpha(.1))
+		row.Background(th.Accent.Alpha(.08))
 	} else if row.Hovered() {
 		row.Background(th.Text.Alpha(.035))
 	}

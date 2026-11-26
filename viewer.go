@@ -289,6 +289,11 @@ func (a *App) viewerOverlay(c *ui.Context) {
 		a.closeViewer()
 		return
 	}
+	// The viewer is a darkroom: neutral black chrome avoids tinting the
+	// photograph, regardless of the gallery's light or dark appearance.
+	vt := viewerPalette()
+	applyThemePreferences(vt, c)
+	c.SetTheme(vt)
 	th := c.Theme()
 	it := a.viewer.Item
 	wasOpen := a.viewer.Open
@@ -338,8 +343,8 @@ func (a *App) viewerHeader(c *ui.Context, it *Item, th *ui.Theme, floating bool)
 		if it.Kind == "video" {
 			icon = lucide.Film()
 		}
-		ui.Box(c).Size(30, 30).Radius(8).Background(th.Accent.Alpha(.12)).Center().Children(func() {
-			components.Icon(c, icon).Size(15, 15).TextColor(th.Accent)
+		ui.Box(c).Size(30, 30).Radius(8).Background(th.SurfaceHover).Center().Children(func() {
+			components.Icon(c, icon).Size(15, 15).TextColor(th.TextMuted)
 		})
 		title := ui.Column(c).Grow(1).MinWidth(0)
 		if !floating {
@@ -675,7 +680,7 @@ func (a *App) viewerCanvas(c *ui.Context, it *Item, th *ui.Theme) {
 		box.Draw(func(p *ui.Painter, r ui.Rect) {
 			switch {
 			case it.Kind == "video" && a.viewer.Player != nil:
-				p.Fill(r, ui.RGBA(0, 0, 0, 245), 0)
+				p.Fill(r, ui.Hex("#0a0a0b"), 0)
 				if !a.viewer.Player.Ready() {
 					msg := "正在载入视频…"
 					if err := a.viewer.Player.Err(); err != nil {
@@ -685,7 +690,7 @@ func (a *App) viewerCanvas(c *ui.Context, it *Item, th *ui.Theme) {
 					p.Text(r.X+(r.W-w)/2, r.Y+r.H/2, msg, 13, ui.RGBA(230, 230, 235, 255))
 				}
 			case a.viewer.Bitmap == nil && a.viewer.Placeholder != nil:
-				p.Fill(r, ui.RGBA(0, 0, 0, 245), 0)
+				p.Fill(r, ui.Hex("#0a0a0b"), 0)
 				bw, bh := a.viewer.Placeholder.Size()
 				if bw > 0 && bh > 0 {
 					fit := viewerFitScale(bw, bh, a.viewer.Angle, r.W, r.H)
@@ -698,7 +703,7 @@ func (a *App) viewerCanvas(c *ui.Context, it *Item, th *ui.Theme) {
 					})
 				}
 			case a.viewer.Bitmap == nil:
-				p.Fill(r, ui.RGBA(0, 0, 0, 245), 0)
+				p.Fill(r, ui.Hex("#0a0a0b"), 0)
 				msg := "正在载入…"
 				if a.viewer.Err != "" {
 					msg = a.viewer.Err
@@ -710,7 +715,7 @@ func (a *App) viewerCanvas(c *ui.Context, it *Item, th *ui.Theme) {
 				if bw <= 0 || bh <= 0 {
 					return
 				}
-				p.Fill(r, ui.RGBA(0, 0, 0, 245), 0)
+				p.Fill(r, ui.Hex("#0a0a0b"), 0)
 				fit := viewerFitScale(bw, bh, a.viewer.Angle, r.W, r.H)
 				s := fit * a.viewer.Zoom
 				cx := r.X + r.W/2 + a.viewer.PanX
