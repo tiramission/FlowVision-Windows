@@ -2,6 +2,18 @@
 
 全部版本遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的章节格式；更新面板会显示当前版本对应的发布说明。
 
+## [1.4.5] - 2026-11-26
+
+### 修复
+
+- 等待原图后应用 100% 时，指针锚点改为相对画布中心计算；此前直接把画布局部坐标当作中心相对坐标，导致进入 100% 后图片相对“直接进入 100%”出现偏移。
+- 左键长按 1:1、滚轮/触控板缩放只在鼠标指针位于图片实际显示区域时触发；画布黑边和空白区域不再启动原图等待或缩放。
+- 拖动和精确滚动平移后自动夹紧平移量，图片至少保留 48 DIP 可见，禁止把图片完全拖出窗口。
+
+### 测试
+
+- 新增 `TestViewerAnchorPanUsesCanvasCenter`、`TestViewerPendingActualAnchorUsesCanvasCenter`、`TestViewerPointInImageRejectsLetterbox`、`TestViewerPointInImageRejectsTopLetterbox`、`TestViewerActualSizeAtIgnoresLetterbox`、`TestViewerZoomAtIgnoresLetterbox`、`TestViewerDragCannotMoveImageFullyOffCanvas`；全量 `go test -tags mygo_nowebview ./...` 与 `go test -tags "debug mygo_nowebview" ./...` 通过。
+
 ## [1.4.4] - 2026-11-26
 
 ### 修复

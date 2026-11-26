@@ -302,8 +302,8 @@ func (a *App) applyViewerPendingActualSize() {
 			// The bitmap changed from the preview to the original, so the
 			// anchor ratio must use display scales, not the relative zooms.
 			ratio := newDisplay / oldDisplay
-			a.viewer.PanX = px - (px-a.viewer.PanX)*ratio
-			a.viewer.PanY = py - (py-a.viewer.PanY)*ratio
+			a.viewer.PanX, a.viewer.PanY = viewerAnchorPan(
+				px, py, w, h, a.viewer.PanX, a.viewer.PanY, ratio)
 		} else {
 			a.viewer.PanX = 0
 			a.viewer.PanY = 0

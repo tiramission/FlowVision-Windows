@@ -1718,6 +1718,15 @@ func (a *App) viewerActualSizeAt(x, y, w, h float32) {
 	if a.viewer.Bitmap == nil || a.viewer.Item == nil || a.viewer.Item.Kind != "image" {
 		return
 	}
+	if w <= 0 || h <= 0 {
+		w, h = a.viewerCanvasSize(nil)
+	}
+	if x < 0 || y < 0 {
+		x, y = w/2, h/2
+	}
+	if !a.viewerPointInImage(x, y, w, h) {
+		return
+	}
 	if a.viewerNeedsFullResForActualSize() {
 		a.deferViewerActualSize(true, x, y, w, h)
 		return
@@ -1725,9 +1734,6 @@ func (a *App) viewerActualSizeAt(x, y, w, h float32) {
 	a.clearViewerPendingActualSize()
 	a.viewer.OneToOne = true
 	bw, bh := a.viewer.Bitmap.Size()
-	if w <= 0 || h <= 0 {
-		w, h = a.viewerCanvasSize(nil)
-	}
 	fit := viewerFitScale(bw, bh, a.viewer.Angle, w, h)
 	if fit <= 0 {
 		return
@@ -1735,9 +1741,6 @@ func (a *App) viewerActualSizeAt(x, y, w, h float32) {
 	actual := clampViewerZoom(viewerActualZoom(fit))
 	if a.viewer.Zoom >= actual {
 		return
-	}
-	if x < 0 || y < 0 {
-		x, y = w/2, h/2
 	}
 	a.viewer.Zoom, a.viewer.PanX, a.viewer.PanY = viewerZoomAtPoint(
 		a.viewer.Zoom, a.viewer.PanX, a.viewer.PanY, actual/a.viewer.Zoom, x, y, w, h)
@@ -1808,6 +1811,12 @@ func (a *App) viewerZoomAt(delta, x, y, w, h float32) {
 	if a.viewer.Item == nil || a.viewer.Item.Kind != "image" {
 		return
 	}
+	if w <= 0 || h <= 0 {
+		w, h = a.viewerCanvasSize(nil)
+	}
+	if !a.viewerPointInImage(x, y, w, h) {
+		return
+	}
 	a.clearViewerPendingActualSize()
 	before := a.viewer.Zoom
 	a.viewer.Zoom, a.viewer.PanX, a.viewer.PanY = viewerZoomAtPoint(
@@ -1826,6 +1835,8 @@ func (a *App) viewerRotate(delta float32) {
 	}
 	a.clearViewerPendingActualSize()
 	a.viewer.Angle += delta
+	w, h := a.viewerCanvasSize(nil)
+	a.clampViewerPan(w, h)
 	a.refresh()
 }
 

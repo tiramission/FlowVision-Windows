@@ -226,7 +226,7 @@ func TestViewerActualSizeAtRecordsAnchorWhileWaiting(t *testing.T) {
 		a.viewerPendingActualW != 800 || a.viewerPendingActualH != 600 {
 		t.Fatalf("anchor = %.0f,%.0f %.0fx%.0f", a.viewerPendingActualX, a.viewerPendingActualY, a.viewerPendingActualW, a.viewerPendingActualH)
 	}
-	a.dragViewer(0, 0)
+	a.dragViewer(0, 0, 800, 600)
 	if !a.viewerPendingActual {
 		t.Fatal("stationary pointer cleared the pending actual-size anchor")
 	}
@@ -268,15 +268,112 @@ func TestViewerBitmapSwapPreservesDisplayedWidth(t *testing.T) {
 	}
 }
 
+func TestViewerAnchorPanUsesCanvasCenter(t *testing.T) {
+	x, y := viewerAnchorPan(800, 400, 1280, 800, 10, -20, 2)
+	if absFloat(x-(-140)) > 0.01 || absFloat(y-(-40)) > 0.01 {
+		t.Fatalf("anchor pan = %v,%v, want -140,-40", x, y)
+	}
+}
+
+func TestViewerPendingActualAnchorUsesCanvasCenter(t *testing.T) {
+	a := newViewerGestureApp(t)
+	defer a.closeViewer()
+	a.viewer.Bitmap.ReleasePixels()
+	a.viewer.Bitmap = ui.NewBitmap(image.NewRGBA(image.Rect(0, 0, 100, 100)))
+	a.viewer.Zoom = 1
+	a.viewer.OneToOne = false
+	a.viewerPendingActual = true
+	a.viewerPendingActualAt = true
+	a.viewerPendingActualX = 640
+	a.viewerPendingActualY = 400
+	a.viewerPendingActualW = 1280
+	a.viewerPendingActualH = 800
+	a.viewerPendingActualOldW = 50
+	a.viewerPendingActualOldH = 50
+	a.applyViewerPendingActualSize()
+	if absFloat(a.viewer.PanX) > 0.01 || absFloat(a.viewer.PanY) > 0.01 {
+		t.Fatalf("center anchor moved pan to %v,%v, want 0,0", a.viewer.PanX, a.viewer.PanY)
+	}
+}
+
+func TestViewerPointInImageRejectsLetterbox(t *testing.T) {
+	a := newViewerGestureApp(t)
+	defer a.closeViewer()
+	if !a.viewerPointInImage(640, 400, 1280, 800) {
+		t.Fatal("center of image was rejected")
+	}
+	if a.viewerPointInImage(100, 400, 1280, 800) {
+		t.Fatal("left letterbox was treated as image area")
+	}
+}
+
+func TestViewerPointInImageRejectsTopLetterbox(t *testing.T) {
+	a := newViewerGestureApp(t)
+	defer a.closeViewer()
+	a.viewer.Bitmap.ReleasePixels()
+	a.viewer.Bitmap = ui.NewBitmap(image.NewRGBA(image.Rect(0, 0, 100, 50)))
+	if !a.viewerPointInImage(640, 400, 1280, 800) {
+		t.Fatal("center of wide image was rejected")
+	}
+	if a.viewerPointInImage(640, 40, 1280, 800) {
+		t.Fatal("top letterbox was treated as image area")
+	}
+}
+
+func TestViewerActualSizeAtIgnoresLetterbox(t *testing.T) {
+	a := newViewerGestureApp(t)
+	defer a.closeViewer()
+	a.viewer.Item.W, a.viewer.Item.H = 9000, 7000
+	a.viewer.FullResLoading = true
+	a.viewerActualSizeAt(100, 400, 1280, 800)
+	if a.viewerPendingActual {
+		t.Fatal("letterbox long press started the original-size wait")
+	}
+	a.viewerActualSizeAt(640, 400, 1280, 800)
+	if !a.viewerPendingActual {
+		t.Fatal("image-area long press did not start the original-size wait")
+	}
+}
+
+func TestViewerZoomAtIgnoresLetterbox(t *testing.T) {
+	a := newViewerGestureApp(t)
+	defer a.closeViewer()
+	before := a.viewer.Zoom
+	a.viewerZoomAt(1.25, 100, 400, 1280, 800)
+	if a.viewer.Zoom != before {
+		t.Fatalf("letterbox wheel changed zoom from %v to %v", before, a.viewer.Zoom)
+	}
+	a.viewerZoomAt(1.25, 640, 400, 1280, 800)
+	if a.viewer.Zoom == before {
+		t.Fatal("image-area wheel did not zoom")
+	}
+}
+
+func TestViewerDragCannotMoveImageFullyOffCanvas(t *testing.T) {
+	a := newViewerGestureApp(t)
+	defer a.closeViewer()
+	a.viewer.Zoom = 4
+	a.dragViewer(5000, 5000, 1280, 800)
+	bw, bh := a.viewer.Bitmap.Size()
+	fit := viewerFitScale(bw, bh, a.viewer.Angle, 1280, 800)
+	boundsW, _ := viewerRotatedBounds(bw, bh, a.viewer.Angle)
+	dispW := boundsW * fit * a.viewer.Zoom
+	cx := 1280/2 + a.viewer.PanX
+	visible := min(cx+dispW/2, float32(1280)) - max(cx-dispW/2, float32(0))
+	if visible < viewerPanMinVisible-0.1 {
+		t.Fatalf("image left only %.1f px visible after drag", visible)
+	}
+}
+
 func TestZeroMovementDragKeepsPendingActual(t *testing.T) {
 	a := newViewerGestureApp(t)
 	defer a.closeViewer()
 	a.viewerPendingActual = true
-	a.dragViewer(0, 0)
+	a.dragViewer(0, 0, 800, 600)
 	if !a.viewerPendingActual {
 		t.Fatal("zero-movement drag cleared pending actual size")
 	}
-	a.dragViewer(3, 4)
+	a.dragViewer(3, 4, 800, 600)
 	if a.viewerPendingActual {
 		t.Fatal("real drag did not clear pending actual size")
 	}

@@ -12,9 +12,20 @@ import (
 )
 
 const (
-	viewerHoldDelay = 400 * time.Millisecond
-	viewerHoldSlop  = float32(8)
+	viewerHoldDelay     = 400 * time.Millisecond
+	viewerHoldSlop      = float32(8)
+	viewerPanMinVisible = float32(48)
 )
+
+func viewerRotatedBounds(bw, bh int, angle float32) (float32, float32) {
+	if bw <= 0 || bh <= 0 {
+		return 0, 0
+	}
+	rad := float64(angle) * math.Pi / 180
+	boundsW := float32(math.Abs(float64(bw)*math.Cos(rad)) + math.Abs(float64(bh)*math.Sin(rad)))
+	boundsH := float32(math.Abs(float64(bw)*math.Sin(rad)) + math.Abs(float64(bh)*math.Cos(rad)))
+	return boundsW, boundsH
+}
 
 // nextViewerIndex walks past folders and other files so the arrow buttons
 // only land on something the viewer can actually decode.
@@ -54,13 +65,11 @@ func viewerFitScale(bw, bh int, angle, availW, availH float32) float32 {
 	if bw <= 0 || bh <= 0 || availW <= 0 || availH <= 0 {
 		return 0
 	}
-	rad := float64(angle) * math.Pi / 180
-	boundsW := math.Abs(float64(bw)*math.Cos(rad)) + math.Abs(float64(bh)*math.Sin(rad))
-	boundsH := math.Abs(float64(bw)*math.Sin(rad)) + math.Abs(float64(bh)*math.Cos(rad))
+	boundsW, boundsH := viewerRotatedBounds(bw, bh, angle)
 	if boundsW <= 0 || boundsH <= 0 {
 		return 0
 	}
-	return float32(math.Min(float64(availW)/boundsW, float64(availH)/boundsH))
+	return float32(math.Min(float64(availW)/float64(boundsW), float64(availH)/float64(boundsH)))
 }
 
 // viewerBitmapPercentValue reports the scale of the bitmap currently on
@@ -109,6 +118,16 @@ func clampViewerZoom(z float32) float32 {
 	return max(0.15, min(12, z))
 }
 
+// viewerAnchorPan keeps a canvas point fixed while the image scale changes.
+// Pan is relative to the canvas center, so the pointer must be measured from
+// that center too; using the raw canvas coordinate shifts the 100% image by
+// half a canvas width/height.
+func viewerAnchorPan(px, py, w, h, panX, panY, ratio float32) (float32, float32) {
+	ax := px - w/2
+	ay := py - h/2
+	return ax - (ax-panX)*ratio, ay - (ay-panY)*ratio
+}
+
 // viewerZoomAtPoint scales the image while keeping the bitmap point under the
 // pointer at the same canvas position. Pan is relative to the canvas center,
 // so both the pointer and the current pan are measured from that center.
@@ -120,10 +139,74 @@ func viewerZoomAtPoint(zoom, panX, panY, delta, x, y, w, h float32) (newZoom, ne
 	if newZoom == zoom {
 		return zoom, panX, panY
 	}
-	ax := x - w/2
-	ay := y - h/2
 	ratio := newZoom / zoom
-	return newZoom, ax - (ax-panX)*ratio, ay - (ay-panY)*ratio
+	panX, panY = viewerAnchorPan(x, y, w, h, panX, panY, ratio)
+	return newZoom, panX, panY
+}
+
+// viewerPointInBitmap reports whether a canvas point is over the visible
+// bitmap rather than the letterbox around it. The bitmap is centered at
+// (w/2+panX, h/2+panY), scaled by fit*zoom, and rotated by angle.
+func viewerPointInBitmap(x, y, w, h float32, bw, bh int, angle, zoom, panX, panY float32) bool {
+	if bw <= 0 || bh <= 0 || w <= 0 || h <= 0 {
+		return false
+	}
+	fit := viewerFitScale(bw, bh, angle, w, h)
+	if fit <= 0 {
+		return false
+	}
+	scale := fit * zoom
+	if scale <= 0 {
+		return false
+	}
+	rad := float64(angle) * math.Pi / 180
+	cos := float32(math.Cos(rad))
+	sin := float32(math.Sin(rad))
+	dx := x - (w/2 + panX)
+	dy := y - (h/2 + panY)
+	lx := dx*cos + dy*sin
+	ly := -dx*sin + dy*cos
+	halfW := float32(bw) * scale / 2
+	halfH := float32(bh) * scale / 2
+	return float32(math.Abs(float64(lx))) <= halfW &&
+		float32(math.Abs(float64(ly))) <= halfH
+}
+
+func (a *App) viewerPointInImage(x, y, w, h float32) bool {
+	if a.viewer.Bitmap == nil || a.viewer.Item == nil || a.viewer.Item.Kind != "image" {
+		return false
+	}
+	bw, bh := a.viewer.Bitmap.Size()
+	return viewerPointInBitmap(x, y, w, h, bw, bh, a.viewer.Angle,
+		a.viewer.Zoom, a.viewer.PanX, a.viewer.PanY)
+}
+
+// clampViewerPan keeps at least a small strip of the image inside the canvas.
+// Without it a drag can move the bitmap completely off-screen, leaving an
+// empty canvas with no way back except the fit/center buttons.
+func (a *App) clampViewerPan(w, h float32) {
+	if a.viewer.Bitmap == nil || w <= 0 || h <= 0 {
+		return
+	}
+	bw, bh := a.viewer.Bitmap.Size()
+	fit := viewerFitScale(bw, bh, a.viewer.Angle, w, h)
+	if fit <= 0 {
+		return
+	}
+	boundsW, boundsH := viewerRotatedBounds(bw, bh, a.viewer.Angle)
+	dispW := boundsW * fit * a.viewer.Zoom
+	dispH := boundsH * fit * a.viewer.Zoom
+	if dispW <= 0 || dispH <= 0 {
+		return
+	}
+	minX := min(viewerPanMinVisible, dispW, w/2)
+	minY := min(viewerPanMinVisible, dispH, h/2)
+	cx := w/2 + a.viewer.PanX
+	cy := h/2 + a.viewer.PanY
+	cx = max(minX-dispW/2, min(cx, w-minX+dispW/2))
+	cy = max(minY-dispH/2, min(cy, h-minY+dispH/2))
+	a.viewer.PanX = cx - w/2
+	a.viewer.PanY = cy - h/2
 }
 
 // viewerImmersive reports whether the viewer is filling the host window. It
@@ -483,13 +566,14 @@ func (a *App) cancelViewerHold() {
 // dragViewer applies a real pointer movement. MyGo reports held=true for a
 // stationary primary press too, so zero movement must not cancel the pending
 // long-press actual-size transition.
-func (a *App) dragViewer(dx, dy float32) {
+func (a *App) dragViewer(dx, dy, w, h float32) {
 	if dx == 0 && dy == 0 {
 		return
 	}
 	a.clearViewerPendingActualSize()
 	a.viewer.PanX += dx
 	a.viewer.PanY += dy
+	a.clampViewerPan(w, h)
 }
 
 func (a *App) beginViewerHold(button int, x, y float32, at time.Time) {
@@ -667,7 +751,7 @@ func (a *App) viewerCanvas(c *ui.Context, it *Item, th *ui.Theme) {
 			return
 		}
 		if dx, dy, held := box.Dragged(); held {
-			a.dragViewer(dx, dy)
+			a.dragViewer(dx, dy, canvasW, canvasH)
 		}
 		box.HandleInput(func(ev ui.InputEvent) bool {
 			a.showViewerCursor()
@@ -682,6 +766,7 @@ func (a *App) viewerCanvas(c *ui.Context, it *Item, th *ui.Theme) {
 					a.clearViewerPendingActualSize()
 					a.viewer.PanX -= ev.DX
 					a.viewer.PanY -= ev.DY
+					a.clampViewerPan(canvasW, canvasH)
 					a.refresh()
 				} else if ev.DY < 0 {
 					a.viewerZoomAt(1.12, ev.X, ev.Y, canvasW, canvasH)

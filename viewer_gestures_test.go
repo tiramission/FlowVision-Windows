@@ -74,7 +74,7 @@ func TestViewerLongPressLeftZoomsAtPointer(t *testing.T) {
 	tt := ui.NewTester(a.view, 900, 700)
 	tt.Frame()
 	_, _, w, h := canvasLocalPoint(t, tt)
-	x, y := w/4, h/3
+	x, y := w/2+20, h/2-15
 	a.viewer.Zoom = 0.1
 	a.viewer.PanX, a.viewer.PanY = 0, 0
 	bw, bh := a.viewer.Bitmap.Size()
