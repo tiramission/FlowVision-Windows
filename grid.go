@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/egoist/mygo/ui"
-	"github.com/oneo-me/onevra/source/components"
 	"github.com/oneo-me/onevra/source/icons/lucide"
 )
 
@@ -210,10 +209,22 @@ func (a *App) gridView(c *ui.Context, tab *Tab) {
 	}
 	a.endThumbFrame(frame)
 
-	scroll := ui.Scroll(c).Fill().TrackScroll(&tab.Scroll).Padding(16).Gap(0)
+	scroll := ui.Scroll(c).Fill().TrackScroll(&tab.Scroll).Padding(16).Gap(0).Key("media-grid-scroll")
 	scroll.Children(func() {
-		box := ui.Box(c).Key("media-grid").Height(layout.TotalH).Focusable().Role(ui.RoleList).
+		// Keep the hit-test box at least as tall as the viewport so a
+		// secondary click below the last row still reaches the grid's
+		// context menu instead of falling through to the scroll surface.
+		contentH := layout.TotalH
+		if minH := windowH - titleBarHeight - toolbarHeight - bottomBarHeight - 32; contentH < minH {
+			contentH = minH
+		}
+		box := ui.Box(c).Key("media-grid").Height(contentH).Focusable().Role(ui.RoleList).
 			Label(fmt.Sprintf("%s，%d 项", tab.Name, len(tab.Items)))
+		box.Bind(&a.gridFocusHandle)
+		if a.gridMenuRefocus {
+			a.gridMenuRefocus = false
+			box.Focus()
+		}
 		if box.FileDragOver() {
 			box.Border(2, th.Accent)
 		}
@@ -238,7 +249,7 @@ func (a *App) gridView(c *ui.Context, tab *Tab) {
 		// The pointer is in the content box's coordinates, which include the
 		// scroll offset, so hit testing needs no adjustment.
 		if box.Clicked() {
-			a.contextAtValid = false
+			a.gridMenuOpen = false
 			x, y, _ := box.PointerPosition()
 			if idx, ok := layout.hit(x, y); ok {
 				it := layout.Cells[idx].It
@@ -262,85 +273,19 @@ func (a *App) gridView(c *ui.Context, tab *Tab) {
 		}
 		if box.RightClicked() {
 			x, y, _ := box.PointerPosition()
-			a.contextAtX, a.contextAtY = x, y
-			a.contextAtValid = true
-			if idx, ok := layout.hit(x, y); ok {
-				it := layout.Cells[idx].It
-				if !tab.Selected[it.ID] {
-					tab.Selected = map[string]bool{it.ID: true}
-					tab.Anchor = it.ID
-				}
-				a.contextEmpty = false
-			} else {
-				a.contextEmpty = true
-			}
+			a.resolveGridContextAt(tab, layout, x, y)
+			b := box.Bounds()
+			a.openGridMenu(b.X+x, b.Y+y, false)
 		}
 
-		components.ContextMenu(c, box, func(m *components.Menu) {
-			a.prepareGridContext(tab, layout, box)
-
-			if a.contextEmpty || len(a.contextIDs) == 0 {
-				if m.Item("新建文件夹…").Chosen() {
-					a.later(a.beginNewFolder)
-				}
-				if m.Item("刷新").Shortcut("F5").Chosen() {
-					t := tab
-					a.later(func() { a.loadTab(t, false) })
-				}
-				m.Separator()
-				if m.Item("全选").Shortcut("Ctrl+A").Chosen() {
-					t := tab
-					a.later(func() { a.active = tabIndex(a.tabs, t); a.selectAll() })
-				}
-				if m.Item("取消选择").Chosen() {
-					a.later(a.clearSelection)
-				}
-				return
-			}
-			one := a.contextOne()
-			if m.Item("打开").Chosen() && one != nil {
-				a.later(func() { a.activateItem(one) })
-			}
-			if m.Item("在资源管理器中显示").Chosen() {
-				ids := append([]string(nil), a.contextIDs...)
-				a.later(func() {
-					if ids2 := ids; len(ids2) == 1 {
-						if it, ok := items.Get(ids2[0]); ok {
-							_ = (AppSvc{}).Reveal(it.Path)
-						}
-					} else if t := a.tab(); t != nil {
-						_ = (AppSvc{}).OpenFolder(t.Path)
-					}
-				})
-			}
-			if m.Item("用默认应用打开").Disabled(one == nil).Chosen() && one != nil {
-				path := one.Path
-				a.later(func() { _ = (AppSvc{}).OpenExternal(path) })
-			}
-			if m.Item("复制路径").Disabled(one == nil).Chosen() && one != nil {
-				path := one.Path
-				a.later(func() { _ = (AppSvc{}).CopyText(path) })
-			}
-			m.Separator()
-			if m.Item("重命名…").Shortcut("F2").Disabled(one == nil).Chosen() {
-				a.later(a.beginRename)
-			}
-			if m.Item("移到回收站").Shortcut("Delete").Chosen() {
-				a.later(func() { a.askDelete(false) })
-			}
-			if m.Item("永久删除").Chosen() {
-				a.later(func() { a.askDelete(true) })
-			}
-			m.Separator()
-			if m.Item("显示信息").Disabled(one == nil || !isMediaKind(one.Kind)).Chosen() && one != nil {
-				a.later(func() {
-					a.activateItem(one)
-					if isMediaKind(one.Kind) {
-						a.viewerSetInfo(true)
-					}
-				})
-			}
-		})
+		openKeyboardMenu := func() {
+			a.resolveGridContextSelection(tab)
+			b := box.Bounds()
+			ax, ay := a.gridMenuKeyboardAnchor(tab, layout, b)
+			a.openGridMenu(ax, ay, true)
+		}
+		box.OnShortcut(0, ui.KeyContextMenu, openKeyboardMenu)
+		box.OnShortcut(ui.Shift, ui.KeyF10, openKeyboardMenu)
 
 		box.OnShortcut(0, ui.KeyEnter, func() {
 			if it := tab.selectedOne(); it != nil {
@@ -383,37 +328,6 @@ func (a *App) gridView(c *ui.Context, tab *Tab) {
 			a.selectGridIndex(tab, layout, len(layout.Cells)-1)
 		})
 	})
-}
-
-// prepareGridContext resolves the items behind the grid menu. A secondary
-// click stores the pointer location before the popover appears; the keyboard
-// menu key has no pointer, so it falls back to the current selection.
-func (a *App) prepareGridContext(tab *Tab, layout gridLayout, box ui.Element) {
-	x, y, over := box.PointerPosition()
-	if !over && a.contextAtValid {
-		x, y, over = a.contextAtX, a.contextAtY, true
-	}
-	a.contextIDs = nil
-	if over {
-		if idx, ok := layout.hit(x, y); ok {
-			it := layout.Cells[idx].It
-			if !tab.Selected[it.ID] {
-				tab.Selected = map[string]bool{it.ID: true}
-				tab.Anchor = it.ID
-			}
-			a.contextEmpty = false
-		} else {
-			a.contextEmpty = true
-		}
-	} else {
-		a.contextEmpty = len(tab.Selected) == 0
-	}
-	for id := range tab.Selected {
-		a.contextIDs = append(a.contextIDs, id)
-	}
-	// The stored pointer position belongs to the click that opened this menu.
-	// A later keyboard menu must fall back to the current selection.
-	a.contextAtValid = false
 }
 
 func tabIndex(tabs []*Tab, want *Tab) int {

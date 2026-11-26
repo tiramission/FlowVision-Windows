@@ -48,6 +48,7 @@ func (a *App) view(c *ui.Context) {
 	})
 
 	a.selectionBar(c)
+	a.gridMenuOverlay(c)
 	a.overlays(c)
 	a.runPending()
 }

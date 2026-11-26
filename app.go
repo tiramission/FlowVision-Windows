@@ -307,12 +307,21 @@ type App struct {
 	themeDetected bool
 	systemDark    bool
 
-	contextIDs     []string
-	contextEmpty   bool
-	contextAtX     float32
-	contextAtY     float32
-	contextAtValid bool
-	pending        []func()
+	contextIDs   []string
+	contextEmpty bool
+
+	// The grid context menu lives in a window-level overlay so its material
+	// is not clipped by the scrolling content and its placement can flip at
+	// the pointer instead of at the scroll viewport.
+	gridMenuOpen       bool
+	gridMenuX          float32
+	gridMenuY          float32
+	gridMenuFocusFirst bool
+	gridMenuFocusPanel bool
+	gridMenuRefocus    bool
+	gridMenuTabID      int
+	gridFocusHandle    ui.Handle
+	pending            []func()
 
 	thumbs              map[string]*thumbEntry
 	thumbLoad           map[string]bool

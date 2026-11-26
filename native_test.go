@@ -648,6 +648,51 @@ func TestNativeGridContextMenuKeyboard(t *testing.T) {
 	}
 }
 
+func TestNativeGridBlankContextMenu(t *testing.T) {
+	a := newViewTestApp()
+	tt := ui.NewTester(a.view, 1280, 800)
+	tt.ClickAt(60, 220)
+	tt.Frame()
+	tt.RightClickAt(60, 650)
+	tt.Frame()
+	if !a.gridMenuOpen || !tt.HasText("新建文件夹…") || tt.HasText("在资源管理器中显示") {
+		t.Fatalf("blank menu: open=%v texts=%q", a.gridMenuOpen, tt.Texts())
+	}
+	if !a.tab().Selected["1"] {
+		t.Fatal("blank menu should keep the existing selection")
+	}
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	if a.gridMenuOpen {
+		t.Fatal("escape did not close the blank menu")
+	}
+}
+
+func TestNativeGridKeyboardMenuVisibleAfterScroll(t *testing.T) {
+	a := newViewTestApp()
+	tb := a.tab()
+	tb.Items, tb.All = nil, nil
+	for i := 0; i < 40; i++ {
+		it := &Item{ID: fmt.Sprintf("%d", i+1), Name: fmt.Sprintf("p%02d.png", i), Kind: "image", W: 800, H: 600}
+		tb.Items = append(tb.Items, it)
+		tb.All = append(tb.All, it)
+	}
+	tt := ui.NewTester(a.view, 1280, 800)
+	tt.Frame()
+	tt.Scroll(600, 400, 0, 100000)
+	tt.Frame()
+	tt.ClickAt(1000, 600)
+	tt.Frame()
+	tb.Selected = map[string]bool{}
+	tb.Anchor = ""
+	tt.Key(0, ui.KeyContextMenu)
+	tt.Frame()
+	if !a.gridMenuOpen || !tt.HasText("新建文件夹…") {
+		t.Fatalf("keyboard menu after scroll: open=%v anchor=%.0f,%.0f texts=%q",
+			a.gridMenuOpen, a.gridMenuX, a.gridMenuY, tt.Texts())
+	}
+}
+
 func TestCompactSidebarAndViewerInfoWidth(t *testing.T) {
 	a := &App{sidebar: true, sidebarWidth: 248}
 	if got := a.sidebarLayoutWidth(900); got != compactSidebarMax {
@@ -761,6 +806,9 @@ func TestNativeGridKeyboardSelection(t *testing.T) {
 	tt.Frame()
 	if len(a.tab().Selected) != 1 {
 		t.Fatalf("right key selected %d", len(a.tab().Selected))
+	}
+	if !a.tab().Selected["2"] {
+		t.Fatalf("right key did not advance to the second item: %v", a.tab().Selected)
 	}
 	if a.tab().Anchor == "" {
 		t.Fatal("no anchor after keyboard move")
