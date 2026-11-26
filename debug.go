@@ -87,6 +87,7 @@ type debugState struct {
 	ViewerOneToOne           bool     `json:"viewerOneToOne"`
 	ViewerFullResLoading     bool     `json:"viewerFullResLoading"`
 	ViewerFullResUnsupported bool     `json:"viewerFullResUnsupported"`
+	ViewerFullResPending     bool     `json:"viewerFullResPending"`
 	ViewerNotice             string   `json:"viewerNotice,omitempty"`
 	HeapAllocMB              float64  `json:"heapAllocMB"`
 	HeapSysMB                float64  `json:"heapSysMB"`
@@ -212,6 +213,7 @@ func debugSnapshot() debugState {
 		st.ViewerOneToOne = app.viewer.OneToOne
 		st.ViewerFullResLoading = app.viewer.FullResLoading
 		st.ViewerFullResUnsupported = app.viewer.FullResUnsupported
+		st.ViewerFullResPending = app.viewerPendingActual
 		st.ViewerNotice = app.viewer.Notice.Text
 		if p := app.viewer.Player; p != nil {
 			st.PlayerReady = p.Ready()

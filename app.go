@@ -3,8 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
-	"math"
 	"image"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime/debug"
@@ -272,13 +272,21 @@ type App struct {
 	viewerPreloadMu      sync.Mutex
 	viewerPreloadBytes   int64
 
-	viewerStats       viewerLoadStats
-	viewerSlot        *ui.Bitmap
-	viewerFullRes     *viewerFullResEntry
-	viewerFullResKey  string
-	viewerSlowTimer   *time.Timer
-	viewerFullTimer   *time.Timer
-	viewerNoticeTimer *time.Timer
+	viewerStats             viewerLoadStats
+	viewerSlot              *ui.Bitmap
+	viewerFullRes           *viewerFullResEntry
+	viewerFullResKey        string
+	viewerPendingActual     bool
+	viewerPendingActualAt   bool
+	viewerPendingActualX    float32
+	viewerPendingActualY    float32
+	viewerPendingActualW    float32
+	viewerPendingActualH    float32
+	viewerPendingActualOldW int
+	viewerPendingActualOldH int
+	viewerSlowTimer         *time.Timer
+	viewerFullTimer         *time.Timer
+	viewerNoticeTimer       *time.Timer
 
 	hoverTimer *time.Timer
 	hoverKey   string
@@ -1229,6 +1237,7 @@ func (a *App) loadViewerMedia(it *Item) {
 	a.clearViewerHover()
 	a.stopViewerLoadTimers()
 	a.clearViewerFullRes()
+	a.clearViewerPendingActualSize()
 	a.releaseViewerOwnedBitmap()
 	a.viewerStats = viewerLoadStats{}
 	a.viewer.Loading = true
@@ -1451,6 +1460,7 @@ func (a *App) closeViewer() {
 	a.stopViewerLoadTimers()
 	a.clearViewerHover()
 	a.clearViewerFullRes()
+	a.clearViewerPendingActualSize()
 	a.releaseViewerOwnedBitmap()
 	a.clearViewerPreloadCache()
 	a.viewerKeysDown = nil
@@ -1649,6 +1659,7 @@ func (a *App) viewerFit() {
 	if a.viewer.Item == nil || a.viewer.Item.Kind != "image" {
 		return
 	}
+	a.clearViewerPendingActualSize()
 	a.viewer.Zoom = 1
 	a.viewer.PanX = 0
 	a.viewer.PanY = 0
@@ -1660,6 +1671,7 @@ func (a *App) viewerReset() {
 	if a.viewer.Item == nil || a.viewer.Item.Kind != "image" {
 		return
 	}
+	a.clearViewerPendingActualSize()
 	a.viewer.Zoom = 1
 	a.viewer.Angle = 0
 	a.viewer.PanX = 0
@@ -1676,7 +1688,15 @@ func (a *App) viewerActualSize() {
 	if a.viewer.Bitmap == nil || a.viewer.Item == nil || a.viewer.Item.Kind != "image" {
 		return
 	}
-	a.requestViewerFullRes(true)
+	if a.viewerNeedsFullResForActualSize() {
+		// Do not enlarge the 2560 preview to 1:1 while the original is still
+		// decoding. The blurry intermediate frame is what makes the first
+		// switch feel discontinuous, so hold the current fit view and apply
+		// 1:1 only when the original bitmap arrives.
+		a.deferViewerActualSize(false, 0, 0, 0, 0)
+		return
+	}
+	a.clearViewerPendingActualSize()
 	bw, bh := a.viewer.Bitmap.Size()
 	w, h := a.viewerCanvasSize(nil)
 	fit := viewerFitScale(bw, bh, a.viewer.Angle, w, h)
@@ -1698,7 +1718,11 @@ func (a *App) viewerActualSizeAt(x, y, w, h float32) {
 	if a.viewer.Bitmap == nil || a.viewer.Item == nil || a.viewer.Item.Kind != "image" {
 		return
 	}
-	a.requestViewerFullRes(true)
+	if a.viewerNeedsFullResForActualSize() {
+		a.deferViewerActualSize(true, x, y, w, h)
+		return
+	}
+	a.clearViewerPendingActualSize()
 	a.viewer.OneToOne = true
 	bw, bh := a.viewer.Bitmap.Size()
 	if w <= 0 || h <= 0 {
@@ -1759,6 +1783,7 @@ func (a *App) viewerCenter() {
 	if a.viewer.Item == nil || a.viewer.Item.Kind != "image" {
 		return
 	}
+	a.clearViewerPendingActualSize()
 	a.viewer.PanX = 0
 	a.viewer.PanY = 0
 	a.refresh()
@@ -1768,6 +1793,7 @@ func (a *App) viewerZoom(delta float32) {
 	if a.viewer.Item == nil || a.viewer.Item.Kind != "image" {
 		return
 	}
+	a.clearViewerPendingActualSize()
 	before := a.viewer.Zoom
 	a.viewer.Zoom = clampViewerZoom(a.viewer.Zoom * delta)
 	if a.viewer.Zoom != before {
@@ -1782,6 +1808,7 @@ func (a *App) viewerZoomAt(delta, x, y, w, h float32) {
 	if a.viewer.Item == nil || a.viewer.Item.Kind != "image" {
 		return
 	}
+	a.clearViewerPendingActualSize()
 	before := a.viewer.Zoom
 	a.viewer.Zoom, a.viewer.PanX, a.viewer.PanY = viewerZoomAtPoint(
 		a.viewer.Zoom, a.viewer.PanX, a.viewer.PanY, delta, x, y, w, h)
@@ -1797,6 +1824,7 @@ func (a *App) viewerRotate(delta float32) {
 	if a.viewer.Item == nil || a.viewer.Item.Kind != "image" {
 		return
 	}
+	a.clearViewerPendingActualSize()
 	a.viewer.Angle += delta
 	a.refresh()
 }

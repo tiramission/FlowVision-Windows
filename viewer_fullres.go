@@ -28,15 +28,13 @@ func viewerFullResKey(it *Item) string {
 }
 
 // requestViewerFullRes decodes and keeps one full-resolution bitmap. The
-// preview stays visible while it runs, so the switch to 1:1 is not a blank
-// frame.
-func (a *App) requestViewerFullRes(oneToOne bool) {
+// preview stays visible while it runs. It never marks the viewer as 1:1
+// preemptively: actual-size callers either apply immediately when the bitmap is
+// already ready, or wait for the pending flag below.
+func (a *App) requestViewerFullRes() {
 	it := a.viewer.Item
 	if it == nil || it.Kind != "image" {
 		return
-	}
-	if oneToOne {
-		a.viewer.OneToOne = true
 	}
 	if a.viewer.FullResReady {
 		return
@@ -72,7 +70,6 @@ func (a *App) requestViewerFullRes(oneToOne bool) {
 	gen := a.viewer.Gen
 	key := viewerFullResKey(it)
 	a.viewer.FullResLoading = true
-	a.viewer.OneToOne = oneToOne
 	a.startViewerFullTimer(gen)
 	go func() {
 		bmp, bytes, err := decodeViewerFullRes(it)
@@ -90,6 +87,7 @@ func (a *App) requestViewerFullRes(oneToOne bool) {
 					bmp.ReleasePixels()
 				}
 				a.viewer.FullResUnsupported = true
+				a.clearViewerPendingActualSize()
 				a.notifyViewer("fullres", "原图载入失败："+err.Error(), viewerNoticeError, 4*time.Second)
 				a.refresh()
 				return
@@ -108,7 +106,11 @@ func (a *App) requestViewerFullRes(oneToOne bool) {
 			a.viewer.Placeholder = nil
 			a.viewerStats.FullResBytes = bytes
 			nw, nh := bmp.Size()
-			a.adjustViewerZoomForBitmapSwap(oldW, oldH, nw, nh)
+			if a.viewerPendingActual {
+				a.applyViewerPendingActualSize()
+			} else {
+				a.adjustViewerZoomForBitmapSwap(oldW, oldH, nw, nh)
+			}
 			if oldOwned && oldBmp != nil && oldBmp != bmp {
 				oldBmp.ReleasePixels()
 			}
@@ -192,6 +194,127 @@ func (a *App) adjustViewerZoomForBitmapSwap(oldW, oldH, newW, newH int) {
 	a.viewer.Zoom = clampViewerZoom(display / newFit)
 }
 
+// viewerNeedsFullResForActualSize reports whether 1:1 would enlarge a 2560
+// preview. If it would, actual-size waits for the original instead of showing
+// an upscaled preview frame first.
+func (a *App) viewerNeedsFullResForActualSize() bool {
+	if a.viewer.FullResReady {
+		return false
+	}
+	if a.viewer.Item == nil || a.viewer.Item.Kind != "image" {
+		return false
+	}
+	w, h := a.viewer.Item.W, a.viewer.Item.H
+	if w <= 0 || h <= 0 {
+		d := imageDims(a.viewer.Item.Path, a.viewer.Item.Mtime)
+		w, h = d.W, d.H
+	}
+	if w <= 0 || h <= 0 {
+		return false
+	}
+	return w > viewerPreviewMaxDim || h > viewerPreviewMaxDim
+}
+
+// deferViewerActualSize starts the original decode and holds the current view
+// until the bitmap is ready. The anchor variant keeps the point under the
+// pointer stable when the final 1:1 transform is applied.
+func (a *App) deferViewerActualSize(at bool, x, y, w, h float32) {
+	if a.viewer.FullResUnsupported {
+		a.clearViewerPendingActualSize()
+		a.notifyViewer("fullres", "原图载入失败，无法切换到 100%", viewerNoticeError, 4*time.Second)
+		a.refresh()
+		return
+	}
+	a.viewerPendingActual = true
+	a.viewerPendingActualAt = at
+	a.viewerPendingActualX = x
+	a.viewerPendingActualY = y
+	a.viewerPendingActualW = w
+	a.viewerPendingActualH = h
+	if a.viewer.Bitmap != nil {
+		a.viewerPendingActualOldW, a.viewerPendingActualOldH = a.viewer.Bitmap.Size()
+	}
+	a.viewer.OneToOne = false
+	a.requestViewerFullRes()
+	if a.viewer.FullResReady {
+		a.applyViewerPendingActualSize()
+		return
+	}
+	a.notifyViewer("fullres", "正在载入原图，完成后切换到 100%…", viewerNoticeInfo, 0)
+	a.refresh()
+}
+
+func (a *App) clearViewerPendingActualSize() {
+	a.viewerPendingActual = false
+	a.viewerPendingActualAt = false
+	a.viewerPendingActualX = 0
+	a.viewerPendingActualY = 0
+	a.viewerPendingActualW = 0
+	a.viewerPendingActualH = 0
+	a.viewerPendingActualOldW = 0
+	a.viewerPendingActualOldH = 0
+	if a.viewer.NoticeKey == "fullres" && a.viewer.Notice.Until.IsZero() {
+		a.viewer.Notice = viewerNotice{}
+		a.viewer.NoticeKey = ""
+	}
+}
+
+func (a *App) applyViewerPendingActualSize() {
+	if !a.viewerPendingActual || a.viewer.Bitmap == nil {
+		a.clearViewerPendingActualSize()
+		return
+	}
+	at := a.viewerPendingActualAt
+	px, py := a.viewerPendingActualX, a.viewerPendingActualY
+	pw, ph := a.viewerPendingActualW, a.viewerPendingActualH
+	bw, bh := a.viewer.Bitmap.Size()
+	w, h := a.viewerCanvasSize(nil)
+	if w <= 0 || h <= 0 {
+		w, h = pw, ph
+	}
+	fit := viewerFitScale(bw, bh, a.viewer.Angle, w, h)
+	if fit <= 0 {
+		a.clearViewerPendingActualSize()
+		return
+	}
+	actual := clampViewerZoom(viewerActualZoom(fit))
+	if at {
+		if px < 0 || py < 0 {
+			px, py = w/2, h/2
+		}
+		current := a.viewer.Zoom
+		if current <= 0 {
+			current = 1
+		}
+		oldW, oldH := a.viewerPendingActualOldW, a.viewerPendingActualOldH
+		oldFit := float32(0)
+		if oldW > 0 && oldH > 0 {
+			oldFit = viewerFitScale(oldW, oldH, a.viewer.Angle, w, h)
+		}
+		oldDisplay := oldFit * current
+		newDisplay := fit * actual
+		if oldDisplay > 0 {
+			// The bitmap changed from the preview to the original, so the
+			// anchor ratio must use display scales, not the relative zooms.
+			ratio := newDisplay / oldDisplay
+			a.viewer.PanX = px - (px-a.viewer.PanX)*ratio
+			a.viewer.PanY = py - (py-a.viewer.PanY)*ratio
+		} else {
+			a.viewer.PanX = 0
+			a.viewer.PanY = 0
+		}
+		a.viewer.Zoom = actual
+		a.viewer.OneToOne = true
+	} else {
+		a.viewer.Zoom = actual
+		a.viewer.PanX = 0
+		a.viewer.PanY = 0
+		a.viewer.OneToOne = true
+	}
+	a.clearViewerPendingActualSize()
+	a.notifyViewer("zoom", "100%", viewerNoticeInfo, 1200*time.Millisecond)
+}
+
 func (a *App) maybeRequestViewerFullRes() {
 	if a.viewer.Item == nil || a.viewer.Item.Kind != "image" || a.viewer.Bitmap == nil {
 		return
@@ -202,6 +325,6 @@ func (a *App) maybeRequestViewerFullRes() {
 	bw, bh := a.viewer.Bitmap.Size()
 	w, h := a.viewerCanvasSize(nil)
 	if viewerPercentValue(bw, bh, a.viewer.Angle, a.viewer.Zoom, w, h) >= 125 {
-		a.requestViewerFullRes(false)
+		a.requestViewerFullRes()
 	}
 }

@@ -2,6 +2,19 @@
 
 全部版本遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的章节格式；更新面板会显示当前版本对应的发布说明。
 
+## [1.4.3] - 2026-11-26
+
+### 修复
+
+- 初次切到 100% 时不再先把 2560 预览放大：真原图未就绪时保持当前适合窗口视图，底部显示“正在载入原图，完成后切换到 100%…”，原图解码完成后一次性进入真 1:1。
+- 等待原图期间滚轮缩放、拖动、旋转、适合窗口或重置会取消这次待切换的 1:1，避免解码完成后突然跳转。
+- 真原图已缓存，或图片本身不超过 2560 时，仍立即进入 100%。
+
+### 测试
+
+- 新增 `TestViewerActualSizeWaitsForFullRes`、`TestViewerActualSizeAtRecordsAnchorWhileWaiting`；全量 `go test -tags mygo_nowebview ./...` 通过。
+- 80 MP 实机验证：点击“实际大小”后 `viewerZoom=1`、`viewerFullResPending=true`、`viewerOneToOne=false`，保持适合窗口预览；解码完成后切换为 `viewerOneToOne=true`、`viewerFullRes=true`、100%。
+
 ## [1.4.2] - 2026-11-26
 
 ### 修复

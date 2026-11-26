@@ -215,8 +215,8 @@ func (a *App) drawViewerDebugHUD(p *ui.Painter, r ui.Rect, th *ui.Theme) {
 		fmt.Sprintf("decode %dms  scale %dms  encode %dms  bitmap %dms", a.viewerStats.DecodeMs, a.viewerStats.ScaleMs, a.viewerStats.EncodeMs, a.viewerStats.BitmapMs),
 		fmt.Sprintf("preload %d/%dMB  zoom %.0f%%  %d/%d", a.viewerPreloadBytesValue()>>20, viewerPreloadBudget>>20, a.viewer.Zoom*100, a.viewer.Index+1, total),
 	}
-	if a.viewer.FullResReady || a.viewer.FullResLoading || a.viewer.FullResUnsupported {
-		lines = append(lines, fmt.Sprintf("fullres ready=%v loading=%v unsupported=%v 1:1=%v", a.viewer.FullResReady, a.viewer.FullResLoading, a.viewer.FullResUnsupported, a.viewer.OneToOne))
+	if a.viewer.FullResReady || a.viewer.FullResLoading || a.viewer.FullResUnsupported || a.viewerPendingActual {
+		lines = append(lines, fmt.Sprintf("fullres ready=%v loading=%v unsupported=%v pending=%v 1:1=%v", a.viewer.FullResReady, a.viewer.FullResLoading, a.viewer.FullResUnsupported, a.viewerPendingActual, a.viewer.OneToOne))
 	}
 	x := r.X + r.W - 300
 	if x < r.X+12 {

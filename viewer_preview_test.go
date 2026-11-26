@@ -6,6 +6,7 @@ import (
 	"image/jpeg"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -170,7 +171,7 @@ func TestViewerFullResSkipsSmallImage(t *testing.T) {
 	a := newViewerGestureApp(t)
 	defer a.closeViewer()
 	a.viewer.Item.W, a.viewer.Item.H = 100, 100
-	a.requestViewerFullRes(false)
+	a.requestViewerFullRes()
 	if a.viewer.FullResLoading || a.viewer.FullResReady || a.viewer.FullResUnsupported {
 		t.Fatalf("small image requested full-res: loading=%v ready=%v unsupported=%v",
 			a.viewer.FullResLoading, a.viewer.FullResReady, a.viewer.FullResUnsupported)
@@ -181,12 +182,49 @@ func TestViewerFullResLargeImageStartsDecode(t *testing.T) {
 	a := newViewerGestureApp(t)
 	defer a.closeViewer()
 	a.viewer.Item.W, a.viewer.Item.H = 9000, 7000
-	a.requestViewerFullRes(false)
+	a.requestViewerFullRes()
 	if !a.viewer.FullResLoading {
 		t.Fatal("large image did not start full-resolution decoding")
 	}
 	if a.viewer.FullResUnsupported {
 		t.Fatal("large image was marked unsupported")
+	}
+}
+
+func TestViewerActualSizeWaitsForFullRes(t *testing.T) {
+	a := newViewerGestureApp(t)
+	defer a.closeViewer()
+	a.viewer.Item.W, a.viewer.Item.H = 9000, 7000
+	a.viewer.FullResLoading = true // prevent the async decode from completing in this unit test
+	a.viewer.Zoom = 1
+	a.viewer.OneToOne = false
+	a.viewerActualSize()
+	if !a.viewerPendingActual {
+		t.Fatal("actual size did not wait for the original bitmap")
+	}
+	if a.viewer.OneToOne {
+		t.Fatal("actual size entered 1:1 before the original was ready")
+	}
+	if a.viewer.Zoom != 1 {
+		t.Fatalf("preview was upscaled while waiting: zoom=%v", a.viewer.Zoom)
+	}
+	if !strings.Contains(a.viewer.Notice.Text, "正在载入原图") {
+		t.Fatalf("missing wait notice: %q", a.viewer.Notice.Text)
+	}
+}
+
+func TestViewerActualSizeAtRecordsAnchorWhileWaiting(t *testing.T) {
+	a := newViewerGestureApp(t)
+	defer a.closeViewer()
+	a.viewer.Item.W, a.viewer.Item.H = 9000, 7000
+	a.viewer.FullResLoading = true
+	a.viewerActualSizeAt(123, 456, 800, 600)
+	if !a.viewerPendingActual || !a.viewerPendingActualAt {
+		t.Fatalf("anchor pending state = active:%v at:%v", a.viewerPendingActual, a.viewerPendingActualAt)
+	}
+	if a.viewerPendingActualX != 123 || a.viewerPendingActualY != 456 ||
+		a.viewerPendingActualW != 800 || a.viewerPendingActualH != 600 {
+		t.Fatalf("anchor = %.0f,%.0f %.0fx%.0f", a.viewerPendingActualX, a.viewerPendingActualY, a.viewerPendingActualW, a.viewerPendingActualH)
 	}
 }
 

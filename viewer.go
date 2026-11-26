@@ -605,6 +605,7 @@ func (a *App) viewerCanvas(c *ui.Context, it *Item, th *ui.Theme) {
 			return
 		}
 		if dx, dy, held := box.Dragged(); held {
+			a.clearViewerPendingActualSize()
 			a.viewer.PanX += dx
 			a.viewer.PanY += dy
 		}
@@ -618,6 +619,7 @@ func (a *App) viewerCanvas(c *ui.Context, it *Item, th *ui.Theme) {
 				return true
 			case ui.InputScroll:
 				if ev.Precise {
+					a.clearViewerPendingActualSize()
 					a.viewer.PanX -= ev.DX
 					a.viewer.PanY -= ev.DY
 					a.refresh()
