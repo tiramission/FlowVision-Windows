@@ -226,6 +226,10 @@ func TestViewerActualSizeAtRecordsAnchorWhileWaiting(t *testing.T) {
 		a.viewerPendingActualW != 800 || a.viewerPendingActualH != 600 {
 		t.Fatalf("anchor = %.0f,%.0f %.0fx%.0f", a.viewerPendingActualX, a.viewerPendingActualY, a.viewerPendingActualW, a.viewerPendingActualH)
 	}
+	a.dragViewer(0, 0)
+	if !a.viewerPendingActual {
+		t.Fatal("stationary pointer cleared the pending actual-size anchor")
+	}
 }
 
 func TestViewerBitmapSwapPreservesActualZoom(t *testing.T) {
@@ -242,6 +246,67 @@ func TestViewerBitmapSwapPreservesActualZoom(t *testing.T) {
 	if a.viewer.Zoom == 1 {
 		t.Fatal("zoom was not recomputed for the larger bitmap")
 	}
+}
+
+func TestViewerBitmapSwapPreservesDisplayedWidth(t *testing.T) {
+	a := newViewerGestureApp(t)
+	defer a.closeViewer()
+	oldW, oldH := 2560, 2048
+	newW, newH := 10000, 8000
+	a.viewer.Zoom = 1.25
+	w, h := a.viewerCanvasSize(nil)
+	oldFit := viewerFitScale(oldW, oldH, a.viewer.Angle, w, h)
+	oldWidth := oldFit * a.viewer.Zoom * float32(oldW)
+	a.adjustViewerZoomForBitmapSwap(oldW, oldH, newW, newH)
+	newFit := viewerFitScale(newW, newH, a.viewer.Angle, w, h)
+	newWidth := newFit * a.viewer.Zoom * float32(newW)
+	if absFloat(newWidth-oldWidth) > 1 {
+		t.Fatalf("displayed width changed from %.1f to %.1f (zoom=%v)", oldWidth, newWidth, a.viewer.Zoom)
+	}
+	if absFloat(a.viewer.Zoom-1.25) > 0.001 {
+		t.Fatalf("zoom changed from 1.25 to %v", a.viewer.Zoom)
+	}
+}
+
+func TestZeroMovementDragKeepsPendingActual(t *testing.T) {
+	a := newViewerGestureApp(t)
+	defer a.closeViewer()
+	a.viewerPendingActual = true
+	a.dragViewer(0, 0)
+	if !a.viewerPendingActual {
+		t.Fatal("zero-movement drag cleared pending actual size")
+	}
+	a.dragViewer(3, 4)
+	if a.viewerPendingActual {
+		t.Fatal("real drag did not clear pending actual size")
+	}
+	if a.viewer.PanX != 3 || a.viewer.PanY != 4 {
+		t.Fatalf("pan = %v,%v, want 3,4", a.viewer.PanX, a.viewer.PanY)
+	}
+}
+
+func TestViewerLongPressKeepsPendingDuringHold(t *testing.T) {
+	a := newViewerGestureApp(t)
+	defer a.closeViewer()
+	a.viewer.Item.W, a.viewer.Item.H = 10000, 8000
+	a.viewer.FullResLoading = true // keep the original decode from finishing
+	tt := ui.NewTester(a.view, 900, 700)
+	tt.Frame()
+	x, y := canvasPoint(t, tt)
+	tt.Press(x, y)
+	tt.Frame()
+	tt.Advance(viewerHoldDelay + 20*time.Millisecond)
+	tt.Frame()
+	if !a.viewerPendingActual {
+		t.Fatal("long press cleared pending while the pointer was still held")
+	}
+	if a.viewer.OneToOne {
+		t.Fatal("long press entered 1:1 before the original was ready")
+	}
+	if a.viewer.Zoom != 1 {
+		t.Fatalf("long press moved the preview while waiting: zoom=%v", a.viewer.Zoom)
+	}
+	tt.Release(x, y)
 }
 
 func TestViewerHoverZoneArmsAndCancels(t *testing.T) {

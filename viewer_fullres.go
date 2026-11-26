@@ -187,11 +187,16 @@ func (a *App) adjustViewerZoomForBitmapSwap(oldW, oldH, newW, newH int) {
 		a.viewer.Zoom = clampViewerZoom(viewerActualZoom(newFit))
 		return
 	}
-	display := a.viewer.Zoom * oldFit
-	if display <= 0 {
+	// Zoom is relative to the current bitmap's fit. Preserving
+	// Zoom*oldFit would preserve the preview's per-pixel scale, not the
+	// displayed scene: replacing a 2560 preview with a 10000px original
+	// would suddenly magnify the image. Preserve the displayed width instead.
+	displayWidth := a.viewer.Zoom * oldFit * float32(oldW)
+	newWidthAtFit := newFit * float32(newW)
+	if displayWidth <= 0 || newWidthAtFit <= 0 {
 		return
 	}
-	a.viewer.Zoom = clampViewerZoom(display / newFit)
+	a.viewer.Zoom = clampViewerZoom(displayWidth / newWidthAtFit)
 }
 
 // viewerNeedsFullResForActualSize reports whether 1:1 would enlarge a 2560
@@ -324,7 +329,7 @@ func (a *App) maybeRequestViewerFullRes() {
 	}
 	bw, bh := a.viewer.Bitmap.Size()
 	w, h := a.viewerCanvasSize(nil)
-	if viewerPercentValue(bw, bh, a.viewer.Angle, a.viewer.Zoom, w, h) >= 125 {
+	if viewerBitmapPercentValue(bw, bh, a.viewer.Angle, a.viewer.Zoom, w, h) >= 125 {
 		a.requestViewerFullRes()
 	}
 }

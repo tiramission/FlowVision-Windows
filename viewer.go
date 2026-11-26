@@ -63,12 +63,34 @@ func viewerFitScale(bw, bh int, angle, availW, availH float32) float32 {
 	return float32(math.Min(float64(availW)/boundsW, float64(availH)/boundsH))
 }
 
-func viewerPercentValue(bw, bh int, angle, zoom, availW, availH float32) int {
+// viewerBitmapPercentValue reports the scale of the bitmap currently on
+// screen, relative to that bitmap's own pixels. It is used to decide when the
+// 2560 preview itself has been enlarged enough to need the original.
+func viewerBitmapPercentValue(bw, bh int, angle, zoom, availW, availH float32) int {
 	fitted := viewerFitScale(bw, bh, angle, availW, availH)
 	if fitted <= 0 {
 		return int(math.Round(float64(zoom * 100)))
 	}
 	return int(math.Round(float64(fitted*zoom) * 100))
+}
+
+// viewerPercentValue reports the display scale against the original image,
+// not against whichever preview bitmap happens to be loaded. A 2560 preview
+// and the full-resolution bitmap therefore show the same percentage when they
+// occupy the same area on screen.
+func viewerPercentValue(bw, bh, refW, refH int, angle, zoom, availW, availH float32) int {
+	fitted := viewerFitScale(bw, bh, angle, availW, availH)
+	if fitted <= 0 {
+		return int(math.Round(float64(zoom * 100)))
+	}
+	scale := fitted * zoom
+	switch {
+	case refW > 0 && bw > 0:
+		scale *= float32(bw) / float32(refW)
+	case refH > 0 && bh > 0:
+		scale *= float32(bh) / float32(refH)
+	}
+	return int(math.Round(float64(scale) * 100))
 }
 
 // viewerActualZoom converts a fit scale into the relative zoom that displays
@@ -132,18 +154,45 @@ func (a *App) viewerCanvasSize(c *ui.Context) (float32, float32) {
 	return viewerCanvasMetrics(w, h, a.viewerImmersive(), a.viewer.ShowInfo)
 }
 
-// viewerPercent reports the real display scale (image pixels to logical
-// pixels), not the relative fit multiplier. 100% therefore means 1:1.
+// viewerPercent reports the real display scale against the original image
+// dimensions, not the relative fit multiplier or the currently loaded preview.
+// 100% therefore always means one original pixel per logical display pixel.
 func (a *App) viewerPercent(c *ui.Context) int {
 	if a.viewer.Bitmap == nil || a.viewer.Item == nil || a.viewer.Item.Kind != "image" {
 		return int(math.Round(float64(a.viewer.Zoom * 100)))
 	}
 	bw, bh := a.viewer.Bitmap.Size()
+	refW, refH := a.viewerReferenceSize()
 	w, h := a.viewerCanvasSize(c)
 	if w <= 0 || h <= 0 {
 		return 100
 	}
-	return viewerPercentValue(bw, bh, a.viewer.Angle, a.viewer.Zoom, w, h)
+	return viewerPercentValue(bw, bh, refW, refH, a.viewer.Angle, a.viewer.Zoom, w, h)
+}
+
+// viewerReferenceSize is the fixed pixel size of the original image. The
+// bitmap on screen can be a 2560 preview or the original, but percentages must
+// not change just because that bitmap was swapped.
+func (a *App) viewerReferenceSize() (int, int) {
+	it := a.viewer.Item
+	if it != nil {
+		if it.W > 0 && it.H > 0 {
+			return it.W, it.H
+		}
+		if a.viewer.Info.Width > 0 && a.viewer.Info.Height > 0 {
+			return a.viewer.Info.Width, a.viewer.Info.Height
+		}
+		if d := imageDims(it.Path, it.Mtime); d.W > 0 && d.H > 0 {
+			return d.W, d.H
+		}
+	}
+	if a.viewer.Info.Width > 0 && a.viewer.Info.Height > 0 {
+		return a.viewer.Info.Width, a.viewer.Info.Height
+	}
+	if a.viewer.Bitmap != nil {
+		return a.viewer.Bitmap.Size()
+	}
+	return 0, 0
 }
 
 func (a *App) viewerOverlay(c *ui.Context) {
@@ -431,6 +480,18 @@ func (a *App) cancelViewerHold() {
 	a.viewer.HoldAt = time.Time{}
 }
 
+// dragViewer applies a real pointer movement. MyGo reports held=true for a
+// stationary primary press too, so zero movement must not cancel the pending
+// long-press actual-size transition.
+func (a *App) dragViewer(dx, dy float32) {
+	if dx == 0 && dy == 0 {
+		return
+	}
+	a.clearViewerPendingActualSize()
+	a.viewer.PanX += dx
+	a.viewer.PanY += dy
+}
+
 func (a *App) beginViewerHold(button int, x, y float32, at time.Time) {
 	if button != 0 && button != 1 {
 		return
@@ -579,7 +640,8 @@ func (a *App) viewerCanvas(c *ui.Context, it *Item, th *ui.Theme) {
 				pct := -1
 				if a.viewer.Bitmap != nil {
 					bw, bh := a.viewer.Bitmap.Size()
-					pct = viewerPercentValue(bw, bh, a.viewer.Angle, a.viewer.Zoom, r.W, r.H)
+					refW, refH := a.viewerReferenceSize()
+					pct = viewerPercentValue(bw, bh, refW, refH, a.viewer.Angle, a.viewer.Zoom, r.W, r.H)
 				}
 				a.drawViewerHUD(p, r, th, pct)
 			}
@@ -605,9 +667,7 @@ func (a *App) viewerCanvas(c *ui.Context, it *Item, th *ui.Theme) {
 			return
 		}
 		if dx, dy, held := box.Dragged(); held {
-			a.clearViewerPendingActualSize()
-			a.viewer.PanX += dx
-			a.viewer.PanY += dy
+			a.dragViewer(dx, dy)
 		}
 		box.HandleInput(func(ev ui.InputEvent) bool {
 			a.showViewerCursor()

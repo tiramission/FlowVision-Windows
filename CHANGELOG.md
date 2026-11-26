@@ -2,6 +2,18 @@
 
 全部版本遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的章节格式；更新面板会显示当前版本对应的发布说明。
 
+## [1.4.4] - 2026-11-26
+
+### 修复
+
+- 长按左键进入等待原图后，不再被 MyGo 的零位移 `Dragged()` 立即取消；只有真实拖动才取消 pending，避免第一次长按只触发布局中的原图替换、第二次长按才进入 100%。
+- 2560 预览替换成原图时按“画面尺寸”保持缩放，而不是按当前 bitmap 的 fit 倍数保持；修正 80 MP 图片第一次长按时预览被放大约 3.9 倍、百分比却不变的问题。
+- 缩放百分比改为以原图尺寸为固定基准，预览和原图在同一画面尺寸下显示同一个百分比；100% 始终表示原图 1:1。
+
+### 测试
+
+- 新增 `TestViewerLongPressKeepsPendingDuringHold`、`TestZeroMovementDragKeepsPendingActual`、`TestViewerBitmapSwapPreservesDisplayedWidth`、`TestViewerPercentUsesOriginalDimensions`；全量 `go test -tags mygo_nowebview ./...` 与 `go test -tags "debug mygo_nowebview" ./...` 通过。
+
 ## [1.4.3] - 2026-11-26
 
 ### 修复
