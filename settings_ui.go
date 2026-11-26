@@ -13,7 +13,7 @@ import (
 // Settings surface. All controls bind to retained draft fields; this keeps an
 // edit alive across the rebuild that delivers its Changed notice.
 func (a *App) settingsModal(c *ui.Context) {
-	if !a.showSettings {
+	if !a.showSettings || !a.settingsModalOpen {
 		return
 	}
 	winW, winH := c.Size()
@@ -25,7 +25,7 @@ func (a *App) settingsModal(c *ui.Context) {
 	if h < 360 {
 		h = min(winH, 360)
 	}
-	ui.Modal(c, &a.showSettings, func() {
+	ui.Modal(c, &a.settingsModalOpen, func() {
 		ui.Column(c).Width(w).Height(h).Key("settings-panel").Children(func() {
 			components.Settings(c, &a.settingsUI, a.settingsCategories(), components.SettingsOptions{
 				Title:             "设置",
@@ -36,22 +36,81 @@ func (a *App) settingsModal(c *ui.Context) {
 				EmptyText:         "没有匹配的设置",
 				CloseLabel:        "取消",
 				Narrow:            w < 700,
-				Close:             func() { a.showSettings = false; a.refresh() },
+				Close:             a.requestSettingsClose,
 				HeaderActions:     a.settingsHeaderActions,
 				HideSidebar:       false,
 				HideSearch:        false,
 			})
 		})
 	}).Radius(14).Clip()
+	// The X button and the modal's own Escape/backdrop handling both close the
+	// element before a callback can intervene. If a draft is pending, reopen the
+	// editor through the confirmation instead of dropping it silently.
+	if !a.settingsModalOpen {
+		a.requestSettingsClose()
+	}
+}
+
+func (a *App) settingsDiscardModal(c *ui.Context) {
+	if !a.settingsConfirm {
+		return
+	}
+	wasOpen := a.settingsConfirm
+	th := c.Theme()
+	ui.Modal(c, &a.settingsConfirm, func() {
+		ui.Column(c).Width(450).Gap(11).Children(func() {
+			dialogHeader(c, lucide.CircleAlert(), "放弃未保存的修改？", "本次修改不会生效。")
+			components.Text(c, "设置尚未保存。继续编辑会保留当前草稿；放弃修改将恢复上次保存的值。").
+				FontSize(12).TextColor(th.TextMuted)
+			ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
+				if components.Button(c, "继续编辑", components.ButtonSecondary).Clicked() {
+					a.settingsConfirm = false
+					a.settingsCloseAfter = nil
+					a.settingsModalOpen = true
+					a.refresh()
+				}
+				if components.Button(c, "放弃修改", components.ButtonPrimary).Clicked() {
+					a.settingsConfirm = false
+					a.closeSettingsNow()
+				}
+			})
+		})
+	})
+	// Dismissing the warning with Escape or a backdrop click keeps editing.
+	// Any follow-up that was queued before the warning (such as opening help)
+	// must not fire later from the retained draft.
+	if wasOpen && !a.settingsConfirm && a.showSettings && a.settingsModalOpen {
+		a.settingsCloseAfter = nil
+	}
+	// Escape or a backdrop click on the confirmation returns to the editor,
+	// which is the safe outcome: the draft stays alive.
+	if !a.settingsConfirm && a.showSettings && !a.settingsModalOpen {
+		a.settingsCloseAfter = nil
+		a.settingsModalOpen = true
+		a.refresh()
+	}
 }
 
 func (a *App) settingsHeaderActions(c *ui.Context) {
-	if components.Button(c, "恢复默认", components.ButtonGhost).Clicked() {
-		a.resetSettingsDraft()
-	}
-	if components.Button(c, "保存", components.ButtonPrimary).Clicked() {
-		a.later(a.applySettings)
-	}
+	th := c.Theme()
+	// The heading's text sits optically higher than its buttons. Lift the
+	// action group as one unit so the badge and both buttons share the title's
+	// baseline without changing the heading height.
+	ui.Row(c).AlignSelf(ui.Center).Shrink(0).Gap(th.Space(2)).Margin(-th.Space(1.5), 0, 0, 0).Children(func() {
+		if a.settingsDirty() {
+			// Badge opts itself into start alignment; wrap it so the action
+			// row can center it with the buttons.
+			ui.Row(c).AlignSelf(ui.Center).Shrink(0).Children(func() {
+				components.Badge(c, "未保存", components.BadgeOptions{Tone: components.BadgeWarning})
+			})
+		}
+		if components.Button(c, "恢复默认", components.ButtonGhost).Clicked() {
+			a.resetSettingsDraft()
+		}
+		if components.Button(c, "保存", components.ButtonPrimary).Clicked() {
+			a.later(a.applySettings)
+		}
+	})
 }
 
 func (a *App) settingsCategories() []components.SettingsCategory {
@@ -279,8 +338,7 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 							Leading:     settingsIcon(lucide.Keyboard()),
 							Build: func(c *ui.Context) {
 								if components.Button(c, "打开快捷键参考", components.ButtonSecondary).Clicked() {
-									a.showSettings = false
-									a.later(a.openHelp)
+									a.requestSettingsCloseAfter(a.openHelp)
 								}
 							},
 						},
@@ -373,8 +431,7 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 							Leading:     settingsIcon(lucide.Info()),
 							Build: func(c *ui.Context) {
 								if components.Button(c, "查看关于", components.ButtonGhost).Clicked() {
-									a.showSettings = false
-									a.later(func() { a.showAbout = true; a.refresh() })
+									a.requestSettingsCloseAfter(func() { a.showAbout = true; a.refresh() })
 								}
 							},
 						},

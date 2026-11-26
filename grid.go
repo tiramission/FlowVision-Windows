@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/oneo-me/onevra/source/components"
 	"github.com/oneo-me/onevra/source/icons/lucide"
 )
 
@@ -73,7 +74,11 @@ func buildWaterfall(items []*Item, width float32, target, gap int, captions bool
 			// take a full-width square turns a single-column narrow window into
 			// one giant placeholder card, so keep their preview at the current
 			// thumbnail scale instead.
-			if limit := float32(target); imgH > limit {
+			limit := float32(target)
+			if it.Kind == "other" {
+				limit *= 0.68
+			}
+			if imgH > limit {
 				imgH = limit
 			}
 		}
@@ -182,7 +187,7 @@ func (a *App) gridView(c *ui.Context, tab *Tab) {
 	windowW, windowH := c.Size()
 	width := windowW
 	if a.sidebar {
-		width -= float32(a.sidebarWidth)
+		width -= a.sidebarLayoutWidth(windowW)
 	}
 	width -= 32
 	if width < 120 {
@@ -207,7 +212,7 @@ func (a *App) gridView(c *ui.Context, tab *Tab) {
 
 	scroll := ui.Scroll(c).Fill().TrackScroll(&tab.Scroll).Padding(16).Gap(0)
 	scroll.Children(func() {
-		box := ui.Box(c).Height(layout.TotalH).Focusable().Role(ui.RoleList).
+		box := ui.Box(c).Key("media-grid").Height(layout.TotalH).Focusable().Role(ui.RoleList).
 			Label(fmt.Sprintf("%s，%d 项", tab.Name, len(tab.Items)))
 		if box.FileDragOver() {
 			box.Border(2, th.Accent)
@@ -233,6 +238,7 @@ func (a *App) gridView(c *ui.Context, tab *Tab) {
 		// The pointer is in the content box's coordinates, which include the
 		// scroll offset, so hit testing needs no adjustment.
 		if box.Clicked() {
+			a.contextAtValid = false
 			x, y, _ := box.PointerPosition()
 			if idx, ok := layout.hit(x, y); ok {
 				it := layout.Cells[idx].It
@@ -257,17 +263,7 @@ func (a *App) gridView(c *ui.Context, tab *Tab) {
 		if box.RightClicked() {
 			x, y, _ := box.PointerPosition()
 			a.contextAtX, a.contextAtY = x, y
-		}
-
-		box.ContextMenu(func(m *ui.Menu) {
-			// The native context menu opens on the secondary click before the
-			// element reports RightClicked, so locate the tile here, at the
-			// pointer position the menu is anchored to.
-			x, y, have := box.PointerPosition()
-			if !have {
-				x, y = a.contextAtX, a.contextAtY
-			}
-			a.contextIDs = nil
+			a.contextAtValid = true
 			if idx, ok := layout.hit(x, y); ok {
 				it := layout.Cells[idx].It
 				if !tab.Selected[it.ID] {
@@ -278,20 +274,21 @@ func (a *App) gridView(c *ui.Context, tab *Tab) {
 			} else {
 				a.contextEmpty = true
 			}
-			for id := range tab.Selected {
-				a.contextIDs = append(a.contextIDs, id)
-			}
+		}
+
+		components.ContextMenu(c, box, func(m *components.Menu) {
+			a.prepareGridContext(tab, layout, box)
 
 			if a.contextEmpty || len(a.contextIDs) == 0 {
 				if m.Item("新建文件夹…").Chosen() {
 					a.later(a.beginNewFolder)
 				}
-				if m.Item("刷新").Shortcut(0, ui.KeyF5).Chosen() {
+				if m.Item("刷新").Shortcut("F5").Chosen() {
 					t := tab
 					a.later(func() { a.loadTab(t, false) })
 				}
 				m.Separator()
-				if m.Item("全选").Shortcut(ui.Cmd, ui.KeyA).Chosen() {
+				if m.Item("全选").Shortcut("Ctrl+A").Chosen() {
 					t := tab
 					a.later(func() { a.active = tabIndex(a.tabs, t); a.selectAll() })
 				}
@@ -325,10 +322,10 @@ func (a *App) gridView(c *ui.Context, tab *Tab) {
 				a.later(func() { _ = (AppSvc{}).CopyText(path) })
 			}
 			m.Separator()
-			if m.Item("重命名…").Shortcut(0, ui.KeyF2).Disabled(one == nil).Chosen() {
+			if m.Item("重命名…").Shortcut("F2").Disabled(one == nil).Chosen() {
 				a.later(a.beginRename)
 			}
-			if m.Item("移到回收站").Shortcut(0, ui.KeyDelete).Chosen() {
+			if m.Item("移到回收站").Shortcut("Delete").Chosen() {
 				a.later(func() { a.askDelete(false) })
 			}
 			if m.Item("永久删除").Chosen() {
@@ -388,6 +385,37 @@ func (a *App) gridView(c *ui.Context, tab *Tab) {
 	})
 }
 
+// prepareGridContext resolves the items behind the grid menu. A secondary
+// click stores the pointer location before the popover appears; the keyboard
+// menu key has no pointer, so it falls back to the current selection.
+func (a *App) prepareGridContext(tab *Tab, layout gridLayout, box ui.Element) {
+	x, y, over := box.PointerPosition()
+	if !over && a.contextAtValid {
+		x, y, over = a.contextAtX, a.contextAtY, true
+	}
+	a.contextIDs = nil
+	if over {
+		if idx, ok := layout.hit(x, y); ok {
+			it := layout.Cells[idx].It
+			if !tab.Selected[it.ID] {
+				tab.Selected = map[string]bool{it.ID: true}
+				tab.Anchor = it.ID
+			}
+			a.contextEmpty = false
+		} else {
+			a.contextEmpty = true
+		}
+	} else {
+		a.contextEmpty = len(tab.Selected) == 0
+	}
+	for id := range tab.Selected {
+		a.contextIDs = append(a.contextIDs, id)
+	}
+	// The stored pointer position belongs to the click that opened this menu.
+	// A later keyboard menu must fall back to the current selection.
+	a.contextAtValid = false
+}
+
 func tabIndex(tabs []*Tab, want *Tab) int {
 	for i, t := range tabs {
 		if t == want {
@@ -425,8 +453,8 @@ func (a *App) drawGrid(p *ui.Painter, r ui.Rect, layout gridLayout, th *ui.Theme
 		// eye reads the picture, not a white rectangle around it.
 		imageTile := it.Kind == "image" || it.Kind == "video"
 		cardFace := th.Surface
-		cardBorder := th.Border.Alpha(.72)
-		borderWidth := float32(1)
+		cardBorder := ui.Color{}
+		borderWidth := float32(0)
 		if selected {
 			cardBorder = th.Accent.Alpha(.92)
 			borderWidth = 2
@@ -440,33 +468,43 @@ func (a *App) drawGrid(p *ui.Painter, r ui.Rect, layout gridLayout, th *ui.Theme
 			}
 			if !selected {
 				cardBorder = th.Accent.Alpha(.35)
+				borderWidth = 1
 			}
 		}
 		if !imageTile {
-			p.Fill(card, cardFace, 9)
+			p.Fill(card, cardFace, tileRadius)
 		}
 
 		if it.Kind == "folder" {
-			p.Fill(imgR, th.SurfaceHover, 9)
-			side := float32(34)
-			p.Icon(lucide.Folder(), ui.Rect{X: imgR.X + (imgR.W-side)/2, Y: imgR.Y + (imgR.H-side)/2 - 8, W: side, H: side}, th.Accent)
+			// A folder is a quiet tile in the same visual family as a photo:
+			// one outer surface, one inset preview, and the caption underneath.
+			// The old card border made it read as a card inside a card; the inset
+			// preview is what gives the folder its file-like weight.
+			inner := th.SurfaceHover
+			if i == hover {
+				inner = th.Surface
+			}
+			p.Fill(imgR, inner, tileRadius)
+			side := float32(44)
+			iconY := imgR.Y + (imgR.H-side)/2 - 8
+			p.Icon(lucide.Folder(), ui.Rect{X: imgR.X + (imgR.W-side)/2, Y: iconY, W: side, H: side}, th.Accent.Alpha(.86))
 			label := "文件夹"
-			w, _ := p.MeasureText(0, ui.Span{Text: label, Size: 11, Weight: 500})
-			p.Text(imgR.X+(imgR.W-w)/2, imgR.Y+imgR.H/2+12, label, 11, th.TextMuted)
+			w, _ := p.MeasureText(0, ui.Span{Text: label, Size: 10.5, Weight: 500})
+			p.Text(imgR.X+(imgR.W-w)/2, iconY+side+4, label, 10.5, th.TextMuted.Alpha(.9))
 		} else if it.Kind == "image" || it.Kind == "video" {
 			bmp := a.thumb(it, a.settings.ThumbSize)
 			if bmp != nil {
-				p.Clip(imgR, 8, func() {
+				p.Clip(imgR, thumbnailRadius, func() {
 					p.Image(bmp, imgR, ui.Cover)
 				})
 			} else {
-				p.Fill(imgR, th.SurfaceHover, 8)
-				icon := lucide.ImageOff()
+				p.Fill(imgR, th.SurfaceHover, thumbnailRadius)
+				icon := lucide.Image()
 				if it.Kind == "video" {
-					icon = lucide.Video()
+					icon = lucide.Film()
 				}
 				side := float32(30)
-				p.Icon(icon, ui.Rect{X: imgR.X + (imgR.W-side)/2, Y: imgR.Y + (imgR.H-side)/2, W: side, H: side}, th.TextMuted)
+				p.Icon(icon, ui.Rect{X: imgR.X + (imgR.W-side)/2, Y: imgR.Y + (imgR.H-side)/2, W: side, H: side}, th.TextMuted.Alpha(.78))
 			}
 			if it.Kind == "video" {
 				badge := ui.Rect{X: imgR.X + 8, Y: imgR.Y + 8, W: 56, H: 22}
@@ -475,7 +513,7 @@ func (a *App) drawGrid(p *ui.Painter, r ui.Rect, layout gridLayout, th *ui.Theme
 				p.Text(badge.X+20, badge.Y+4, "视频", 10.5, ui.RGBA(255, 255, 255, 235))
 			}
 		} else {
-			p.Fill(imgR, th.SurfaceHover, 9)
+			p.Fill(imgR, th.SurfaceHover, tileRadius)
 			ext := strings.TrimPrefix(strings.ToUpper(filepath.Ext(it.Name)), ".")
 			if ext == "" {
 				ext = "文件"
@@ -513,8 +551,8 @@ func (a *App) drawGrid(p *ui.Painter, r ui.Rect, layout gridLayout, th *ui.Theme
 			if selected {
 				p.Stroke(imgR, th.Accent.Alpha(.92), 8, 2)
 			}
-		} else {
-			p.Stroke(card, cardBorder, 9, borderWidth)
+		} else if borderWidth > 0 {
+			p.Stroke(card, cardBorder, tileRadius, borderWidth)
 		}
 		if selected {
 			badgeBase := card

@@ -121,6 +121,7 @@ func TestSettingsInlineBindingCapture(t *testing.T) {
 	a.settings = defaultSettings()
 	a.draft = a.settings
 	a.showSettings = true
+	a.settingsModalOpen = true
 	a.settingsUI.Category = "control"
 	a.beginBindingCapture("prevClick")
 	tt := ui.NewTester(a.view, 1200, 900)

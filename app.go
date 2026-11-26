@@ -209,23 +209,27 @@ type App struct {
 	maximized       bool
 	fullscreen      bool
 
-	showSettings    bool
-	draft           Settings
-	settingsUI      components.SettingsState
-	draftThumbSize  float64
-	draftGridGap    float64
-	draftSidebarW   float64
-	draftCacheLimit float64
-	draftPreload    float64
-	draftTheme      string
-	draftSort       string
-	cacheInfo       CacheInfo
-	focusSearch     bool
-	searchHandle    ui.Handle
-	scrollActiveTab bool
-	tabScroll       ui.ScrollState
-	places          []Place
-	drives          []Place
+	showSettings       bool
+	settingsModalOpen  bool
+	settingsConfirm    bool
+	settingsCloseAfter func()
+	draft              Settings
+	settingsUI         components.SettingsState
+	draftThumbSize     float64
+	draftGridGap       float64
+	draftSidebarW      float64
+	draftCacheLimit    float64
+	draftPreload       float64
+	draftTheme         string
+	draftSort          string
+	cacheInfo          CacheInfo
+	focusSearch        bool
+	searchOpen         bool
+	searchHandle       ui.Handle
+	scrollActiveTab    bool
+	tabScroll          ui.ScrollState
+	places             []Place
+	drives             []Place
 
 	showHelp   bool
 	helpFilter int
@@ -303,11 +307,12 @@ type App struct {
 	themeDetected bool
 	systemDark    bool
 
-	contextIDs   []string
-	contextEmpty bool
-	contextAtX   float32
-	contextAtY   float32
-	pending      []func()
+	contextIDs     []string
+	contextEmpty   bool
+	contextAtX     float32
+	contextAtY     float32
+	contextAtValid bool
+	pending        []func()
 
 	thumbs              map[string]*thumbEntry
 	thumbLoad           map[string]bool
@@ -691,7 +696,13 @@ func (a *App) pickFolder() {
 		if err != nil || path == "" {
 			return
 		}
-		a.update(func() { a.goTo(path, true) })
+		a.update(func() {
+			if a.tab() == nil {
+				a.newTab(path)
+				return
+			}
+			a.goTo(path, true)
+		})
 	}()
 }
 
@@ -824,7 +835,84 @@ func (a *App) openSettings() {
 	a.cacheInfo = thumbCacheInfo()
 	a.bindingCapture = ""
 	a.bindingCaptureNote = ""
+	a.settingsModalOpen = true
+	a.settingsConfirm = false
+	a.settingsCloseAfter = nil
 	a.showSettings = true
+	a.refresh()
+}
+
+// settingsEditingEqual compares only the fields the settings surface can edit.
+// Favorites, tabs and the last path are application state that happen to share
+// the Settings file, not unsaved preference changes.
+func settingsEditingEqual(a, b Settings) bool {
+	return a.Theme == b.Theme &&
+		a.ThumbSize == b.ThumbSize &&
+		a.GridGap == b.GridGap &&
+		a.ShowCardNames == b.ShowCardNames &&
+		a.Sort == b.Sort &&
+		a.Desc == b.Desc &&
+		a.ShowHidden == b.ShowHidden &&
+		a.ShowOther == b.ShowOther &&
+		a.Recursive == b.Recursive &&
+		a.Sidebar == b.Sidebar &&
+		a.SidebarWidth == b.SidebarWidth &&
+		a.InfoPanel == b.InfoPanel &&
+		a.ViewerAutoImmersive == b.ViewerAutoImmersive &&
+		a.PlayVideo == b.PlayVideo &&
+		a.LoopVideo == b.LoopVideo &&
+		a.CacheLimitMB == b.CacheLimitMB &&
+		a.ViewerPreload == b.ViewerPreload &&
+		a.ViewerHUD == b.ViewerHUD &&
+		a.SidePrev == b.SidePrev &&
+		a.SideNext == b.SideNext &&
+		a.SidePrevHold == b.SidePrevHold &&
+		a.SideNextHold == b.SideNextHold
+}
+
+func (a *App) settingsDirty() bool {
+	return !settingsEditingEqual(a.settings, a.commitSettingsDraft())
+}
+
+// requestSettingsClose is the only path that closes the settings surface for
+// a user action. A modal's X, Escape and backdrop click all arrive here; with
+// no edits it closes at once, otherwise it asks before dropping the draft.
+func (a *App) requestSettingsClose() {
+	if !a.showSettings || a.settingsConfirm {
+		return
+	}
+	if !a.settingsDirty() {
+		a.closeSettingsNow()
+		return
+	}
+	// Keep the editor behind the confirmation. The settings modal's own X,
+	// Escape and backdrop handling flip the shared open flag before this runs;
+	// restoring it here means the warning sits over the draft it is protecting
+	// rather than over the browser page.
+	a.settingsModalOpen = true
+	a.settingsConfirm = true
+	a.refresh()
+}
+
+// requestSettingsCloseAfter closes settings and runs an explicit follow-up,
+// such as opening help or about. With pending edits the user decides first;
+// continuing to edit cancels the follow-up.
+func (a *App) requestSettingsCloseAfter(after func()) {
+	a.settingsCloseAfter = after
+	a.requestSettingsClose()
+}
+
+func (a *App) closeSettingsNow() {
+	a.showSettings = false
+	a.settingsModalOpen = false
+	a.settingsConfirm = false
+	a.bindingCapture = ""
+	a.bindingCaptureNote = ""
+	after := a.settingsCloseAfter
+	a.settingsCloseAfter = nil
+	if after != nil {
+		a.later(after)
+	}
 	a.refresh()
 }
 
@@ -880,6 +968,9 @@ func (a *App) applySettings() {
 	_ = saveSettings(s)
 	a.syncWindowMinimum()
 	a.showSettings = false
+	a.settingsModalOpen = false
+	a.settingsConfirm = false
+	a.settingsCloseAfter = nil
 	a.bindingCapture = ""
 	a.bindingCaptureNote = ""
 	if a.viewer.Open {

@@ -47,15 +47,37 @@ func (a *App) view(c *ui.Context) {
 		a.shellHairlines(c, winH, th)
 	})
 
+	a.selectionBar(c)
 	a.overlays(c)
 	a.runPending()
 }
 
 const titleBarHeight float32 = 48
 
+// The browse toolbar is one command row under the tab strip. It replaces the
+// previous two-row title/search stack, giving the media canvas more height.
+const toolbarHeight float32 = 52
+
 // The sidebar footer and the workbench status bar share one height so their
 // top hairlines form a single full-width line, not two steps.
 const bottomBarHeight float32 = 40
+
+// On the minimum window the default 248 DIP sidebar would take over a quarter
+// of the width. Keep a deliberately narrow sidebar, but collapse the ordinary
+// range and any wide setting that would leave too little workbench beside it.
+// A wide 520 DIP sidebar still gets its stored width once the window can spare
+// both it and a comfortable command row.
+func (a *App) sidebarLayoutWidth(windowW float32) float32 {
+	if !a.sidebar {
+		return 0
+	}
+	w := float32(a.sidebarWidth)
+	if windowW > 0 && w > compactSidebarMax &&
+		(windowW < compactSidebarThreshold || windowW < w+compactSidebarWorkbench) {
+		w = compactSidebarMax
+	}
+	return w
+}
 
 // shellHairlines paints the frame's internal joints after all panels. A
 // 1 DIP line at the sidebar edge runs continuously through the brand header,
@@ -66,13 +88,14 @@ func (a *App) shellHairlines(c *ui.Context, winH float32, th *ui.Theme) {
 	// Resolve the hairline against the panel surface once. Drawing a translucent
 	// rule twice at a T-junction darkened the joint by another alpha step; an
 	// opaque pre-blended color keeps every segment the same weight.
+	winW, _ := c.Size()
 	hair := th.Border.Alpha(.55).Over(th.Surface)
 	ui.Box(c).Absolute().Left(0).Right(0).Top(titleBarHeight).Height(1).
 		Background(hair).PassThrough()
 	ui.Box(c).Absolute().Left(0).Right(0).Top(winH - bottomBarHeight).Height(1).
 		Background(hair).PassThrough()
 	if a.sidebar {
-		ui.Box(c).Absolute().Left(float32(a.sidebarWidth) - 1).Top(0).Width(1).Height(winH).
+		ui.Box(c).Absolute().Left(a.sidebarLayoutWidth(winW) - 1).Top(0).Width(1).Height(winH).
 			Background(hair).PassThrough()
 	}
 }
@@ -114,6 +137,8 @@ func (a *App) titleBar(c *ui.Context) {
 				Padding(0, 6, 0, 0).AlignItems(ui.Center).DragWindow()
 			brand.Children(func() { a.brandContent(c) })
 			ui.Box(c).Width(1).Height(22).Background(th.Border).Margin(0, 4)
+			components.IconButton(c, lucide.PanelLeftOpen(), "展开侧栏 (Ctrl+B)", components.IconButtonPlain).
+				OnClick(a.toggleSidebar)
 		}
 		a.tabStrip(c)
 		a.windowControls(c)
@@ -217,6 +242,7 @@ func (a *App) viewShortcuts(c *ui.Context) {
 	c.OnWindowShortcut(0, ui.KeyF1, a.openHelp)
 	c.OnWindowShortcut(0, ui.KeyF11, func() { a.toggleWindowFullscreen() })
 	c.OnWindowShortcut(ui.Ctrl, ui.KeyF, func() {
+		a.searchOpen = true
 		a.focusSearch = true
 		a.refresh()
 	})
@@ -224,7 +250,8 @@ func (a *App) viewShortcuts(c *ui.Context) {
 
 func (a *App) sidebarView(c *ui.Context) {
 	th := c.Theme()
-	side := ui.Column(c).Width(float32(a.sidebarWidth)).FillHeight().Background(th.Surface)
+	winW, _ := c.Size()
+	side := ui.Column(c).Width(a.sidebarLayoutWidth(winW)).FillHeight().Background(th.Surface)
 	side.Children(func() {
 		// The sidebar owns the app mark at the top of its full-height column.
 		// The workbench title bar starts to its right, so the tab row and its
@@ -278,6 +305,8 @@ func (a *App) sidebarView(c *ui.Context) {
 				components.IconButton(c, lucide.Keyboard(), "快捷键帮助", components.IconButtonPlain).
 					OnClick(a.openHelp)
 				ui.Spacer(c)
+				components.IconButton(c, lucide.PanelLeftClose(), "收起侧栏 (Ctrl+B)", components.IconButtonPlain).
+					OnClick(a.toggleSidebar)
 				components.Text(c, "v"+appVersion()).FontSize(9.5).TextColor(th.TextMuted.Alpha(.75)).Padding(0, 4)
 			})
 	})
@@ -317,7 +346,7 @@ func (a *App) sidebarPathRow(c *ui.Context, path string, icon *ui.SVG, favorite 
 		a.goTo(path, true)
 	}
 	if favorite {
-		row.ContextMenu(func(m *ui.Menu) {
+		components.ContextMenu(c, row, func(m *components.Menu) {
 			if m.Item("打开").Chosen() {
 				a.later(func() { a.goTo(path, true) })
 			}
@@ -640,12 +669,32 @@ func (a *App) toolbar(c *ui.Context) {
 	if tab == nil {
 		return
 	}
+	winW, _ := c.Size()
+	compact := winW < 1120
+	searchVisible := !compact || a.searchOpen || tab.Query != "" || a.focusSearch
 
 	buildSearch := func() {
-		ui.Box(c.Key(fmt.Sprintf("search-%d", tab.ID))).Grow(1).MinWidth(0).MaxWidth(420).Children(func() {
+		if !searchVisible {
+			components.IconButton(c, lucide.Search(), "搜索 (Ctrl+F)", components.IconButtonPlain).
+				OnClick(func() {
+					a.searchOpen = true
+					a.focusSearch = true
+					a.refresh()
+				})
+			return
+		}
+		width := float32(230)
+		if compact {
+			width = 150
+		}
+		ui.Box(c.Key(fmt.Sprintf("search-%d", tab.ID))).Width(width).MinWidth(120).Children(func() {
+			placeholder := "搜索此文件夹"
+			if a.settings.Recursive {
+				placeholder = "搜索（含子文件夹）"
+			}
 			components.TextBox(c, &tab.Query, components.TextBoxOptions{
 				LeadingIcon: lucide.Search(),
-			}).Placeholder("搜索此文件夹").Label("搜索").FillWidth().Bind(&a.searchHandle)
+			}).Placeholder(placeholder).Label("搜索").FillWidth().Bind(&a.searchHandle)
 		})
 		if a.focusSearch {
 			a.searchHandle.SelectAll(c)
@@ -660,14 +709,47 @@ func (a *App) toolbar(c *ui.Context) {
 				OnClick(func() {
 					tab.Query = ""
 					tab.refilter()
+					if compact {
+						a.searchOpen = false
+					}
+					a.refresh()
+				})
+		} else if compact {
+			components.IconButton(c, lucide.X(), "收起搜索", components.IconButtonCompact).
+				OnClick(func() {
+					a.searchOpen = false
 					a.refresh()
 				})
 		}
 	}
 
+	buildFilter := func() {
+		index := 0
+		switch tab.Filter {
+		case "image":
+			index = 1
+		case "video":
+			index = 2
+		}
+		before := index
+		tabs := components.Tabs(c, &index, components.TabsSegmented, "全部", "图片", "视频")
+		// Segmented tabs align to the top of their track by default. The command
+		// row centers its controls, so opt the track into the row's center line.
+		tabs.List.AlignSelf(ui.Center)
+		tabs.List.Label("显示内容，文件夹始终保留")
+		if index != before {
+			values := []string{"all", "image", "video"}
+			a.later(func() { a.setMediaFilter(tab, values[index]) })
+		}
+	}
+
 	buildSort := func() {
+		sortWidth := float32(92)
+		if compact {
+			sortWidth = 84
+		}
 		sortSel := components.Select(c.Key("sort"), &tab.Sort)
-		sortSel.Trigger.Width(92).Label("排序")
+		sortSel.Trigger.Width(sortWidth).Label("排序")
 		sortSel.Trigger.Children(func() {
 			components.Text(c, sortLabel(tab.Sort)).SingleLine()
 		})
@@ -699,23 +781,28 @@ func (a *App) toolbar(c *ui.Context) {
 	}
 
 	// Recursive scanning, card captions and hidden files are set-and-forget
-	// view options. Keeping them behind one menu leaves search and sort as the
-	// only always-visible controls in the workbench.
+	// options. Search, media filtering, sorting and navigation stay in the
+	// command row; secondary navigation and folder actions live here.
 	buildViewMenu := func() {
-		more := components.IconButton(c, lucide.Ellipsis(), "更多视图选项", components.IconButtonPlain)
+		more := components.IconButton(c, lucide.Ellipsis(), "更多操作", components.IconButtonPlain)
 		components.MenuButton(c, more, func(m *components.Menu) {
-			m.Group("显示内容", func(m *components.Menu) {
-				all := m.Item("图片和视频").Checked(tab.Filter == "" || tab.Filter == "all")
-				if all.Chosen() {
-					a.setMediaFilter(tab, "all")
+			m.Group("当前文件夹", func(m *components.Menu) {
+				favorite := m.Item("收藏此文件夹").Checked(a.isFavorite(tab.Path))
+				if favorite.Chosen() {
+					a.toggleFavorite()
 				}
-				images := m.Item("仅展示图片").Checked(tab.Filter == "image")
-				if images.Chosen() {
-					a.setMediaFilter(tab, "image")
+				if m.Item("刷新当前文件夹").Shortcut("F5").Chosen() {
+					t := tab
+					a.later(func() { a.loadTab(t, false) })
 				}
-				videos := m.Item("仅展示视频").Checked(tab.Filter == "video")
-				if videos.Chosen() {
-					a.setMediaFilter(tab, "video")
+				if m.Item("上一文件夹").Chosen() {
+					a.later(func() { a.sibling(-1) })
+				}
+				if m.Item("下一文件夹").Chosen() {
+					a.later(func() { a.sibling(1) })
+				}
+				if m.Item("选择其他文件夹…").Chosen() {
+					a.later(a.pickFolder)
 				}
 			})
 			m.Group("显示选项", func(m *components.Menu) {
@@ -748,42 +835,81 @@ func (a *App) toolbar(c *ui.Context) {
 		ui.Box(c).Width(1).Height(20).Background(th.Border.Alpha(.55)).Margin(2, 6)
 	}
 
-	ui.Column(c).Padding(10, 14, 8, 14).Gap(8).Background(th.Background).Children(func() {
-		ui.Row(c).Gap(2).Children(func() {
-			components.IconButton(c, lucide.ArrowLeft(), "返回", components.IconButtonPlain).
-				Disabled(len(tab.History) == 0).OnClick(func() { a.goBack() })
-			components.IconButton(c, lucide.ArrowUp(), "上一级", components.IconButtonPlain).
-				OnClick(a.up)
-			components.IconButton(c, lucide.ChevronLeft(), "上一文件夹", components.IconButtonPlain).
-				OnClick(func() { a.sibling(-1) })
-			components.IconButton(c, lucide.ChevronRight(), "下一文件夹", components.IconButtonPlain).
-				OnClick(func() { a.sibling(1) })
-			ui.Box(c).Width(1).Height(20).Background(th.Border.Alpha(.55)).Margin(2, 6)
-			components.IconButton(c, lucide.RefreshCw(), "刷新当前文件夹 (F5)", components.IconButtonPlain).
-				Disabled(tab.Loading).
-				OnClick(func() { a.loadTab(tab, false) })
+	ui.Row(c).Height(toolbarHeight).FillWidth().Padding(0, 14).Gap(4).
+		AlignItems(ui.Center).Background(th.Background).
+		BorderWidth(0, 0, 1, 0).BorderColor(th.Border.Alpha(.5)).Children(func() {
+		components.IconButton(c, lucide.ArrowLeft(), "返回", components.IconButtonPlain).
+			Disabled(len(tab.History) == 0).OnClick(func() { a.goBack() })
+		components.IconButton(c, lucide.ArrowUp(), "上一级", components.IconButtonPlain).
+			OnClick(a.up)
+		divider()
 
-			ui.Column(c).Grow(1).MinWidth(0).PaddingX(8).Clip().Children(func() {
-				components.Text(c, tab.Name).FontSize(17).FontWeight(600).SingleLine().Ellipsis("…")
-				components.Text(c, tab.Path).FontSize(10).TextColor(th.TextMuted).SingleLine().Ellipsis("…")
+		if crumbs, paths := breadcrumbItems(tab.Path, tab.Name); len(crumbs) > 0 && !compact {
+			chosen := -1
+			ui.Box(c).Grow(1).MinWidth(0).Clip().Children(func() {
+				b := components.Breadcrumbs(c, crumbs, &chosen)
+				b.Label("当前位置：" + tab.Path)
+				if b.Changed() && chosen >= 0 && chosen < len(paths) {
+					path := paths[chosen]
+					a.later(func() { a.goTo(path, true) })
+				}
 			})
-			star := components.IconButton(c, lucide.Star(), "收藏此文件夹", components.IconButtonPlain)
-			if a.isFavorite(tab.Path) {
-				star.TextColor(th.Accent)
-			}
-			if star.Clicked() {
-				a.toggleFavorite()
-			}
+		} else if compact && searchVisible {
+			ui.Spacer(c)
+		} else {
+			components.Text(c, tab.Name).FontSize(13).FontWeight(600).SingleLine().Ellipsis("…")
+		}
+
+		buildSearch()
+		buildFilter()
+		buildSort()
+		divider()
+		buildViewMenu()
+		if !a.sidebar {
 			components.IconButton(c, lucide.Settings(), "设置", components.IconButtonPlain).
 				OnClick(a.openSettings)
-		})
-		ui.Row(c).Gap(6).Children(func() {
-			buildSearch()
-			buildSort()
-			divider()
-			buildViewMenu()
-		})
+		}
 	})
+}
+
+// breadcrumbItems turns a Windows path into labels and the absolute path each
+// ancestor link should open. The final item is the current folder and is not
+// interactive, matching components.Breadcrumbs.
+func breadcrumbItems(path, name string) ([]string, []string) {
+	path = filepath.Clean(path)
+	if path == "" || path == "." {
+		return nil, nil
+	}
+	volume := filepath.VolumeName(path)
+	root := volume
+	if root == "" {
+		root = string(filepath.Separator)
+	} else if !strings.HasSuffix(root, string(filepath.Separator)) {
+		root += string(filepath.Separator)
+	}
+	rootLabel := volume
+	if rootLabel == "" {
+		rootLabel = string(filepath.Separator)
+	}
+	rest := strings.TrimPrefix(path, root)
+	rest = strings.Trim(rest, string(filepath.Separator))
+	labels := []string{rootLabel}
+	paths := []string{root}
+	if rest != "" {
+		current := root
+		for _, segment := range strings.Split(rest, string(filepath.Separator)) {
+			if segment == "" {
+				continue
+			}
+			current = filepath.Join(current, segment)
+			labels = append(labels, segment)
+			paths = append(paths, current)
+		}
+	}
+	if name != "" && len(labels) > 1 {
+		labels[len(labels)-1] = name
+	}
+	return labels, paths
 }
 
 func (a *App) setMediaFilter(tab *Tab, filter string) {
@@ -825,7 +951,9 @@ func (a *App) content(c *ui.Context) {
 	th := c.Theme()
 	tab := a.tab()
 	if tab == nil {
-		emptyState(c, lucide.FolderOpen(), "没有打开的文件夹", "")
+		emptyState(c, lucide.FolderOpen(), "没有打开的文件夹", "", func(c *ui.Context) {
+			components.Button(c, "选择文件夹", components.ButtonPrimary).OnClick(a.pickFolder)
+		})
 		return
 	}
 	switch {
@@ -838,22 +966,52 @@ func (a *App) content(c *ui.Context) {
 			components.Button(c, "重试", components.ButtonSecondary).OnClick(func() { a.loadTab(tab, false) })
 		})
 	case len(tab.Items) == 0:
-		if tab.Query != "" {
-			ui.Column(c).Grow(1).Center().Gap(12).Children(func() {
-				components.Icon(c, lucide.SearchX()).Size(30, 30).TextColor(th.TextMuted)
-				components.Text(c, "没有匹配的图片").TextColor(th.TextMuted)
+		a.emptyBrowseState(c, tab)
+	default:
+		a.gridView(c, tab)
+	}
+}
+
+func (a *App) emptyBrowseState(c *ui.Context, tab *Tab) {
+	if tab.Query != "" {
+		emptyState(c, lucide.SearchX(), "没有匹配的内容", "换个关键词，或清除当前筛选后再看。", func(c *ui.Context) {
+			ui.Row(c).Gap(8).Justify(ui.Center).Children(func() {
 				components.Button(c, "清除搜索", components.ButtonSecondary).OnClick(func() {
 					tab.Query = ""
 					tab.refilter()
 					a.refresh()
 				})
+				if tab.Filter != "all" {
+					components.Button(c, "显示全部", components.ButtonSecondary).OnClick(func() {
+						a.setMediaFilter(tab, "all")
+					})
+				}
 			})
-		} else {
-			emptyState(c, lucide.Images(), "此文件夹没有可显示的图片", "把图片或文件夹拖进来，或换一个文件夹")
-		}
-	default:
-		a.gridView(c, tab)
+		})
+		return
 	}
+	if tab.Filter == "image" || tab.Filter == "video" {
+		kind := "图片"
+		icon := lucide.Images()
+		if tab.Filter == "video" {
+			kind = "视频"
+			icon = lucide.Video()
+		}
+		emptyState(c, icon, "没有可显示的"+kind, "当前仅展示"+kind+"；文件夹仍会保留，方便继续导航。", func(c *ui.Context) {
+			components.Button(c, "显示全部", components.ButtonSecondary).OnClick(func() {
+				a.setMediaFilter(tab, "all")
+			})
+		})
+		return
+	}
+	emptyState(c, lucide.Images(), "此文件夹没有可显示的内容", "把图片、视频或文件夹拖进来，或选择其他文件夹。", func(c *ui.Context) {
+		ui.Row(c).Gap(8).Justify(ui.Center).Children(func() {
+			components.Button(c, "选择文件夹", components.ButtonSecondary).OnClick(a.pickFolder)
+			components.Button(c, "重新读取", components.ButtonSecondary).OnClick(func() {
+				a.loadTab(tab, false)
+			})
+		})
+	})
 }
 
 func loadingState(c *ui.Context) {
@@ -864,7 +1022,7 @@ func loadingState(c *ui.Context) {
 	})
 }
 
-func emptyState(c *ui.Context, icon *ui.SVG, title, detail string) {
+func emptyState(c *ui.Context, icon *ui.SVG, title, detail string, action func(*ui.Context)) {
 	th := c.Theme()
 	ui.Column(c).Grow(1).Center().Gap(12).Children(func() {
 		ui.Box(c).Size(64, 64).Radius(18).Background(th.Accent.Alpha(.08)).
@@ -875,6 +1033,61 @@ func emptyState(c *ui.Context, icon *ui.SVG, title, detail string) {
 		if detail != "" {
 			components.Text(c, detail).FontSize(11.5).TextColor(th.TextMuted).MaxWidth(460).Center()
 		}
+		if action != nil {
+			action(c)
+		}
+	})
+}
+
+func (a *App) selectionBar(c *ui.Context) {
+	th := c.Theme()
+	tab := a.tab()
+	if tab == nil || len(tab.Selected) == 0 {
+		return
+	}
+	if a.showSettings || a.showHelp || a.showAbout || a.updateOpen || a.errorMsg != "" ||
+		a.renameOpen || a.newFolderOpen || a.confirmDeleteOpen {
+		return
+	}
+	winW, _ := c.Size()
+	left := a.sidebarLayoutWidth(winW)
+	width := winW - left
+	one := tab.selectedOne()
+	n := len(tab.Selected)
+	items := []components.FloatingButtonGroupItem{
+		{ID: "open", Label: "打开", Icon: lucide.ExternalLink, Disabled: one == nil},
+		{ID: "reveal", Label: "定位", Icon: lucide.Locate, Disabled: one == nil},
+		{ID: "copy", Label: "复制路径", Icon: lucide.Copy, Disabled: one == nil},
+		{Separator: true},
+		{ID: "delete", Label: "删除", Icon: lucide.Trash, Shortcut: "Delete"},
+		{ID: "clear", Label: "取消选择", Icon: lucide.X, Shortcut: "Esc"},
+	}
+	ui.Overlay(c, func() {
+		ui.Row(c).Absolute().Left(left).Width(width).Bottom(bottomBarHeight + 12).Height(52).
+			Justify(ui.Center).AlignItems(ui.Center).Children(func() {
+			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+				ui.Box(c).Padding(9, 4).Radius(pillRadius).Background(th.Surface).
+					BorderWidth(1).BorderColor(th.Border.Alpha(.8)).Children(func() {
+					components.Text(c, fmt.Sprintf("已选 %d 项", n)).FontSize(11).FontWeight(600).
+						TextColor(th.Text)
+				})
+				group := components.FloatingButtonGroup(c, "选中项操作", components.FloatingButtonGroupRaised, ui.Horizontal, items)
+				switch group.Clicked() {
+				case "open":
+					if one != nil {
+						a.later(func() { a.activateItem(one) })
+					}
+				case "reveal":
+					a.later(a.revealSelected)
+				case "copy":
+					a.later(a.copySelectedPath)
+				case "delete":
+					a.later(func() { a.askDelete(false) })
+				case "clear":
+					a.later(a.clearSelection)
+				}
+			})
+		})
 	})
 }
 
@@ -886,21 +1099,17 @@ func (a *App) statusBar(c *ui.Context) {
 	}
 	ui.Row(c).Height(bottomBarHeight).Padding(0, 14).Gap(10).AlignItems(ui.Center).Background(th.Surface).
 		Children(func() {
-			components.Text(c, fmt.Sprintf("%d 项", len(tab.Items))).FontSize(11).TextColor(th.TextMuted).
-				AlignSelf(ui.Center)
-			if tab.Query != "" && len(tab.Items) != len(tab.All) {
-				components.Text(c, fmt.Sprintf("（共 %d 项）", len(tab.All))).FontSize(11).TextColor(th.TextMuted).
-					AlignSelf(ui.Center)
+			count := fmt.Sprintf("%d 项", len(tab.Items))
+			filtered := tab.Query != "" || (tab.Filter != "" && tab.Filter != "all")
+			if filtered && len(tab.Items) != len(tab.All) {
+				count = fmt.Sprintf("%d / %d 项", len(tab.Items), len(tab.All))
 			}
+			components.Text(c, count).FontSize(11).TextColor(th.TextMuted).AlignSelf(ui.Center)
 			counts := fmt.Sprintf("%d 图片 · %d 视频", countKind(tab.Items, "image"), countKind(tab.Items, "video"))
 			if n := countKind(tab.Items, "folder"); n > 0 {
 				counts += fmt.Sprintf(" · %d 文件夹", n)
 			}
 			components.Text(c, counts).FontSize(11).TextColor(th.TextMuted).AlignSelf(ui.Center)
-			if n := len(tab.Selected); n > 0 {
-				components.Text(c, fmt.Sprintf("已选 %d 项", n)).FontSize(11).TextColor(th.Accent).
-					AlignSelf(ui.Center)
-			}
 			if tab.Result.Truncated {
 				components.Text(c, "已截断").FontSize(11).TextColor(th.TextMuted).AlignSelf(ui.Center)
 			}
@@ -909,20 +1118,8 @@ func (a *App) statusBar(c *ui.Context) {
 				components.Badge(c, "递归", components.BadgeOptions{Tone: components.BadgeWarning}).
 					AlignSelf(ui.Center)
 			}
-			switch tab.Filter {
-			case "image":
-				components.Badge(c, "仅图片", components.BadgeOptions{Tone: components.BadgeNeutral}).
-					AlignSelf(ui.Center)
-			case "video":
-				components.Badge(c, "仅视频", components.BadgeOptions{Tone: components.BadgeNeutral}).
-					AlignSelf(ui.Center)
-			}
 			if a.settings.ShowHidden {
 				components.Badge(c, "隐藏", components.BadgeOptions{Tone: components.BadgeNeutral}).
-					AlignSelf(ui.Center)
-			}
-			if !a.settings.ShowCardNames {
-				components.Badge(c, "文件名已隐藏", components.BadgeOptions{Tone: components.BadgeNeutral}).
 					AlignSelf(ui.Center)
 			}
 			components.Text(c, "F1 快捷键").FontSize(10).TextColor(th.TextMuted.Alpha(.88)).

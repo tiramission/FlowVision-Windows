@@ -216,9 +216,19 @@ func (a *App) viewerImmersive() bool {
 	return a.viewer.Open && a.viewer.Immersive
 }
 
+// viewerInfoPanelWidth keeps the information card from taking a third of a
+// compact window. The stored 300 DIP card remains at normal widths; below
+// 1000 DIP it contracts to 28% of the window, with a 248 DIP floor.
+func viewerInfoPanelWidth(windowW float32) float32 {
+	if windowW > 0 && windowW < viewerInfoPanelCompactFrom {
+		return max(viewerInfoPanelMin, windowW*viewerInfoPanelCompactRatio)
+	}
+	return viewerInfoPanelDefault
+}
+
 func viewerCanvasMetrics(w, h float32, immersive, info bool) (float32, float32) {
 	if info && !immersive {
-		w -= 300
+		w -= viewerInfoPanelWidth(w)
 	}
 	if !immersive {
 		h -= 50 + 52
@@ -804,7 +814,8 @@ func (a *App) viewerCanvas(c *ui.Context, it *Item, th *ui.Theme) {
 }
 
 func (a *App) viewerInfoPanel(c *ui.Context, it *Item, th *ui.Theme) {
-	ui.Column(c).Width(300).FillHeight().Background(th.Surface).
+	winW, _ := c.Size()
+	ui.Column(c).Width(viewerInfoPanelWidth(winW)).FillHeight().Background(th.Surface).
 		BorderStartWidth(1).BorderColor(th.Border.Alpha(.7)).
 		Padding(12, 14).Gap(10).Children(func() {
 		ui.Row(c).Gap(7).AlignItems(ui.Center).Children(func() {
@@ -872,7 +883,7 @@ func (a *App) viewerInfoPanel(c *ui.Context, it *Item, th *ui.Theme) {
 			viewerInfoAction(c, th, "定位", lucide.FolderOpen, false, func() {
 				_ = (AppSvc{}).Reveal(it.Path)
 			}).Grow(1)
-			viewerInfoAction(c, th, "复制路径", lucide.Copy, false, func() {
+			viewerInfoAction(c, th, "复制", lucide.Copy, false, func() {
 				_ = (AppSvc{}).CopyText(it.Path)
 			}).Grow(1)
 		})

@@ -11,6 +11,7 @@ import (
 
 func (a *App) overlays(c *ui.Context) {
 	a.settingsModal(c)
+	a.settingsDiscardModal(c)
 	a.renameModal(c)
 	a.newFolderModal(c)
 	a.deleteModal(c)

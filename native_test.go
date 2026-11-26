@@ -175,6 +175,17 @@ func TestNativeSelectionAndViewerOverlay(t *testing.T) {
 	if !tt.HasText("已选 1 项") {
 		t.Fatalf("selection status missing: %q", tt.Texts())
 	}
+	if !tt.HasText("取消选择") {
+		t.Fatalf("selection action bar missing: %q", tt.Texts())
+	}
+	if err := tt.Click("取消选择"); err != nil {
+		t.Fatalf("clear selection: %v", err)
+	}
+	tt.Frame()
+	if len(a.tab().Selected) != 0 {
+		t.Fatalf("clear selection left %v", a.tab().Selected)
+	}
+	a.selectOnly("2")
 	a.viewer = Viewer{Open: true, Item: a.tab().Items[1], Zoom: 1, ShowInfo: true}
 	a.viewer.InfoReady = true
 	tt.Frame()
@@ -183,6 +194,43 @@ func TestNativeSelectionAndViewerOverlay(t *testing.T) {
 	}
 	if !tt.HasText("1 / 3") {
 		t.Fatalf("viewer counter missing: %q", tt.Texts())
+	}
+}
+
+func TestNativeToolbarCompactSearch(t *testing.T) {
+	a := newViewTestApp()
+	a.sidebar = true
+	a.sidebarWidth = 248
+	tt := ui.NewTester(a.view, 900, 600)
+	tt.Frame()
+	if err := tt.Click("搜索 (Ctrl+F)"); err != nil {
+		t.Fatalf("compact search button: %v", err)
+	}
+	tt.Frame()
+	if !a.searchOpen {
+		t.Fatal("compact search button did not open the field")
+	}
+	if !tt.HasText("收起搜索") {
+		t.Fatalf("compact search close control missing: %q", tt.Texts())
+	}
+}
+
+func TestBreadcrumbItems(t *testing.T) {
+	labels, paths := breadcrumbItems(`C:\Users\test\Pictures`, "Pictures")
+	wantLabels := []string{"C:", "Users", "test", "Pictures"}
+	wantPaths := []string{`C:\`, `C:\Users`, `C:\Users\test`, `C:\Users\test\Pictures`}
+	if fmt.Sprint(labels) != fmt.Sprint(wantLabels) {
+		t.Fatalf("labels = %v, want %v", labels, wantLabels)
+	}
+	if fmt.Sprint(paths) != fmt.Sprint(wantPaths) {
+		t.Fatalf("paths = %v, want %v", paths, wantPaths)
+	}
+	labels, paths = breadcrumbItems(`C:\`, `C:\`)
+	if len(labels) != 1 || labels[0] != "C:" || len(paths) != 1 || paths[0] != `C:\` {
+		t.Fatalf("root breadcrumb = %v %v", labels, paths)
+	}
+	if labels, paths = breadcrumbItems("", ""); labels != nil || paths != nil {
+		t.Fatalf("empty breadcrumb = %v %v", labels, paths)
 	}
 }
 
@@ -239,7 +287,7 @@ func TestNativeToolbarViewMenuRecursive(t *testing.T) {
 	a.settings.Recursive = false
 	tt := ui.NewTester(a.view, 1280, 800)
 	tt.Frame()
-	more, ok := tt.AccessByRole(ui.RoleMenuButton, "更多视图选项")
+	more, ok := tt.AccessByRole(ui.RoleMenuButton, "更多操作")
 	if !ok {
 		t.Fatalf("view options menu missing: %q", tt.Texts())
 	}
@@ -254,7 +302,7 @@ func TestNativeToolbarViewMenuRecursive(t *testing.T) {
 	}
 }
 
-func TestNativeToolbarViewMenuMediaFilter(t *testing.T) {
+func TestNativeToolbarMediaFilterTabs(t *testing.T) {
 	a := newViewTestApp()
 	tab := a.tab()
 	tab.All = []*Item{
@@ -266,21 +314,40 @@ func TestNativeToolbarViewMenuMediaFilter(t *testing.T) {
 	tab.Items = tab.All
 	tt := ui.NewTester(a.view, 1280, 800)
 	tt.Frame()
-	more, ok := tt.AccessByRole(ui.RoleMenuButton, "更多视图选项")
-	if !ok {
-		t.Fatalf("view options menu missing: %q", tt.Texts())
-	}
-	tt.ClickAt(more.Bounds.X+more.Bounds.W/2, more.Bounds.Y+more.Bounds.H/2)
-	tt.Frame()
-	if err := tt.Click("仅展示图片"); err != nil {
-		t.Fatalf("media filter menu item: %v", err)
+	if err := tt.Click("图片"); err != nil {
+		t.Fatalf("media filter tab: %v", err)
 	}
 	tt.Frame()
 	if tab.Filter != "image" {
-		t.Fatalf("media filter menu wrote %q, want image", tab.Filter)
+		t.Fatalf("media filter tab wrote %q, want image", tab.Filter)
 	}
 	if len(tab.Items) != 2 || tab.Items[0].ID != "folder" || tab.Items[1].ID != "image" {
 		t.Fatalf("image filter produced %v", tab.Items)
+	}
+	if !tt.HasText("2 / 4 项") {
+		t.Fatalf("filtered count missing: %q", tt.Texts())
+	}
+}
+
+func TestNativeEmptyFilterAction(t *testing.T) {
+	a := newViewTestApp()
+	tab := a.tab()
+	tab.Filter = "video"
+	tab.All = []*Item{
+		{ID: "image", Name: "photo.jpg", Kind: "image"},
+	}
+	tab.Items = nil
+	tt := ui.NewTester(a.view, 1280, 800)
+	tt.Frame()
+	if !tt.HasText("没有可显示的视频") {
+		t.Fatalf("filtered empty state missing: %q", tt.Texts())
+	}
+	if err := tt.Click("显示全部"); err != nil {
+		t.Fatalf("show all action: %v", err)
+	}
+	tt.Frame()
+	if tab.Filter != "all" || len(tab.Items) != 1 || tab.Items[0].ID != "image" {
+		t.Fatalf("show all left filter=%q items=%v", tab.Filter, tab.Items)
 	}
 }
 
@@ -531,21 +598,154 @@ func TestNativeGridContextMenu(t *testing.T) {
 	tt := ui.NewTester(a.view, 1280, 800)
 	tt.RightClickAt(60, 220)
 	tt.Frame()
-	menu := tt.Menu()
-	if len(menu) == 0 {
+	if !tt.HasText("在资源管理器中显示") {
 		t.Fatalf("context menu did not open: %q", tt.Texts())
 	}
-	t.Logf("menu: %v", menu)
-	if err := tt.ChooseMenuItem("打开"); err != nil {
+	if len(a.tab().Selected) != 1 {
+		t.Fatalf("context click selected %d items", len(a.tab().Selected))
+	}
+	if err := tt.Click("显示信息"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
 	tt.Frame()
 	if !a.viewer.Open {
-		t.Fatalf("open did not open viewer; menu %v", menu)
+		t.Fatalf("open did not open viewer; texts %q", tt.Texts())
+	}
+	if !a.viewer.ShowInfo {
+		t.Fatal("context action did not open the information panel")
 	}
 	if a.viewer.Item == nil || a.viewer.Item.Name == "" {
 		t.Fatal("viewer has no item")
+	}
+}
+
+func TestNativeGridContextMenuKeyboard(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		mod  ui.Modifiers
+		key  ui.Key
+	}{
+		{"menu-key", 0, ui.KeyContextMenu},
+		{"shift-f10", ui.Shift, ui.KeyF10},
+	} {
+		a := newViewTestApp()
+		pic := filepath.Join(t.TempDir(), "a.png")
+		writePNG(t, pic, 20, 20)
+		it := a.tab().Items[0]
+		it.Name, it.Path, it.Kind, it.Ext = "a.png", pic, "image", ".png"
+		tt := ui.NewTester(a.view, 1280, 800)
+		tt.ClickAt(60, 220)
+		tt.Frame()
+		tt.Key(tc.mod, tc.key)
+		tt.Frame()
+		if !tt.HasText("在资源管理器中显示") {
+			t.Fatalf("%s: grid menu did not open: %q", tc.name, tt.Texts())
+		}
+		if len(a.tab().Selected) != 1 {
+			t.Fatalf("%s: selection changed to %v", tc.name, a.tab().Selected)
+		}
+	}
+}
+
+func TestCompactSidebarAndViewerInfoWidth(t *testing.T) {
+	a := &App{sidebar: true, sidebarWidth: 248}
+	if got := a.sidebarLayoutWidth(900); got != compactSidebarMax {
+		t.Fatalf("compact sidebar = %.0f, want %.0f", got, compactSidebarMax)
+	}
+	if got := a.sidebarLayoutWidth(1320); got != 248 {
+		t.Fatalf("normal sidebar = %.0f, want 248", got)
+	}
+	a.sidebarWidth = 160
+	if got := a.sidebarLayoutWidth(900); got != 160 {
+		t.Fatalf("narrow custom sidebar = %.0f, want 160", got)
+	}
+	a.sidebarWidth = 520
+	if got := a.sidebarLayoutWidth(900); got != compactSidebarMax {
+		t.Fatalf("wide custom sidebar at compact width = %.0f, want %.0f", got, compactSidebarMax)
+	}
+	if got := a.sidebarLayoutWidth(1040); got != compactSidebarMax {
+		t.Fatalf("wide custom sidebar at minimum wide width = %.0f, want %.0f", got, compactSidebarMax)
+	}
+	if got := a.sidebarLayoutWidth(1320); got != 520 {
+		t.Fatalf("wide custom sidebar at roomy width = %.0f, want 520", got)
+	}
+	if got := viewerInfoPanelWidth(900); got != 252 {
+		t.Fatalf("compact info panel = %.0f, want 252", got)
+	}
+	if got := viewerInfoPanelWidth(1000); got != 300 {
+		t.Fatalf("normal info panel = %.0f, want 300", got)
+	}
+}
+
+func TestSettingsDirtyTracksEditableFields(t *testing.T) {
+	a := &App{settings: defaultSettings()}
+	a.fillSettingsDraft(a.settings)
+	if a.settingsDirty() {
+		t.Fatal("fresh draft reported dirty")
+	}
+	a.draft.ShowHidden = !a.settings.ShowHidden
+	if !a.settingsDirty() {
+		t.Fatal("changed preference was not dirty")
+	}
+	a.draft = a.settings
+	a.draft.Favorites = append(a.draft.Favorites, `C:\Pictures`)
+	if a.settingsDirty() {
+		t.Fatal("favorites are not an editable preference")
+	}
+}
+
+func TestSettingsDirtyCloseAsksBeforeDiscard(t *testing.T) {
+	a := newViewTestApp()
+	a.openSettings()
+	a.draft.ShowHidden = !a.settings.ShowHidden
+	tt := ui.NewTester(a.view, 1200, 900)
+	tt.Frame()
+	a.requestSettingsClose()
+	tt.Frame()
+	if !a.showSettings || !a.settingsConfirm || !a.settingsModalOpen {
+		t.Fatalf("dirty close: open=%v confirm=%v modal=%v", a.showSettings, a.settingsConfirm, a.settingsModalOpen)
+	}
+	if !tt.HasText("放弃未保存的修改？") {
+		t.Fatalf("dirty close did not show confirmation: %q", tt.Texts())
+	}
+	if err := tt.Click("继续编辑"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !a.showSettings || a.settingsConfirm || !a.settingsModalOpen {
+		t.Fatalf("continue editing: open=%v confirm=%v modal=%v", a.showSettings, a.settingsConfirm, a.settingsModalOpen)
+	}
+	a.requestSettingsClose()
+	tt.Frame()
+	if !a.settingsConfirm {
+		t.Fatal("second dirty close did not confirm")
+	}
+	if err := tt.Click("放弃修改"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.showSettings || a.settingsConfirm || a.settingsModalOpen {
+		t.Fatalf("discard: open=%v confirm=%v modal=%v", a.showSettings, a.settingsConfirm, a.settingsModalOpen)
+	}
+}
+
+func TestSettingsEscapeKeepsDraft(t *testing.T) {
+	a := newViewTestApp()
+	a.openSettings()
+	tt := ui.NewTester(a.view, 1200, 900)
+	tt.Frame()
+	a.draft.ShowHidden = !a.settings.ShowHidden
+	tt.Frame()
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	if !a.showSettings || !a.settingsConfirm || !a.settingsModalOpen {
+		t.Fatalf("escape: open=%v confirm=%v modal=%v", a.showSettings, a.settingsConfirm, a.settingsModalOpen)
+	}
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	if !a.showSettings || a.settingsConfirm || !a.settingsModalOpen {
+		t.Fatalf("escape confirm: open=%v confirm=%v modal=%v", a.showSettings, a.settingsConfirm, a.settingsModalOpen)
 	}
 }
 

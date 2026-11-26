@@ -2,6 +2,23 @@ package main
 
 import "github.com/egoist/mygo/ui"
 
+// Layout and shape tokens shared by the gallery and viewer. Colors stay in the
+// two palettes below; these dimensions keep the same tile language everywhere.
+const (
+	tileRadius      float32 = 9
+	thumbnailRadius float32 = 8
+	pillRadius      float32 = 999
+
+	compactSidebarThreshold float32 = 960
+	compactSidebarMax       float32 = 220
+	compactSidebarWorkbench float32 = 640
+
+	viewerInfoPanelDefault      float32 = 300
+	viewerInfoPanelMin          float32 = 248
+	viewerInfoPanelCompactRatio         = 0.28
+	viewerInfoPanelCompactFrom  float32 = 1000
+)
+
 // FlowVision's visual refresh keeps Onevra's component system but separates
 // two viewing contexts: a warm gallery for browsing and a neutral darkroom for
 // the viewer. The palette intentionally spends accent color only on selection,
@@ -29,16 +46,17 @@ func galleryPalette(dark bool) *ui.Theme {
 		t.Warning = ui.Hex("#e6b567")
 		t.Success = ui.Hex("#79bea1")
 		t.Selection = accent.Alpha(0.16)
-		// Focus stays visible without turning every focused field into an
-		// orange-bordered card. High contrast restores a stronger ring.
-		t.Focus = t.Text.Alpha(0.30)
+		// Keyboard focus is a real control state, so the ring uses the accent
+		// itself instead of a 30% wash that measured below 3:1 on the warm
+		// surface. High contrast later replaces it with the strongest text tone.
+		t.Focus = accent
 		t.Scrollbar = t.Text.Alpha(.30)
 		t.Radius = 10
 		return t
 	}
 
 	t := ui.LightTheme()
-	accent := ui.Hex("#bf5330")
+	accent := ui.Hex("#b54a29")
 	black := ui.RGB(0, 0, 0)
 	white := ui.RGB(255, 255, 255)
 	t.Background = ui.Hex("#f3f0e9")
@@ -57,8 +75,9 @@ func galleryPalette(dark bool) *ui.Theme {
 	t.Success = ui.Hex("#257a57")
 	t.Selection = accent.Alpha(0.14)
 	// A neutral focus ring keeps forms calm; the accent is reserved for the
-	// selected state and primary actions. High contrast strengthens it later.
-	t.Focus = t.Text.Alpha(0.30)
+	// selected state and primary actions. Solid accent reaches 4.5:1 or better
+	// on the gallery surface, above the 3:1 focus requirement.
+	t.Focus = accent
 	t.Scrollbar = t.Text.Alpha(.26)
 	t.Radius = 10
 	return t
@@ -88,7 +107,9 @@ func viewerPalette() *ui.Theme {
 	t.Warning = ui.Hex("#e8b567")
 	t.Success = ui.Hex("#74c69d")
 	t.Selection = accent.Alpha(0.20)
-	t.Focus = accent.Alpha(0.72)
+	// The darkroom controls need the same visible keyboard state as the gallery;
+	// the accent ring has ample contrast against the neutral black chrome.
+	t.Focus = accent
 	t.Scrollbar = t.Text.Alpha(.28)
 	t.Radius = 10
 	return t
@@ -101,7 +122,7 @@ func applyThemePreferences(t *ui.Theme, c *ui.Context) {
 	if p.HighContrast {
 		t.Border = t.Border.Mix(t.Text, 0.45)
 		t.TextMuted = t.TextMuted.Mix(t.Text, 0.4)
-		t.Focus.A = 255
+		t.Focus = t.Text
 		t.Scrollbar = t.Scrollbar.Alpha(1.6)
 	}
 	if s := p.TextScale; s > 0 && s != 1 {

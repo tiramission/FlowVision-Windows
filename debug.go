@@ -525,7 +525,9 @@ func debugCommand(name, arg string) {
 		app.beginBindingCapture(arg)
 	case "closeui":
 		app.closeViewer()
-		app.showSettings = false
+		if app.showSettings {
+			app.closeSettingsNow()
+		}
 		app.showHelp = false
 		app.showAbout = false
 		app.updateOpen = false
