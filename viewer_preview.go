@@ -121,10 +121,15 @@ func loadViewerPreviewFallback(it *Item, d dimInfo, cachePath string) (*viewerPr
 }
 
 func viewerPreviewCachePath(it *Item, mode string) string {
+	if previewDir == "" {
+		// No cache directory: a relative path here would write the preview next
+		// to the process working directory instead.
+		return ""
+	}
 	if mode != viewerPreviewHQMode {
 		mode = viewerPreviewFastMode
 	}
-	return filepath.Join(thumbDir, fmt.Sprintf("%s-preview-%s-%d-%d-%s.jpg",
+	return filepath.Join(previewDir, fmt.Sprintf("%s-preview-%s-%d-%d-%s.jpg",
 		it.ID, mode, it.Mtime, it.Size, viewerPreviewCacheVer))
 }
 
@@ -172,34 +177,38 @@ func loadViewerPreviewData(it *Item) (*viewerPreviewResult, error) {
 	}
 
 	p := viewerPreviewCachePath(it, mode)
-	if data, ok := readFreshCache(p, it.Mtime); ok {
-		decodeStart := time.Now()
-		if img, err := jpeg.Decode(bytes.NewReader(data)); err == nil {
-			return &viewerPreviewResult{
-				Img:      img,
-				Bytes:    int64(len(data)),
-				CacheHit: true,
-				DecodeMs: time.Since(decodeStart).Milliseconds(),
-			}, nil
+	if p != "" {
+		if data, ok := readFreshCache(p, it.Mtime); ok {
+			decodeStart := time.Now()
+			if img, err := jpeg.Decode(bytes.NewReader(data)); err == nil {
+				return &viewerPreviewResult{
+					Img:      img,
+					Bytes:    int64(len(data)),
+					CacheHit: true,
+					DecodeMs: time.Since(decodeStart).Milliseconds(),
+				}, nil
+			}
+			// A truncated cache entry must not poison every later open.
+			_ = os.Remove(p)
 		}
-		// A truncated cache entry must not poison every later open.
-		_ = os.Remove(p)
 	}
 
 	previewMu.Lock()
-	if data, ok := readFreshCache(p, it.Mtime); ok {
-		previewMu.Unlock()
-		decodeStart := time.Now()
-		if img, err := jpeg.Decode(bytes.NewReader(data)); err == nil {
-			return &viewerPreviewResult{
-				Img:      img,
-				Bytes:    int64(len(data)),
-				CacheHit: true,
-				DecodeMs: time.Since(decodeStart).Milliseconds(),
-			}, nil
+	if p != "" {
+		if data, ok := readFreshCache(p, it.Mtime); ok {
+			previewMu.Unlock()
+			decodeStart := time.Now()
+			if img, err := jpeg.Decode(bytes.NewReader(data)); err == nil {
+				return &viewerPreviewResult{
+					Img:      img,
+					Bytes:    int64(len(data)),
+					CacheHit: true,
+					DecodeMs: time.Since(decodeStart).Milliseconds(),
+				}, nil
+			}
+			_ = os.Remove(p)
+			previewMu.Lock()
 		}
-		_ = os.Remove(p)
-		previewMu.Lock()
 	}
 	defer previewMu.Unlock()
 
@@ -276,6 +285,9 @@ func loadViewerPreviewData(it *Item) (*viewerPreviewResult, error) {
 }
 
 func writePreviewCache(p string, data []byte) {
+	if p == "" {
+		return
+	}
 	tmp := fmt.Sprintf("%s.tmp-%d", p, time.Now().UnixNano())
 	if err := os.WriteFile(tmp, data, 0o644); err == nil {
 		if err := os.Rename(tmp, p); err != nil {

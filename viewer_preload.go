@@ -8,7 +8,11 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-const viewerPreloadBudget = 96 << 20
+// viewerPreloadBudget is the bitmap budget for the neighbouring previews. A
+// 2560×1440 preview is 14.7 MB and a 2560×2560 one 26 MB, so 384 MB keeps the
+// configured 8 neighbours per side on tall images instead of silently pruning
+// them down to the first few.
+const viewerPreloadBudget = 384 << 20
 
 type viewerPreloadEntry struct {
 	Bmp   *ui.Bitmap
@@ -137,6 +141,9 @@ func (a *App) scheduleViewerPreload() {
 	if start {
 		go a.runViewerPreloadWorker(epoch)
 	}
+	// With no neighbours to decode (none, all cached, or preload turned off)
+	// the original of the current image can start right away.
+	a.maybeAutoViewerFullRes()
 }
 
 func (a *App) runViewerPreloadWorker(epoch int) {
@@ -187,7 +194,13 @@ func (a *App) runViewerPreloadWorker(epoch int) {
 		} else if bmp != nil {
 			bmp.ReleasePixels()
 		}
+		drained := a.viewerPreloadEpoch == epoch && len(a.viewerPreloadQueue) == 0 && len(a.viewerPreloadLoading) == 0
 		a.viewerPreloadMu.Unlock()
+		if drained {
+			// The neighbours are ready; the current image may now warm its
+			// original without competing with them.
+			a.update(func() { a.maybeAutoViewerFullRes() })
+		}
 	}
 }
 

@@ -15,6 +15,7 @@ import (
 
 func TestViewerPreviewFastDirectAndDiskCache(t *testing.T) {
 	thumbDir = t.TempDir()
+	previewDir = thumbDir
 	t.Setenv("FLOWVISION_VIEWER_PREVIEW", "fast")
 	t.Setenv("FLOWVISION_VIEWER_SCALER", "fast")
 	dir := t.TempDir()
@@ -117,6 +118,7 @@ func TestViewerPreviewSlotReusesBitmap(t *testing.T) {
 
 func TestViewerPreviewHQAndFastDiffer(t *testing.T) {
 	thumbDir = t.TempDir()
+	previewDir = thumbDir
 	t.Setenv("FLOWVISION_VIEWER_PREVIEW", "hq")
 	t.Setenv("FLOWVISION_VIEWER_SCALER", "hq")
 	t.Setenv("FLOWVISION_VIEWER_CACHE", "off")
@@ -502,6 +504,7 @@ func TestViewerOversizePreviewFallback(t *testing.T) {
 		t.Skipf("oversize fixture unavailable: %v", err)
 	}
 	thumbDir = t.TempDir()
+	previewDir = thumbDir
 	t.Setenv("FLOWVISION_VIEWER_CACHE", "off")
 	it := &Item{
 		ID: "oversize-preview-test", Name: "80mp.jpg", Kind: "image",

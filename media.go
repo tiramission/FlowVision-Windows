@@ -69,9 +69,12 @@ var previewMu sync.Mutex
 func previewBytes(it *Item) ([]byte, error) {
 	previewMu.Lock()
 	defer previewMu.Unlock()
-	p := filepath.Join(thumbDir, fmt.Sprintf("%s-preview-%d-%d.jpg", it.ID, it.Mtime, it.Size))
-	if data, ok := readFreshCache(p, it.Mtime); ok {
-		return data, nil
+	p := ""
+	if previewDir != "" {
+		p = filepath.Join(previewDir, fmt.Sprintf("%s-preview-%d-%d.jpg", it.ID, it.Mtime, it.Size))
+		if data, ok := readFreshCache(p, it.Mtime); ok {
+			return data, nil
+		}
 	}
 	d := imageDims(it.Path, it.Mtime)
 	if d.W > 0 && d.H > 0 && d.W*d.H > viewerPreviewMaxPixels {
@@ -104,10 +107,12 @@ func previewBytes(it *Item) ([]byte, error) {
 	if err := jpeg.Encode(&buf, dst, &jpeg.Options{Quality: 90}); err != nil {
 		return nil, err
 	}
-	tmp := fmt.Sprintf("%s.tmp-%d", p, time.Now().UnixNano())
-	if err := os.WriteFile(tmp, buf.Bytes(), 0o644); err == nil {
-		if err := os.Rename(tmp, p); err != nil {
-			_ = os.Remove(tmp)
+	if p != "" {
+		tmp := fmt.Sprintf("%s.tmp-%d", p, time.Now().UnixNano())
+		if err := os.WriteFile(tmp, buf.Bytes(), 0o644); err == nil {
+			if err := os.Rename(tmp, p); err != nil {
+				_ = os.Remove(tmp)
+			}
 		}
 	}
 	return buf.Bytes(), nil

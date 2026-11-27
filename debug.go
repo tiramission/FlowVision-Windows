@@ -55,6 +55,12 @@ type debugState struct {
 	ThumbReady               int      `json:"thumbReady"`
 	ThumbPreview             int      `json:"thumbPreview"`
 	ThumbCacheMB             float64  `json:"thumbCacheMB"`
+	CacheThumbFiles          int      `json:"cacheThumbFiles"`
+	CachePreviewFiles        int      `json:"cachePreviewFiles"`
+	ThumbPrefetchEnabled     bool     `json:"thumbPrefetchEnabled"`
+	ThumbPrefetchNext        int      `json:"thumbPrefetchNext"`
+	ThumbPrefetchActive      int      `json:"thumbPrefetchActive"`
+	ThumbPrefetchTotal       int      `json:"thumbPrefetchTotal"`
 	ThumbBackend             string   `json:"thumbBackend"`
 	Goroutines               int      `json:"goroutines"`
 	Sidebar                  bool     `json:"sidebar"`
@@ -137,6 +143,14 @@ func debugSnapshot() debugState {
 		}
 	}
 	st.ThumbCacheMB = float64(app.thumbBytes) / (1 << 20)
+	st.CacheThumbFiles = countCacheFiles(thumbDir)
+	st.CachePreviewFiles = countCacheFiles(previewDir)
+	st.ThumbPrefetchEnabled = app.settings.ThumbPrefetch
+	st.ThumbPrefetchNext = app.prefetchNext
+	st.ThumbPrefetchActive = app.prefetchActive
+	if t := app.tab(); t != nil {
+		st.ThumbPrefetchTotal = len(t.All)
+	}
 	st.ThumbBackend = thumbBackendMode()
 	st.Goroutines = runtime.NumGoroutine()
 	st.Recursive = app.settings.Recursive

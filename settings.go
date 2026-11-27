@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -40,7 +41,9 @@ type Settings struct {
 	Tabs                []TabState  `json:"tabs"`
 	ActiveTab           int         `json:"activeTab"`
 	CacheLimitMB        int         `json:"cacheLimitMB"`
+	ThumbPrefetch       bool        `json:"thumbPrefetch"`
 	ViewerPreload       int         `json:"viewerPreload"`
+	ViewerAutoFullRes   bool        `json:"viewerAutoFullRes"`
 	ViewerHUD           string      `json:"viewerHUD"` // off | auto | always
 	SidePrev            SideBinding `json:"sidePrev"`
 	SideNext            SideBinding `json:"sideNext"`
@@ -66,7 +69,9 @@ func defaultSettings() Settings {
 		PlayVideo:           true,
 		LoopVideo:           false,
 		CacheLimitMB:        1500,
+		ThumbPrefetch:       true,
 		ViewerPreload:       2,
+		ViewerAutoFullRes:   true,
 		ViewerHUD:           "auto",
 		SidePrev:            defaultSidePrev(),
 		SideNext:            defaultSideNext(),
@@ -97,6 +102,8 @@ func initSettings() {
 // parseSettings merges a stored document over the defaults, so a file written
 // by an older build (or edited by hand) keeps sane values for omitted fields.
 func parseSettings(data []byte) (Settings, bool) {
+	// An editor that saves as "UTF-8 with BOM" must not reset every preference.
+	data = bytes.TrimPrefix(data, []byte("\xef\xbb\xbf"))
 	def := defaultSettings()
 	s := def
 	if json.Unmarshal(data, &s) != nil {
@@ -108,6 +115,12 @@ func parseSettings(data []byte) (Settings, bool) {
 	if json.Unmarshal(data, &fields) == nil {
 		if _, ok := fields["viewerPreload"]; !ok {
 			s.ViewerPreload = def.ViewerPreload
+		}
+		if _, ok := fields["thumbPrefetch"]; !ok {
+			s.ThumbPrefetch = def.ThumbPrefetch
+		}
+		if _, ok := fields["viewerAutoFullRes"]; !ok {
+			s.ViewerAutoFullRes = def.ViewerAutoFullRes
 		}
 	}
 	return mergeSettings(def, s), true

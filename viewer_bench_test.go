@@ -53,6 +53,7 @@ func viewerBenchItems(b *testing.B) []*Item {
 
 func BenchmarkViewerPreviewCold(b *testing.B) {
 	thumbDir = b.TempDir()
+	previewDir = thumbDir
 	b.Setenv("FLOWVISION_VIEWER_PREVIEW", "fast")
 	b.Setenv("FLOWVISION_VIEWER_SCALER", "fast")
 	b.Setenv("FLOWVISION_VIEWER_CACHE", "off")
@@ -74,6 +75,7 @@ func BenchmarkViewerPreviewCold(b *testing.B) {
 
 func BenchmarkViewerPreviewWarm(b *testing.B) {
 	thumbDir = b.TempDir()
+	previewDir = thumbDir
 	b.Setenv("FLOWVISION_VIEWER_PREVIEW", "fast")
 	b.Setenv("FLOWVISION_VIEWER_SCALER", "fast")
 	items := viewerBenchItems(b)

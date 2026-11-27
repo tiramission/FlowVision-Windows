@@ -208,6 +208,7 @@ func (a *App) gridView(c *ui.Context, tab *Tab) {
 		}
 	}
 	a.endThumbFrame(frame)
+	a.pumpThumbPrefetch(tab)
 
 	scroll := ui.Scroll(c).Fill().TrackScroll(&tab.Scroll).Padding(16).Gap(0).Key("media-grid-scroll")
 	scroll.Children(func() {

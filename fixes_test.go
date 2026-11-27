@@ -280,6 +280,7 @@ func TestEXIFSubIFD(t *testing.T) {
 func TestConcurrentThumbsAndRange(t *testing.T) {
 	dir := t.TempDir()
 	thumbDir = t.TempDir()
+	previewDir = thumbDir
 	thumbSlots = make(chan struct{}, 4)
 	path := filepath.Join(dir, "big.png")
 	writePNG(t, path, 600, 300)

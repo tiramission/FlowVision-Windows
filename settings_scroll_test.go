@@ -40,3 +40,30 @@ func TestSettingsScrollsToViewerHUD(t *testing.T) {
 		_ = f.Close()
 	}
 }
+
+func TestSettingsShowsViewerPreloadScope(t *testing.T) {
+	a := newViewTestApp()
+	a.openSettings()
+	a.settingsUI.Category = "control"
+	tt := ui.NewTester(a.view, 1320, 900)
+	tt.Frame()
+
+	// The viewer group sits below the fold; scroll until the preload rows show.
+	for i := 0; i < 8; i++ {
+		if tt.HasText("自动载入当前图原图") {
+			break
+		}
+		tt.Wheel(800, 480, 0, 400)
+		tt.Advance(600 * time.Millisecond)
+		tt.Frame()
+	}
+	if !tt.HasText("预加载相邻图片") {
+		t.Fatalf("neighbour preload row missing: %q", tt.Texts())
+	}
+	if !tt.HasText("自动载入当前图原图") {
+		t.Fatalf("automatic original row missing: %q", tt.Texts())
+	}
+	if !tt.HasText("2560 预览 · 默认 2 张") {
+		t.Fatalf("preload row does not label the preview size: %q", tt.Texts())
+	}
+}

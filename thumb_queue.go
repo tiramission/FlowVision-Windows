@@ -20,6 +20,10 @@ type thumbTask struct {
 	frame    uint64
 	seq      uint64
 	stage    thumbStage
+	// preload marks a background fill of the rest of the folder. No grid frame
+	// asks for it, so retain keeps it; only dropPreload ends it when the
+	// folder goes away.
+	preload bool
 }
 
 // thumbQueue is a small scheduling layer for thumbnail work. The grid updates
@@ -81,12 +85,30 @@ func (q *thumbQueue) touch(key string, priority float64, frame uint64) bool {
 
 // retain drops waiting tasks that the latest grid frame did not touch. A
 // running task cannot be interrupted, but it keeps its cache result.
+// Background fills are exempt: they are not tied to a frame, only to the
+// folder that queued them.
 func (q *thumbQueue) retain(frame uint64) []string {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	var dropped []string
 	for key, t := range q.pending {
-		if t.frame < frame {
+		if t.frame < frame && !t.preload {
+			delete(q.pending, key)
+			dropped = append(dropped, key)
+		}
+	}
+	return dropped
+}
+
+// dropPreload removes waiting background fills and returns their keys so the
+// caller can clear its own bookkeeping. A running fill is left alone: it only
+// warms the disk cache, so its result stays valid after the folder changes.
+func (q *thumbQueue) dropPreload() []string {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	var dropped []string
+	for key, t := range q.pending {
+		if t.preload {
 			delete(q.pending, key)
 			dropped = append(dropped, key)
 		}

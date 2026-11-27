@@ -302,8 +302,8 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 						},
 						{
 							ID: "viewer-preload", Title: "预加载相邻图片",
-							Description: "打开图片时预先解码前后各若干张，切换更快；0 关闭，同时关闭悬停预取",
-							Keywords:    []string{"preload", "cache", "预加载", "缓存", "相邻", "悬停"},
+							Description: "打开图片时预先解码前后各若干张的 2560 预览（不是原图），切换更快；0 关闭，同时关闭悬停预取",
+							Keywords:    []string{"preload", "cache", "预加载", "缓存", "相邻", "悬停", "2560"},
 							Leading:     settingsIcon(lucide.Images()),
 							Stacked:     true,
 							Build: func(c *ui.Context) {
@@ -313,8 +313,17 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 										Label("前后各预加载（张）").Width(180)
 									components.Text(c, "张").FontSize(10.5).TextColor(th.TextMuted)
 									ui.Spacer(c)
-									components.Text(c, "默认 2 张").FontSize(10).TextColor(th.TextMuted)
+									components.Text(c, "2560 预览 · 默认 2 张").FontSize(10).TextColor(th.TextMuted)
 								})
+							},
+						},
+						{
+							ID: "viewer-auto-fullres", Title: "自动载入当前图原图",
+							Description: "相邻预览完成后在后台解码这张的原图，按 1 或放大到 100% 立即可用；只处理当前这张，切图即放弃，超大图会多占内存",
+							Keywords:    []string{"fullres", "original", "原图", "1:1", "100%", "实际大小", "像素"},
+							Leading:     settingsIcon(lucide.Maximize2()),
+							Build: func(c *ui.Context) {
+								components.Switch(c, &a.draft.ViewerAutoFullRes, "自动载入当前图原图", components.SwitchOptions{HideLabel: true, Compact: true})
 							},
 						},
 						{
@@ -355,8 +364,17 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 					ID: "cache", Title: "缩略图缓存",
 					Items: []components.SettingsItem{
 						{
+							ID: "thumb-prefetch", Title: "后台预加载整个文件夹",
+							Description: "可见卡片加载完后继续把当前文件夹剩余的缩略图存进磁盘缓存；只写缓存不占内存，切换文件夹或关闭开关即停止",
+							Keywords:    []string{"prefetch", "preload", "background", "预加载", "后台", "整目录"},
+							Leading:     settingsIcon(lucide.Download()),
+							Build: func(c *ui.Context) {
+								components.Switch(c, &a.draft.ThumbPrefetch, "后台预加载整个文件夹", components.SwitchOptions{HideLabel: true, Compact: true})
+							},
+						},
+						{
 							ID: "cache-limit", Title: "缓存上限",
-							Description: fmt.Sprintf("当前占用 %s；超出上限后按最近使用清理", (MediaSvc{}).FormatSize(a.cacheInfo.Bytes)),
+							Description: fmt.Sprintf("网格缩略图与查看器预览共用一个额度，当前占用 %s；超出上限后按最近使用清理", (MediaSvc{}).FormatSize(a.cacheInfo.Bytes)),
 							Keywords:    []string{"cache", "disk", "缓存", "磁盘"},
 							Leading:     settingsIcon(lucide.HardDrive()),
 							Stacked:     true,
@@ -386,7 +404,7 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 						},
 						{
 							ID: "cache-clear", Title: "清理缩略图",
-							Description: fmt.Sprintf("%d 个缓存文件；清理后会在浏览时重新生成", a.cacheInfo.Files),
+							Description: fmt.Sprintf("%d 个缓存文件（thumbs 网格缩略图 + previews 查看器预览）；清理后会在浏览时重新生成", a.cacheInfo.Files),
 							Keywords:    []string{"clear", "cache", "清理", "缓存"},
 							Leading:     settingsIcon(lucide.BrushCleaning()),
 							Stacked:     true,

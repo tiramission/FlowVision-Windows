@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 	"os"
+	"sync/atomic"
 	"time"
 
 	"github.com/egoist/mygo/ui"
@@ -27,11 +28,40 @@ func viewerFullResKey(it *Item) string {
 	return fmt.Sprintf("%s|%d|%d", it.ID, it.Mtime, it.Size)
 }
 
-// requestViewerFullRes decodes and keeps one full-resolution bitmap. The
-// preview stays visible while it runs. It never marks the viewer as 1:1
-// preemptively: actual-size callers either apply immediately when the bitmap is
-// already ready, or wait for the pending flag below.
+var (
+	// viewerFullResSlots serializes original decodes. Flipping through a folder
+	// must never run several multi-hundred-megabyte decodes at once.
+	viewerFullResSlots = make(chan struct{}, 1)
+	// viewerFullResWanted holds the key of the original the viewer is waiting
+	// for. A queued decode compares it again after taking the slot and drops
+	// itself when the user has already moved on, so a fast sequence of steps
+	// leaves at most one wasted decode behind.
+	viewerFullResWanted atomic.Value // string
+)
+
+func viewerFullResIsWanted(key string) bool {
+	want, _ := viewerFullResWanted.Load().(string)
+	return want != "" && want == key
+}
+
+// requestViewerFullRes decodes the original for an explicit 1:1 request. The
+// preview stays visible while it runs and the "loading" notice only appears
+// when the decode takes long enough to notice.
 func (a *App) requestViewerFullRes() {
+	a.startViewerFullRes(false)
+}
+
+// requestViewerFullResQuiet warms the original in the background without any
+// notice; a failure leaves the preview in place silently.
+func (a *App) requestViewerFullResQuiet() {
+	a.startViewerFullRes(true)
+}
+
+// startViewerFullRes decodes and keeps one full-resolution bitmap. It never
+// marks the viewer as 1:1 preemptively: actual-size callers either apply
+// immediately when the bitmap is already ready, or wait for the pending flag
+// below.
+func (a *App) startViewerFullRes(silent bool) {
 	it := a.viewer.Item
 	if it == nil || it.Kind != "image" {
 		return
@@ -70,8 +100,20 @@ func (a *App) requestViewerFullRes() {
 	gen := a.viewer.Gen
 	key := viewerFullResKey(it)
 	a.viewer.FullResLoading = true
-	a.startViewerFullTimer(gen)
+	viewerFullResWanted.Store(key)
+	if !silent {
+		a.startViewerFullTimer(gen)
+	}
 	go func() {
+		if !viewerFullResIsWanted(key) {
+			return
+		}
+		viewerFullResSlots <- struct{}{}
+		defer func() { <-viewerFullResSlots }()
+		if !viewerFullResIsWanted(key) {
+			// The viewer moved on while this decode waited its turn.
+			return
+		}
 		bmp, bytes, err := decodeViewerFullRes(it)
 		a.update(func() {
 			if a.viewer.Gen != gen || a.viewer.Item != it || viewerFullResKey(a.viewer.Item) != key {
@@ -88,7 +130,9 @@ func (a *App) requestViewerFullRes() {
 				}
 				a.viewer.FullResUnsupported = true
 				a.clearViewerPendingActualSize()
-				a.notifyViewer("fullres", "原图载入失败："+err.Error(), viewerNoticeError, 4*time.Second)
+				if !silent {
+					a.notifyViewer("fullres", "原图载入失败："+err.Error(), viewerNoticeError, 4*time.Second)
+				}
 				a.refresh()
 				return
 			}
@@ -158,6 +202,7 @@ func (a *App) stopViewerFullTimer() {
 
 func (a *App) clearViewerFullRes() {
 	a.stopViewerFullTimer()
+	viewerFullResWanted.Store("")
 	if a.viewerFullRes != nil {
 		if a.viewerFullRes.Bmp != nil {
 			a.viewerFullRes.Bmp.ReleasePixels()
@@ -334,4 +379,31 @@ func (a *App) maybeRequestViewerFullRes() {
 	if viewerBitmapPercentValue(bw, bh, a.viewer.Angle, a.viewer.Zoom, w, h) >= 125 {
 		a.requestViewerFullRes()
 	}
+}
+
+// maybeAutoViewerFullRes warms the original of the image on screen so pressing
+// 1 is instant. It waits until the neighbouring 2560 previews are done, so
+// paging always stays ahead of the original, and it does nothing when the
+// preview already is the full image. Returns whether a decode was started.
+func (a *App) maybeAutoViewerFullRes() bool {
+	if !a.settings.ViewerAutoFullRes || !a.viewer.Open || a.viewer.Item == nil {
+		return false
+	}
+	if a.viewer.Item.Kind != "image" || a.viewer.Bitmap == nil {
+		return false
+	}
+	if a.viewer.FullResReady || a.viewer.FullResLoading || a.viewer.FullResUnsupported {
+		return false
+	}
+	if !a.viewerNeedsFullResForActualSize() {
+		return false
+	}
+	a.viewerPreloadMu.Lock()
+	busy := len(a.viewerPreloadQueue) > 0 || len(a.viewerPreloadLoading) > 0
+	a.viewerPreloadMu.Unlock()
+	if busy {
+		return false
+	}
+	a.requestViewerFullResQuiet()
+	return a.viewer.FullResLoading
 }

@@ -128,6 +128,7 @@ func TestSRationalAndExifOrientationPreviewScale(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "wide.jpg")
 	writeOrientedJPEG(t, path, 5000, 1000, 6)
 	thumbDir = t.TempDir()
+	previewDir = thumbDir
 	st, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)

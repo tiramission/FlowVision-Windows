@@ -31,6 +31,7 @@ func writePNG(t *testing.T, path string, w, h int) {
 func TestBrowseAndThumbs(t *testing.T) {
 	dir := t.TempDir()
 	thumbDir = t.TempDir()
+	previewDir = thumbDir
 	thumbSlots = make(chan struct{}, 4)
 
 	wide := filepath.Join(dir, "wide.png")

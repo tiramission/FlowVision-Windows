@@ -31,11 +31,17 @@ import (
 
 var (
 	thumbDir     string
+	previewDir   string
 	thumbOnce    sync.Once
 	thumbSlots   chan struct{}
 	thumbWrites  int64
 	thumbWaiters int64
 	thumbLocks   sync.Map // cache path -> *sync.Mutex, one writer per thumbnail
+
+	// thumbPrefetchSlots keeps the folder fill from occupying every worker:
+	// two background decodes leave the rest free for cards that scroll in.
+	thumbPrefetchSlots = make(chan struct{}, 2)
+	thumbLastTrim      atomic.Int64 // unix nanos of the last automatic trim
 )
 
 // lockThumb serializes the generation of one cache file. Without it, several
@@ -62,11 +68,48 @@ func initThumbs() {
 		logf("thumbs: cache dir: %v", err)
 		return
 	}
+	// Two buckets under one budget: the grid's cards and the viewer's 2560
+	// previews have very different lifetimes and sizes, so keeping them apart
+	// makes both the folder and the cleanup readable.
 	thumbDir = filepath.Join(cacheDir, "thumbs")
-	if err := os.MkdirAll(thumbDir, 0o755); err != nil {
-		logf("thumbs: mkdir: %v", err)
+	previewDir = filepath.Join(cacheDir, "previews")
+	for _, dir := range []string{thumbDir, previewDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			logf("thumbs: mkdir %s: %v", dir, err)
+		}
 	}
+	go migrateLegacyPreviews()
 	go trimThumbCache()
+}
+
+// migrateLegacyPreviews moves previews written by older builds, which shared
+// one directory with the grid thumbnails. Previews cost a full decode to
+// rebuild, so moving them is worth the one startup pass.
+func migrateLegacyPreviews() {
+	if thumbDir == "" || previewDir == "" {
+		return
+	}
+	entries, err := os.ReadDir(thumbDir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.Contains(e.Name(), "-preview-") {
+			continue
+		}
+		_ = os.Rename(filepath.Join(thumbDir, e.Name()), filepath.Join(previewDir, e.Name()))
+	}
+}
+
+// cacheBuckets lists the directories that share the cache size budget.
+func cacheBuckets() []string {
+	out := make([]string, 0, 2)
+	for _, dir := range []string{thumbDir, previewDir} {
+		if dir != "" {
+			out = append(out, dir)
+		}
+	}
+	return out
 }
 
 func thumbBudget(size int) int {
@@ -102,6 +145,11 @@ const thumbCacheVersion = "v2"
 // getThumb returns the JPEG bytes of a thumbnail for it, generating and
 // caching them on first use.
 func getThumb(ctx context.Context, it *Item, size int) ([]byte, error) {
+	if thumbDir == "" {
+		// initThumbs could not resolve a cache directory. Decoding here would
+		// write the cache file next to the executable instead.
+		return nil, fmt.Errorf("thumbnail cache directory is unavailable")
+	}
 	size = thumbBudget(size)
 	p := thumbPath(it, size)
 	if data, ok := readFreshCache(p, it.Mtime); ok {
@@ -137,9 +185,24 @@ func getThumb(ctx context.Context, it *Item, size int) ([]byte, error) {
 		}
 	}
 	if atomic.AddInt64(&thumbWrites, 1)%150 == 0 {
-		go trimThumbCache()
+		go trimThumbCacheIfDue()
 	}
 	return data, nil
+}
+
+// trimThumbCacheIfDue rate-limits the cache walk. A folder fill writes
+// thousands of thumbnails, and walking the cache directory every 150 writes
+// would compete with the fill itself.
+func trimThumbCacheIfDue() {
+	now := time.Now().UnixNano()
+	last := thumbLastTrim.Load()
+	if last != 0 && now-last < int64(20*time.Second) {
+		return
+	}
+	if !thumbLastTrim.CompareAndSwap(last, now) {
+		return
+	}
+	trimThumbCache()
 }
 
 // brokenThumb draws the card used when every decoder rejects a file. It keeps
@@ -475,31 +538,40 @@ func placeholderThumb(it *Item, size int) ([]byte, error) {
 // ----------------------------------------------------------------- cache trim
 
 func thumbCacheInfo() CacheInfo {
-	info := CacheInfo{Dir: thumbDir}
-	_ = filepath.WalkDir(thumbDir, func(p string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
+	info := CacheInfo{}
+	if thumbDir != "" {
+		info.Dir = filepath.Dir(thumbDir)
+	}
+	for _, dir := range cacheBuckets() {
+		_ = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return nil
+			}
+			if st, e := d.Info(); e == nil {
+				info.Files++
+				info.Bytes += st.Size()
+			}
 			return nil
-		}
-		if st, e := d.Info(); e == nil {
-			info.Files++
-			info.Bytes += st.Size()
-		}
-		return nil
-	})
+		})
+	}
 	return info
 }
 
 func clearThumbCache() (bool, error) {
 	thumbCacheMu.Lock()
 	defer thumbCacheMu.Unlock()
-	entries, err := os.ReadDir(thumbDir)
-	if err != nil {
-		return false, err
+	cleared := false
+	for _, dir := range cacheBuckets() {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		cleared = true
+		for _, e := range entries {
+			_ = os.Remove(filepath.Join(dir, e.Name()))
+		}
 	}
-	for _, e := range entries {
-		_ = os.Remove(filepath.Join(thumbDir, e.Name()))
-	}
-	return true, nil
+	return cleared, nil
 }
 
 var thumbCacheMu sync.Mutex
@@ -519,18 +591,20 @@ func trimThumbCache() {
 	}
 	var files []ageFile
 	var total int64
-	_ = filepath.WalkDir(thumbDir, func(p string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
+	for _, dir := range cacheBuckets() {
+		_ = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return nil
+			}
+			st, e := d.Info()
+			if e != nil {
+				return nil
+			}
+			total += st.Size()
+			files = append(files, ageFile{p, st.Size(), st.ModTime()})
 			return nil
-		}
-		st, e := d.Info()
-		if e != nil {
-			return nil
-		}
-		total += st.Size()
-		files = append(files, ageFile{p, st.Size(), st.ModTime()})
-		return nil
-	})
+		})
+	}
 	if total <= limit {
 		return
 	}
@@ -553,6 +627,25 @@ func parseIntDefault(s string, def int) int {
 	n, err := strconv.Atoi(strings.TrimSpace(s))
 	if err != nil {
 		return def
+	}
+	return n
+}
+
+// countCacheFiles reports how many files a bucket holds. The debug endpoint
+// uses it to show the split between grid thumbnails and viewer previews.
+func countCacheFiles(dir string) int {
+	if dir == "" {
+		return 0
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, e := range entries {
+		if !e.IsDir() {
+			n++
+		}
 	}
 	return n
 }

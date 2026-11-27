@@ -332,6 +332,13 @@ type App struct {
 	thumbClock          int64
 	thumbPendingRefresh bool
 
+	// Background fill of the active folder. It is bound to (tab, Gen), so a
+	// tab switch or a new listing drops whatever is still queued.
+	prefetchTab    *Tab
+	prefetchGen    int
+	prefetchNext   int
+	prefetchActive int
+
 	treeOpen     map[string]*bool
 	treeRootOpen map[string]*bool
 	treeLoaded   map[string]bool
@@ -350,8 +357,18 @@ type thumbEntry struct {
 }
 
 const (
-	thumbCacheMax      = 420
-	thumbCacheBytesMax = 256 << 20
+	thumbCacheMax = 1200
+	// thumbCacheBytesMax is the in-memory bitmap budget for grid cards. It
+	// covers a full screen of very large thumbnails (640 px at 12 columns)
+	// several times over, so scrolling back never decodes again.
+	thumbCacheBytesMax = 512 << 20
+
+	// thumbPrefetchWindow bounds how many background fills are outstanding so
+	// the queue only ever holds a couple of dozen of them; thumbPrefetchBase
+	// keeps them behind every visible card (whose priority is a viewport
+	// distance in DIP) and ahead of nothing else.
+	thumbPrefetchWindow = 48
+	thumbPrefetchBase   = 1e9
 )
 
 func newApp() *App {
@@ -876,7 +893,9 @@ func settingsEditingEqual(a, b Settings) bool {
 		a.SidePrev == b.SidePrev &&
 		a.SideNext == b.SideNext &&
 		a.SidePrevHold == b.SidePrevHold &&
-		a.SideNextHold == b.SideNextHold
+		a.SideNextHold == b.SideNextHold &&
+		a.ThumbPrefetch == b.ThumbPrefetch &&
+		a.ViewerAutoFullRes == b.ViewerAutoFullRes
 }
 
 func (a *App) settingsDirty() bool {
@@ -993,6 +1012,9 @@ func (a *App) applySettings() {
 	a.treeGen++
 	a.treeLoaded = map[string]bool{}
 	a.treeKids = map[string][]TreeEntry{}
+	if !s.ThumbPrefetch {
+		a.cancelThumbPrefetch()
+	}
 	a.reloadActive()
 	// The active tab's sort is part of persisted tab state, not only the
 	// defaults in Settings. Write it after the active tab has been updated.
@@ -1050,6 +1072,14 @@ func (a *App) clearCache() {
 	a.thumbs = map[string]*thumbEntry{}
 	a.thumbLoad = map[string]bool{}
 	a.thumbBytes = 0
+	a.cancelThumbPrefetch()
+	if t := a.tab(); t != nil {
+		// A manual clear should leave the cache empty until the user browses,
+		// so mark the current listing as already filled.
+		a.prefetchTab = t
+		a.prefetchGen = t.Gen
+		a.prefetchNext = len(t.All)
+	}
 	if a.thumbQueue != nil {
 		a.thumbQueue.reset()
 	}
@@ -2004,7 +2034,7 @@ func (a *App) ensureThumb(it *Item, size int, priority float64, frame uint64) {
 	if e := a.thumbs[key]; e != nil && !e.Preview {
 		return
 	}
-	a.submitThumbTask(key+"|f", key, it, size, priority, frame, thumbStageFinal)
+	a.submitThumbTask(key+"|f", key, it, size, priority, frame, thumbStageFinal, false)
 	if e := a.thumbs[key]; e == nil && it.HasThumb {
 		previewSize := size
 		if previewSize > 160 {
@@ -2012,16 +2042,24 @@ func (a *App) ensureThumb(it *Item, size int, priority float64, frame uint64) {
 		}
 		// Preview is closer to the viewport center than the final decode, so
 		// it runs first and paints the card while WIC works on the full image.
-		a.submitThumbTask(key+"|p", key, it, previewSize, priority-1, frame, thumbStagePreview)
+		a.submitThumbTask(key+"|p", key, it, previewSize, priority-1, frame, thumbStagePreview, false)
 	}
 }
 
-func (a *App) submitThumbTask(taskKey, base string, it *Item, size int, priority float64, frame uint64, stage thumbStage) {
+func (a *App) submitThumbTask(taskKey, base string, it *Item, size int, priority float64, frame uint64, stage thumbStage, preload bool) bool {
+	if thumbDir == "" {
+		// Without a cache directory a decoded thumbnail cannot be stored, so do
+		// not start workers. Headless view tests take this path.
+		return false
+	}
+	if a.thumbLoad == nil {
+		a.thumbLoad = map[string]bool{}
+	}
 	if a.thumbLoad[taskKey] {
 		if a.thumbQueue != nil {
 			a.thumbQueue.touch(taskKey, priority, frame)
 		}
-		return
+		return false
 	}
 	if a.thumbQueue == nil {
 		a.thumbQueue = newThumbQueue()
@@ -2036,10 +2074,18 @@ func (a *App) submitThumbTask(taskKey, base string, it *Item, size int, priority
 		priority: priority,
 		frame:    frame,
 		stage:    stage,
+		preload:  preload,
 	})
+	return true
 }
 
 func (a *App) startThumbWorkers() {
+	if a.win == nil {
+		// Results are applied on the window's thread, so there is nothing to
+		// start without a window. The headless view builder runs on one thread;
+		// letting workers apply results there would race its map access.
+		return
+	}
 	a.thumbOnce.Do(func() {
 		n := cap(thumbSlots)
 		if n < 1 {
@@ -2053,7 +2099,8 @@ func (a *App) startThumbWorkers() {
 
 // endThumbFrame drops queued loads that the latest grid frame did not mark
 // visible. Running loads finish, so at most the workers' current tasks delay
-// a newly visible card.
+// a newly visible card. Background fills are exempt: the grid never marks
+// them, so the queue would otherwise cancel them every frame.
 func (a *App) endThumbFrame(frame uint64) {
 	if a.thumbQueue == nil {
 		return
@@ -2063,62 +2110,143 @@ func (a *App) endThumbFrame(frame uint64) {
 	}
 }
 
+// pumpThumbPrefetch keeps filling the active folder after the visible cards
+// are queued. Fills run at the lowest priority, so scrolling always wins, and
+// two at a time, so a burst of new cards still finds free workers. Nothing
+// keeps a bitmap: the fill stops at the disk cache and the waterfall learns
+// each aspect ratio when its card actually becomes visible.
+//
+// The fill belongs to one listing. Switching tabs, opening another folder or
+// turning the feature off cancels what is still queued; a decode already in
+// flight just finishes and leaves a valid cache file behind.
+func (a *App) pumpThumbPrefetch(t *Tab) {
+	if thumbDir == "" || a.thumbQueue == nil || !a.settings.ThumbPrefetch || t == nil || !t.Loaded || t.Loading {
+		a.cancelThumbPrefetch()
+		return
+	}
+	if a.prefetchTab != t || a.prefetchGen != t.Gen {
+		a.cancelThumbPrefetch()
+		a.prefetchTab = t
+		a.prefetchGen = t.Gen
+	}
+	size := a.settings.ThumbSize
+	for a.prefetchActive < thumbPrefetchWindow && a.prefetchNext < len(t.All) {
+		it := t.All[a.prefetchNext]
+		a.prefetchNext++
+		if it.Kind != "image" && it.Kind != "video" {
+			continue
+		}
+		key := thumbKey(it, size)
+		if e := a.thumbs[key]; e != nil {
+			// Already decoded for a visible card, so the file is cached too.
+			continue
+		}
+		if a.thumbLoad[key+"|f"] {
+			// A visible card is loading it right now; a fill would duplicate it.
+			continue
+		}
+		priority := thumbPrefetchBase + float64(a.prefetchNext)
+		if a.submitThumbTask(key+"|f", key, it, size, priority, a.thumbFrame, thumbStageFinal, true) {
+			a.prefetchActive++
+		}
+	}
+}
+
+// cancelThumbPrefetch drops the queued remainder of a folder fill. The cursor
+// restarts at the top of the next listing, so a folder visited again warms the
+// files that were skipped rather than repeating nothing.
+func (a *App) cancelThumbPrefetch() {
+	if a.prefetchTab == nil && a.prefetchNext == 0 && a.prefetchActive == 0 {
+		return
+	}
+	a.prefetchTab = nil
+	a.prefetchNext = 0
+	a.prefetchActive = 0
+	if a.thumbQueue != nil {
+		for _, key := range a.thumbQueue.dropPreload() {
+			delete(a.thumbLoad, key)
+		}
+	}
+}
+
 func (a *App) thumbWorker() {
 	for {
 		task := a.thumbQueue.next()
 		if task == nil {
 			return
 		}
-		var data []byte
-		var err error
-		if task.stage == thumbStagePreview {
-			data, err = embeddedThumbPreview(task.item, task.size)
-		} else {
-			data, err = getThumb(context.Background(), task.item, task.size)
-		}
-		var bmp *ui.Bitmap
-		if err == nil {
-			bmp, err = ui.DecodeBitmap(data)
-		}
-		if (err != nil || bmp == nil) && task.stage == thumbStageFinal {
-			if data, e := brokenThumb(task.item, task.size); e == nil {
-				bmp, err = ui.DecodeBitmap(data)
-			}
-		}
-		d := dimInfo{}
-		if err == nil && task.stage == thumbStageFinal && task.item.Kind == "image" {
-			d = imageDims(task.item.Path, task.item.Mtime)
-		}
+		a.runThumbTask(task)
+	}
+}
+
+// runThumbTask loads one queued thumbnail and applies the result on the main
+// thread.
+func (a *App) runThumbTask(task *thumbTask) {
+	if task.preload {
+		// Background fill: stop at the disk cache. No bitmap, no dims, no
+		// repaint; the card decodes from cache when it becomes visible.
+		thumbPrefetchSlots <- struct{}{}
+		_, _ = getThumb(context.Background(), task.item, task.size)
+		<-thumbPrefetchSlots
 		a.update(func() {
 			delete(a.thumbLoad, task.key)
 			a.thumbQueue.done(task.key)
-			if err != nil || bmp == nil {
+			if a.prefetchActive > 0 {
+				a.prefetchActive--
+			}
+			a.pumpThumbPrefetch(a.tab())
+		})
+		return
+	}
+	var data []byte
+	var err error
+	if task.stage == thumbStagePreview {
+		data, err = embeddedThumbPreview(task.item, task.size)
+	} else {
+		data, err = getThumb(context.Background(), task.item, task.size)
+	}
+	var bmp *ui.Bitmap
+	if err == nil {
+		bmp, err = ui.DecodeBitmap(data)
+	}
+	if (err != nil || bmp == nil) && task.stage == thumbStageFinal {
+		if data, e := brokenThumb(task.item, task.size); e == nil {
+			bmp, err = ui.DecodeBitmap(data)
+		}
+	}
+	d := dimInfo{}
+	if err == nil && task.stage == thumbStageFinal && task.item.Kind == "image" {
+		d = imageDims(task.item.Path, task.item.Mtime)
+	}
+	a.update(func() {
+		delete(a.thumbLoad, task.key)
+		a.thumbQueue.done(task.key)
+		if err != nil || bmp == nil {
+			return
+		}
+		w, h := bmp.Size()
+		a.thumbClock++
+		e := &thumbEntry{Bmp: bmp, At: a.thumbClock, Bytes: int64(w * h * 4), Preview: task.stage == thumbStagePreview}
+		old := a.thumbs[task.base]
+		if old != nil {
+			if old.Preview == false && e.Preview {
+				// A full image already won; do not replace it with a
+				// late preview.
+				bmp.ReleasePixels()
 				return
 			}
-			w, h := bmp.Size()
-			a.thumbClock++
-			e := &thumbEntry{Bmp: bmp, At: a.thumbClock, Bytes: int64(w * h * 4), Preview: task.stage == thumbStagePreview}
-			old := a.thumbs[task.base]
-			if old != nil {
-				if old.Preview == false && e.Preview {
-					// A full image already won; do not replace it with a
-					// late preview.
-					bmp.ReleasePixels()
-					return
-				}
-				a.thumbBytes -= old.Bytes
-				old.Bmp.ReleasePixels()
-			}
-			a.thumbs[task.base] = e
-			a.thumbBytes += e.Bytes
-			if d.W > 0 && (task.item.W == 0 || task.item.H == 0) {
-				task.item.W, task.item.H, task.item.Orient = d.W, d.H, d.Orient
-				task.item.HasThumb = d.Thumb
-			}
-			a.pruneThumbs()
-			a.refreshThumbs()
-		})
-	}
+			a.thumbBytes -= old.Bytes
+			old.Bmp.ReleasePixels()
+		}
+		a.thumbs[task.base] = e
+		a.thumbBytes += e.Bytes
+		if d.W > 0 && (task.item.W == 0 || task.item.H == 0) {
+			task.item.W, task.item.H, task.item.Orient = d.W, d.H, d.Orient
+			task.item.HasThumb = d.Thumb
+		}
+		a.pruneThumbs()
+		a.refreshThumbs()
+	})
 }
 
 // refreshThumbs coalesces the invalidations from a burst of workers into one
