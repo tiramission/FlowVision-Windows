@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"image"
-	"os"
 	"sync/atomic"
 	"time"
 
@@ -187,7 +186,7 @@ func (a *App) cancelViewerWarmup(key string) {
 }
 
 func decodeViewerFullRes(it *Item) (*ui.Bitmap, int64, error) {
-	f, err := os.Open(it.Path)
+	f, err := openItemFile(it)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -409,6 +408,11 @@ func (a *App) maybeRequestViewerFullRes() {
 // paging always stays ahead of the original, and it does nothing when the
 // preview already is the full image. Returns whether a decode was started.
 func (a *App) maybeAutoViewerFullRes() bool {
+	if a.viewer.Item != nil && isRemotePath(a.viewer.Item.Path) {
+		// Pulling a multi-megabyte original over a share without being asked
+		// is not worth it; 1:1 still decodes it on demand.
+		return false
+	}
 	if !a.settings.ViewerAutoFullRes || !a.viewer.Open || a.viewer.Item == nil {
 		return false
 	}

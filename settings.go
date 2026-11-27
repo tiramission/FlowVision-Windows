@@ -21,34 +21,35 @@ type TabState struct {
 
 // Settings is the app's preferences, stored as settings.json in user data.
 type Settings struct {
-	Theme               string      `json:"theme"` // system | dark | light
-	ThumbSize           int         `json:"thumbSize"`
-	GridGap             int         `json:"gridGap"`
-	ShowCardNames       bool        `json:"showCardNames"`
-	Sort                string      `json:"sort"` // name | date | size | type
-	Desc                bool        `json:"desc"`
-	ShowHidden          bool        `json:"showHidden"`
-	ShowOther           bool        `json:"showOther"`
-	Recursive           bool        `json:"recursive"`
-	Sidebar             bool        `json:"sidebar"`
-	SidebarWidth        int         `json:"sidebarWidth"`
-	InfoPanel           bool        `json:"infoPanel"`
-	ViewerAutoImmersive bool        `json:"viewerAutoImmersive"`
-	PlayVideo           bool        `json:"playVideo"`
-	LoopVideo           bool        `json:"loopVideo"`
-	LastPath            string      `json:"lastPath"`
-	Favorites           []string    `json:"favorites"`
-	Tabs                []TabState  `json:"tabs"`
-	ActiveTab           int         `json:"activeTab"`
-	CacheLimitMB        int         `json:"cacheLimitMB"`
-	ThumbPrefetch       bool        `json:"thumbPrefetch"`
-	ViewerPreload       int         `json:"viewerPreload"`
-	ViewerAutoFullRes   bool        `json:"viewerAutoFullRes"`
-	ViewerHUD           string      `json:"viewerHUD"` // off | auto | always
-	SidePrev            SideBinding `json:"sidePrev"`
-	SideNext            SideBinding `json:"sideNext"`
-	SidePrevHold        SideBinding `json:"sidePrevHold"`
-	SideNextHold        SideBinding `json:"sideNextHold"`
+	Theme               string        `json:"theme"` // system | dark | light
+	ThumbSize           int           `json:"thumbSize"`
+	GridGap             int           `json:"gridGap"`
+	ShowCardNames       bool          `json:"showCardNames"`
+	Sort                string        `json:"sort"` // name | date | size | type
+	Desc                bool          `json:"desc"`
+	ShowHidden          bool          `json:"showHidden"`
+	ShowOther           bool          `json:"showOther"`
+	Recursive           bool          `json:"recursive"`
+	Sidebar             bool          `json:"sidebar"`
+	SidebarWidth        int           `json:"sidebarWidth"`
+	InfoPanel           bool          `json:"infoPanel"`
+	ViewerAutoImmersive bool          `json:"viewerAutoImmersive"`
+	PlayVideo           bool          `json:"playVideo"`
+	LoopVideo           bool          `json:"loopVideo"`
+	LastPath            string        `json:"lastPath"`
+	Favorites           []string      `json:"favorites"`
+	RemoteShares        []remoteShare `json:"remoteShares,omitempty"`
+	Tabs                []TabState    `json:"tabs"`
+	ActiveTab           int           `json:"activeTab"`
+	CacheLimitMB        int           `json:"cacheLimitMB"`
+	ThumbPrefetch       bool          `json:"thumbPrefetch"`
+	ViewerPreload       int           `json:"viewerPreload"`
+	ViewerAutoFullRes   bool          `json:"viewerAutoFullRes"`
+	ViewerHUD           string        `json:"viewerHUD"` // off | auto | always
+	SidePrev            SideBinding   `json:"sidePrev"`
+	SideNext            SideBinding   `json:"sideNext"`
+	SidePrevHold        SideBinding   `json:"sidePrevHold"`
+	SideNextHold        SideBinding   `json:"sideNextHold"`
 }
 
 func defaultSettings() Settings {
@@ -168,6 +169,9 @@ func mergeSettings(def, s Settings) Settings {
 	}
 	if s.Favorites == nil {
 		s.Favorites = []string{}
+	}
+	if s.RemoteShares == nil {
+		s.RemoteShares = []remoteShare{}
 	}
 	if s.Tabs == nil {
 		s.Tabs = []TabState{}

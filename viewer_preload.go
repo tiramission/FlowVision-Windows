@@ -84,6 +84,9 @@ func (a *App) scheduleViewerPreload() {
 	if n > 8 {
 		n = 8
 	}
+	if n > 1 && isRemotePath(a.viewer.Item.Path) {
+		n = 1
+	}
 	items := a.viewerPreloadItems(n)
 	desired := map[string]bool{}
 	currentKey := ""

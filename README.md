@@ -37,6 +37,7 @@ irm https://github.com/tiramission/FlowVision-Windows/releases/latest/download/i
 - **独立光标计时**：查看器沉浸时鼠标静止 2.5 秒才隐藏，移动、点击、滚轮或缩放都会立即恢复；浮层显示/隐藏不再直接控制指针。
 - **快捷键帮助**：`F1` 打开分类帮助，可按全部、浏览、图片查看器、视频与窗口筛选；快捷键按场景分组为卡片，并显示条目数。
 - **侧键与预加载**：设置 → 控制里为查看器的“上一张 / 下一张”分别录制单击和长按快捷键，物理侧键可直接按下识别；查看器可预加载前后各若干张的 2560 预览（默认 2 张，384 MB 预算，不预取原图），当前图的原图由“自动载入当前图原图”在预览完成后补上；鼠标在左右边带停留 220 ms 会优先预取该方向相邻图片，`ViewerPreload=0` 时同步关闭。
+- **远程位置（只读）**：侧边栏「远程」可添加 SMB 或 WebDAV 位置，连接完全在应用进程内建立——不映射盘符、不创建系统会话、不写凭据管理器，资源管理器看不到也访问不了。地址按 `smb://主机/共享` / `webdav://主机:端口/路径` 显示，面包屑、标签页和窗口标题都用这种形式。远程位置只读：重命名、新建、删除等写操作在右键菜单和快捷键里都不出现，服务层也会拒绝；「在资源管理器中显示」「用默认应用打开」同样隐藏，因为系统里没有任何东西能解析这个路径。远程图片照常生成缩略图与 2560 预览，远程视频通过应用内的本机回环 HTTP 服务交给播放器（支持拖动进度），ffmpeg 取帧也走同一个服务。
 - **文件操作**：回收站删除、永久删除、重命名、新建文件夹、资源管理器定位、默认程序打开、复制路径；右键菜单与键盘操作并存。
 - **原生界面**：Onevra 的暖白画廊/中性暗房主题、陶土色强调色、Sidebar、IconButton、TextBox、Switch、Badge 与 Lucide 矢量图标；照片网格由 Go 侧的 `ui.Box.Draw` 虚拟化绘制。
 - **界面字体**：`resources/fonts` 里的 MiSans（官方可变字体 `MiSans VF.ttf`，一个文件覆盖 100–900 全部字重）在启动时用 `ui.RegisterFont` 注册为 DirectWrite 内存字体集合（Windows 10 1703+），字重轴覆盖 100–900，界面用到的 400 / 500 / 600 / 700 都是真字重；缺少文件时回退系统字体，系统装过 MiSans 也会自动启用，`FLOWVISION_UI_FONT` 可临时指定其他字体对照。许可与体积见 `resources/fonts/README.md`。
@@ -61,7 +62,9 @@ irm https://github.com/tiramission/FlowVision-Windows/releases/latest/download/i
 - **虚拟化网格**：`grid.go` 只对可见区域绘制卡片、缩略图、文件名、选中描边和悬停阴影，不为几千张图片创建控件。
 - **缩略图管线**：Windows Imaging Component（WIC）优先读取 JPEG/PNG/TIFF/BMP/GIF/WebP，内嵌缩略图或 `IWICBitmapScaler`（HighQualityCubic）缩放到目标尺寸；HEIC/RAW/ICO 优先系统 Shell provider，普通 JPEG 不依赖 Shell；WIC/Shell 失败自动回退纯 Go。EXIF IFD1 内嵌缩略图先发 160 px preview，最终图到达后替换；磁盘 JPEG q84、`v2` 后端版本、内存 1200 条目 + 512 MB 字节双上限、近似 LRU；缓存按用途分两个目录：`thumbs`（网格卡片）与 `previews`（查看器 2560 预览），共用设置里的容量额度，启动时把旧版混在 `thumbs` 里的预览文件搬到 `previews`；透明图预乘后合成到中性底色。可见卡片排完之后，后台以两路低优先级继续把当前文件夹剩余的缩略图写进磁盘缓存（只写缓存、不保留位图），切换文件夹或关闭开关立即停止。
 - **查看器管线**：最长边 2560、`ApproxBiLinear` 快缩放、`ui.NewBitmap` 直接上屏、JPEG q90 异步写缓存（存 `previews` 目录）；缓存命中走 JPEG 解码后更新一个持久 bitmap 槽，避免每次打开都新建 17 MB 纹理。邻居预加载单 worker、384 MB 字节预算、当前图跳过，只取 2560 预览；当前图的原图在邻居预览排空后自动后台解码（全局串行一张，切图即放弃队列里的其余解码）；1:1 对任意尺寸按需解码原图，当前图保留全分辨率 bitmap，关闭/切图立即释放并回收大图临时堆。
-- **异步媒体信息**：尺寸、EXIF、MP4/MOV sample table、帧率和滚动码率在后台读取；视频先取容器 metadata，再启动播放器，避免文件句柄冲突。
+- **远程读取层**：`remote.go` 定义统一后端接口（列目录、打开流、HTTP 转发、关闭），SMB2 用 `go-smb2` 在进程内建会话，WebDAV 用 `net/http` 发 PROPFIND 与带 Range 的 GET；连接按「主机 + 共享 + 账号」进池，闲置 90 秒回收，回收时的登出带 2 秒上限，服务器不响应就直接断开底层 TCP。路径是虚拟的（`smb://主机/共享/子目录`），`cleanDisplayPath` 让虚拟路径绕开 `filepath.Clean`（否则会变成 `smb:\主机\...`），缩略图、预览、EXIF、ICO 解码都改走 `openItemFile` 拿流，所以远程与本地共用同一套解码管线。
+- **远程视频**：Media Foundation 能用 `http://` 但用不了应用私有的 SMB 会话，因此在 `127.0.0.1:0` 上起一个只服务远程路径的 HTTP 服务（随机端口、随机路径令牌、只接受 GET/HEAD），把 `Range` 原样转给后端，空闲 3 分钟自动关闭；ffmpeg 取帧也把该 URL 当输入。
+- **异步媒体信息**：尺寸、EXIF、MP4/MOV sample table、帧率和滚动码率在后台读取；视频先取容器 metadata，再启动播放器，避免文件句柄冲突。远程文件只读一次 512 KiB 前缀，尺寸与 EXIF 都从这段数据里出。
 - **自绘窗口**：`TitleBarHidden` + `HideWindowButtons`，48 DIP 标题栏承担拖动、双击最大化、最小化/最大化/全屏/关闭和 Windows 11 snap layouts；全屏状态由窗口自身维护。
 - **更新链路**：`mygo.json` 配置 GitHub 更新源与公钥；`mygo.Updater.Check` 返回新版本，`Update.Install` 下载并校验签名归档或增量补丁，成功后 `mygo.App.Relaunch()`。
 
@@ -138,6 +141,9 @@ go test -run '^$' -bench BenchmarkViewerPreview -benchtime=20x -count=1 .
 | 超大图 | 默认显示最长边 2,560 px 预览；>80 MP 优先走系统缩略图 provider，失败再回退 WIC/Shell，provider 不可用时显示中文提示；1:1 按需解码原图，不设 50 MP 上限，受单张纹理和可用内存限制 |
 | 右键八向手势 | 未迁移；右键用于原生上下文菜单 |
 | 系统主题实时跟随 | 启动时检测系统深浅色；运行中可在设置里立即切换主题 |
+| 远程位置写操作 | 只读：不提供重命名、新建、删除、移动；需要写入时请用系统挂载方式 |
+| 远程位置密码 | 「记住密码」用 DPAPI 按当前 Windows 账户加密存到应用数据目录，换账户或换机器后需重新输入 |
+| 远程视频 | 经本机回环 HTTP 服务播放（随机端口 + 随机路径令牌，闲置 3 分钟自动关闭）；播放本身仍依赖本机解码器 |
 
 ## 项目结构
 
@@ -157,6 +163,12 @@ update_ui.go     应用内中文更新面板、检查/下载/安装状态
 dialogs.go       重命名、新建、删除确认、帮助、关于
 menu.go          原生菜单与更新入口
 dir.go           目录扫描、排序、导航
+remote.go        远程位置模型、虚拟路径、连接池、统一读取接口
+remote_smb.go    SMB2 后端（go-smb2，进程内会话）
+remote_webdav.go WebDAV 后端（PROPFIND / Range）
+remote_creds.go  DPAPI 加密的密码存储
+remote_media.go  本机回环媒体服务，远程视频播放与取帧
+remote_ui.go     添加/编辑远程位置对话框与侧边栏条目
 thumb.go         缩略图生成、磁盘缓存、ffmpeg 取帧、缓存淘汰
 meta.go          尺寸、EXIF、MediaSvc
 video_meta.go    MP4/MOV sample table、帧率与滚动视频码率

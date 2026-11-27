@@ -286,6 +286,21 @@ func (a *App) sidebarView(c *ui.Context) {
 					}
 				})
 
+				components.SidebarSectionWithActions(c, "远程", func(c *ui.Context) {
+					components.IconButton(c, lucide.Plus(), "添加远程位置", components.IconButtonCompact).
+						OnClick(func() { a.later(a.openRemoteDialog) })
+				}, func() {
+					if len(a.settings.RemoteShares) == 0 {
+						components.Text(c, `添加 SMB 或 WebDAV 共享，例如 smb://nas/photos`).FontSize(10.5).
+							TextColor(th.TextMuted).Padding(2, 6).SingleLine().Ellipsis("…")
+						return
+					}
+					for _, share := range a.settings.RemoteShares {
+						share := share
+						a.sidebarRemoteRow(c, share)
+					}
+				})
+
 				components.SidebarSectionWithActions(c, "文件夹", func(c *ui.Context) {
 					if t := a.tab(); t != nil {
 						a.folderTreeCount(c, t)
@@ -318,7 +333,7 @@ func (a *App) sidebarPathRow(c *ui.Context, path string, icon *ui.SVG, favorite 
 	th := c.Theme()
 	active := false
 	if t := a.tab(); t != nil {
-		active = strings.EqualFold(filepath.Clean(path), filepath.Clean(t.Path))
+		active = strings.EqualFold(cleanDisplayPath(path), cleanDisplayPath(t.Path))
 	}
 	// A favorite and a built-in location can point at the same folder. Keep
 	// both rows available, but let the favorite carry the active highlight so
@@ -389,7 +404,7 @@ func (a *App) sidebarFolders(c *ui.Context) {
 		a.folderTreeNote(c, "没有打开的文件夹", false, 4)
 		return
 	}
-	p := filepath.Clean(t.Path)
+	p := cleanDisplayPath(t.Path)
 	a.ensureTree(p)
 	rootName := t.Name
 	if rootName == "" {
@@ -408,7 +423,7 @@ func (a *App) sidebarFolders(c *ui.Context) {
 // single count is easier to scan than a longer "N subfolders" sentence, so the
 // hover tooltip spells it out.
 func (a *App) folderTreeCount(c *ui.Context, t *Tab) {
-	p := filepath.Clean(t.Path)
+	p := cleanDisplayPath(t.Path)
 	if !a.treeLoaded[p] {
 		return
 	}
@@ -429,10 +444,10 @@ func (a *App) folderTreeCount(c *ui.Context, t *Tab) {
 // the identity while the row gets a disclosure arrow, folder icon and selection.
 func (a *App) folderTreeRow(c *ui.Context, tree ui.TreeParts, path, name string, root, hasChildren bool) {
 	th := c.Theme()
-	p := filepath.Clean(path)
+	p := cleanDisplayPath(path)
 	selected := false
 	if t := a.tab(); t != nil {
-		selected = strings.EqualFold(p, filepath.Clean(t.Path))
+		selected = strings.EqualFold(p, cleanDisplayPath(t.Path))
 	}
 
 	branch := root
@@ -878,9 +893,12 @@ func (a *App) toolbar(c *ui.Context) {
 // ancestor link should open. The final item is the current folder and is not
 // interactive, matching components.Breadcrumbs.
 func breadcrumbItems(path, name string) ([]string, []string) {
-	path = filepath.Clean(path)
+	path = cleanDisplayPath(path)
 	if path == "" || path == "." {
 		return nil, nil
+	}
+	if isRemotePath(path) {
+		return remoteBreadcrumbItems(path, name)
 	}
 	volume := filepath.VolumeName(path)
 	root := volume
@@ -905,6 +923,34 @@ func breadcrumbItems(path, name string) ([]string, []string) {
 			}
 			current = filepath.Join(current, segment)
 			labels = append(labels, segment)
+			paths = append(paths, current)
+		}
+	}
+	if name != "" && len(labels) > 1 {
+		labels[len(labels)-1] = name
+	}
+	return labels, paths
+}
+
+// remoteBreadcrumbItems splits smb://nas/photos/2024 into a scheme root and
+// the folders below it. The share is part of the root link: a NAS has nothing
+// to show above it, and listing one would be another network round trip.
+func remoteBreadcrumbItems(path, name string) ([]string, []string) {
+	root := remoteShareKey(path)
+	if root == "" {
+		return []string{path}, []string{path}
+	}
+	labels := []string{root}
+	paths := []string{root}
+	rest := strings.Trim(strings.TrimPrefix(strings.TrimSuffix(path, "/"), root), "/")
+	if rest != "" {
+		current := root
+		for _, segment := range strings.Split(rest, "/") {
+			if segment == "" {
+				continue
+			}
+			current += "/" + segment
+			labels = append(labels, unescapeRemoteName(segment))
 			paths = append(paths, current)
 		}
 	}
@@ -1124,6 +1170,14 @@ func (a *App) statusBar(c *ui.Context) {
 			if a.settings.ShowHidden {
 				components.Badge(c, "隐藏", components.BadgeOptions{Tone: components.BadgeNeutral}).
 					AlignSelf(ui.Center)
+			}
+			if a.tabReadOnly() {
+				components.Badge(c, "网络 · 只读", components.BadgeOptions{Tone: components.BadgeNeutral}).
+					AlignSelf(ui.Center)
+			}
+			if notice := a.statusNoticeText(); notice != "" {
+				components.Text(c, notice).FontSize(10.5).TextColor(th.Danger).
+					AlignSelf(ui.Center).SingleLine().Ellipsis("…")
 			}
 			components.Text(c, "F1 快捷键").FontSize(10).TextColor(th.TextMuted.Alpha(.88)).
 				AlignSelf(ui.Center)

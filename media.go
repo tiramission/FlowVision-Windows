@@ -45,6 +45,12 @@ func browserImage(ext string) bool {
 }
 
 func serveItemContent(w http.ResponseWriter, r *http.Request, it *Item) {
+	if isRemotePath(it.Path) {
+		// The remote file has no local handle to ServeContent from; the
+		// media server already answers Range for virtual paths.
+		http.Error(w, "远程文件由媒体服务提供", http.StatusNotImplemented)
+		return
+	}
 	f, err := os.Open(it.Path)
 	if err != nil {
 		http.Error(w, "cannot open", http.StatusNotFound)
@@ -80,7 +86,7 @@ func previewBytes(it *Item) ([]byte, error) {
 	if d.W > 0 && d.H > 0 && d.W*d.H > viewerPreviewMaxPixels {
 		return nil, fmt.Errorf("图片像素 %d×%d 超过预览上限（8000 万）", d.W, d.H)
 	}
-	f, err := os.Open(it.Path)
+	f, err := openItemFile(it)
 	if err != nil {
 		return nil, err
 	}

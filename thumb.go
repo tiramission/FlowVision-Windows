@@ -41,7 +41,10 @@ var (
 	// thumbPrefetchSlots keeps the folder fill from occupying every worker:
 	// two background decodes leave the rest free for cards that scroll in.
 	thumbPrefetchSlots = make(chan struct{}, 2)
-	thumbLastTrim      atomic.Int64 // unix nanos of the last automatic trim
+	// remoteThumbSlots keeps a network share from being hit by the whole worker
+	// pool: six parallel 20 MB reads over SMB starve the link the UI needs.
+	remoteThumbSlots = make(chan struct{}, 2)
+	thumbLastTrim    atomic.Int64 // unix nanos of the last automatic trim
 )
 
 // lockThumb serializes the generation of one cache file. Without it, several
@@ -278,6 +281,14 @@ func renderThumb(it *Item, size int) ([]byte, error) {
 // first only for formats WIC commonly lacks (HEIC/AVIF/JXL/RAW), and the
 // original Go decoder last.
 func renderStill(it *Item, size int) ([]byte, error) {
+	if isRemotePath(it.Path) {
+		// WIC and the Shell provider need a local path; a share is decoded
+		// from its stream instead.
+		if data, err := renderThumbGo(it, size); err == nil {
+			return data, nil
+		}
+		return placeholderThumb(it, size)
+	}
 	switch thumbBackendMode() {
 	case "go":
 		return renderThumbGo(it, size)
@@ -348,7 +359,7 @@ func renderThumbGo(it *Item, size int) ([]byte, error) {
 	if d.W*d.H > 150_000_000 {
 		return nil, fmt.Errorf("image too large to thumbnail")
 	}
-	f, err := os.Open(it.Path)
+	f, err := openItemFile(it)
 	if err != nil {
 		return nil, err
 	}
@@ -456,6 +467,16 @@ func findFFmpeg() string {
 }
 
 func videoFrame(it *Item, size int) ([]byte, error) {
+	// ffmpeg cannot use the app's share session, but it reads a URL happily:
+	// hand a remote clip to the loopback server and let it fetch the frames.
+	source := it.Path
+	if isRemotePath(it.Path) {
+		url, err := remoteMediaServer.URL(it.Path)
+		if err != nil {
+			return nil, err
+		}
+		source = url
+	}
 	ff := findFFmpeg()
 	if ff == "" {
 		return nil, fmt.Errorf("ffmpeg not found")
@@ -464,7 +485,7 @@ func videoFrame(it *Item, size int) ([]byte, error) {
 	for _, at := range tries {
 		args := []string{
 			"-v", "error", "-nostdin", "-y",
-			"-ss", at, "-i", it.Path,
+			"-ss", at, "-i", source,
 			"-frames:v", "1",
 			"-vf", fmt.Sprintf("scale=-2:%d", thumbBudget(size)),
 			"-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1",

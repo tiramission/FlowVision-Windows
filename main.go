@@ -14,7 +14,7 @@ import (
 // devVersion is only the fallback for direct `go build` runs. Packaged builds
 // take the version from mygo.json, which `mygo build` injects into
 // mygo.App.Version().
-const devVersion = "1.9.0"
+const devVersion = "1.10.0"
 
 func appVersion() string {
 	if v := mygo.App.Version(); v != "" {
@@ -68,6 +68,7 @@ func main() {
 	startPath = resolveStartPath()
 	initThumbs()
 	initFonts()
+	initRemoteConnections()
 
 	app = newApp()
 	if cliPath != "" {

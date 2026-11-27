@@ -12,7 +12,12 @@ type gridMenuEntry struct {
 	shortcut string
 	disabled bool
 	divider  bool
-	action   func()
+	// write marks an entry that changes files; a network tab hides those.
+	write bool
+	// localOnly marks an entry that hands a path to Windows. Nothing outside
+	// the app can reach a remote file, so a network tab hides those too.
+	localOnly bool
+	action    func()
 }
 
 // resolveGridContextAt selects the tile under a secondary click and records
@@ -210,8 +215,8 @@ func moveGridMenuFocusTo(rows []ui.Element, enabled []bool, start, step int) {
 func (a *App) gridMenuEntries() []gridMenuEntry {
 	if a.contextEmpty || len(a.contextIDs) == 0 {
 		t := a.tab()
-		return []gridMenuEntry{
-			{label: "新建文件夹…", action: func() { a.later(a.beginNewFolder) }},
+		return withoutWriteEntries(a.tabReadOnly(), []gridMenuEntry{
+			{label: "新建文件夹…", write: true, action: func() { a.later(a.beginNewFolder) }},
 			{label: "刷新", shortcut: "F5", action: func() {
 				if t != nil {
 					a.later(func() { a.loadTab(t, false) })
@@ -227,7 +232,7 @@ func (a *App) gridMenuEntries() []gridMenuEntry {
 				}
 			}},
 			{label: "取消选择", action: func() { a.later(a.clearSelection) }},
-		}
+		})
 	}
 
 	one := a.contextOne()
@@ -239,7 +244,7 @@ func (a *App) gridMenuEntries() []gridMenuEntry {
 				a.later(func() { a.activateItem(one) })
 			}
 		}},
-		{label: "在资源管理器中显示", action: func() {
+		{label: "在资源管理器中显示", localOnly: true, action: func() {
 			a.later(func() {
 				if len(ids) == 1 {
 					if it, ok := items.Get(ids[0]); ok {
@@ -250,7 +255,7 @@ func (a *App) gridMenuEntries() []gridMenuEntry {
 				}
 			})
 		}},
-		{label: "用默认应用打开", disabled: one == nil, action: func() {
+		{label: "用默认应用打开", localOnly: true, disabled: one == nil, action: func() {
 			if one != nil {
 				path := one.Path
 				a.later(func() { _ = (AppSvc{}).OpenExternal(path) })
@@ -263,15 +268,15 @@ func (a *App) gridMenuEntries() []gridMenuEntry {
 			}
 		}},
 		{divider: true},
-		{label: "重命名…", shortcut: "F2", disabled: one == nil, action: func() {
+		{label: "重命名…", shortcut: "F2", disabled: one == nil, write: true, action: func() {
 			if one != nil {
 				a.later(a.beginRename)
 			}
 		}},
-		{label: "移到回收站", shortcut: "Delete", action: func() {
+		{label: "移到回收站", shortcut: "Delete", write: true, action: func() {
 			a.later(func() { a.askDelete(false) })
 		}},
-		{label: "永久删除", action: func() {
+		{label: "永久删除", write: true, action: func() {
 			a.later(func() { a.askDelete(true) })
 		}},
 		{divider: true},
@@ -284,5 +289,28 @@ func (a *App) gridMenuEntries() []gridMenuEntry {
 			}
 		}},
 	}
-	return entries
+	return withoutWriteEntries(a.tabReadOnly(), entries)
+}
+
+// withoutWriteEntries hides the entries that change files on a read-only
+// location, and the ones that would hand the path to Windows, then collapses
+// the dividers they leave behind.
+func withoutWriteEntries(readOnly bool, entries []gridMenuEntry) []gridMenuEntry {
+	if !readOnly {
+		return entries
+	}
+	out := entries[:0]
+	for _, e := range entries {
+		if e.write || e.localOnly {
+			continue
+		}
+		if e.divider && (len(out) == 0 || out[len(out)-1].divider) {
+			continue
+		}
+		out = append(out, e)
+	}
+	for len(out) > 0 && out[len(out)-1].divider {
+		out = out[:len(out)-1]
+	}
+	return out
 }

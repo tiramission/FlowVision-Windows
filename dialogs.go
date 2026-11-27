@@ -19,6 +19,7 @@ func (a *App) overlays(c *ui.Context) {
 	a.helpModal(c)
 	a.aboutModal(c)
 	a.updateModal(c)
+	a.remoteDialog(c)
 	a.viewerOverlay(c)
 }
 

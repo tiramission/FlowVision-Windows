@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"image/jpeg"
 	"image/png"
-	"os"
+	"io"
 )
 
 // icoThumb decodes the PNG-compressed frame that modern icon files use. Go's
@@ -14,14 +14,26 @@ import (
 // carry PNG payloads on some Windows builds, so this small path keeps ICO
 // previews deterministic. Classic DIB-only icons still go through Shell.
 func icoThumb(it *Item, size int) ([]byte, error) {
-	f, err := os.Open(it.Path)
+	f, err := openItemFile(it)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
+	// The whole ICO is read at once: a remote stream cannot seek, and an icon
+	// is small enough that the random access is not worth a second request.
+	raw, err := io.ReadAll(io.LimitReader(f, 4<<20))
+	if err != nil {
+		return nil, err
+	}
+	at := func(off int64, n int) ([]byte, error) {
+		if off < 0 || off+int64(n) > int64(len(raw)) {
+			return nil, fmt.Errorf("truncated ICO file")
+		}
+		return raw[off : off+int64(n)], nil
+	}
 
-	var dir [6]byte
-	if _, err := f.Read(dir[:]); err != nil {
+	dir, err := at(0, 6)
+	if err != nil {
 		return nil, err
 	}
 	if binary.LittleEndian.Uint16(dir[0:2]) != 0 || binary.LittleEndian.Uint16(dir[2:4]) != 1 {
@@ -38,8 +50,8 @@ func icoThumb(it *Item, size int) ([]byte, error) {
 		len  int64
 	}
 	var best entry
-	entries := make([]byte, count*16)
-	if _, err := f.Read(entries); err != nil {
+	entries, err := at(6, count*16)
+	if err != nil {
 		return nil, err
 	}
 	for i := 0; i < count; i++ {
@@ -62,8 +74,8 @@ func icoThumb(it *Item, size int) ([]byte, error) {
 		return nil, fmt.Errorf("no usable ICO frame")
 	}
 
-	payload := make([]byte, best.len)
-	if _, err := f.ReadAt(payload, best.off); err != nil {
+	payload, err := at(best.off, int(best.len))
+	if err != nil {
 		return nil, err
 	}
 	if len(payload) < 8 || !bytes.Equal(payload[:8], []byte("\x89PNG\r\n\x1a\n")) {

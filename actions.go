@@ -40,6 +40,9 @@ func (AppSvc) PickFolder(start string) (string, error) {
 
 // Reveal selects path in Explorer.
 func (AppSvc) Reveal(path string) error {
+	if isRemotePath(path) {
+		return errRemoteNoExplorer
+	}
 	if _, err := os.Stat(path); err != nil {
 		return err
 	}
@@ -49,6 +52,9 @@ func (AppSvc) Reveal(path string) error {
 
 // OpenFolder opens path in Explorer.
 func (AppSvc) OpenFolder(path string) error {
+	if isRemotePath(path) {
+		return errRemoteNoExplorer
+	}
 	st, err := os.Stat(path)
 	if err != nil {
 		return err
@@ -61,6 +67,9 @@ func (AppSvc) OpenFolder(path string) error {
 
 // OpenExternal opens a file with its default application.
 func (AppSvc) OpenExternal(path string) error {
+	if isRemotePath(path) {
+		return errRemoteNoExplorer
+	}
 	if _, err := os.Stat(path); err != nil {
 		return err
 	}
@@ -97,7 +106,14 @@ func (AppSvc) ResolveDrop(path string) (string, error) {
 }
 
 // Delete moves path to the Recycle Bin, or deletes it for good.
+// errReadOnlyRemote is returned when a write reaches a remote location. The
+// UI hides these actions already; this is the guard behind it.
+var errReadOnlyRemote = errors.New("网络位置是只读的")
+
 func (AppSvc) Delete(path string, permanent bool) error {
+	if isRemotePath(path) {
+		return errReadOnlyRemote
+	}
 	st, err := os.Stat(path)
 	if err != nil {
 		return err
@@ -165,6 +181,9 @@ func checkName(name string) error {
 
 // Rename gives path a new name in its own folder and returns the new path.
 func (AppSvc) Rename(path, newName string) (string, error) {
+	if isRemotePath(path) {
+		return "", errReadOnlyRemote
+	}
 	newName = strings.TrimSpace(newName)
 	if err := checkName(newName); err != nil {
 		return "", err
@@ -202,6 +221,9 @@ func (AppSvc) Rename(path, newName string) (string, error) {
 
 // NewFolder creates a folder inside dir.
 func (AppSvc) NewFolder(dir, name string) (string, error) {
+	if isRemotePath(dir) {
+		return "", errReadOnlyRemote
+	}
 	name = strings.TrimSpace(name)
 	if err := checkName(name); err != nil {
 		return "", err
@@ -226,3 +248,7 @@ func (AppSvc) Version() string { return appVersion() }
 
 // Log writes a line to the app's log, for diagnostics from the page.
 func (AppSvc) Log(msg string) { logf("page: %s", msg) }
+
+// errRemoteNoExplorer explains why a remote file cannot be handed to Windows:
+// nothing outside the app knows how to reach it.
+var errRemoteNoExplorer = errors.New("网络位置只在应用内打开，不能交给资源管理器")

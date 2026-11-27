@@ -461,6 +461,45 @@ func debugCommand(name, arg string) {
 	case "find":
 		app.focusSearch = true
 		app.refresh()
+	case "remoteadd":
+		// remoteadd=protocol|host|port|share|base|user|password
+		parts := strings.Split(arg, "|")
+		if len(parts) >= 2 {
+			share := remoteShare{Protocol: parts[0], Host: parts[1]}
+			if len(parts) > 2 {
+				if n, err := strconv.Atoi(parts[2]); err == nil {
+					share.Port = n
+				}
+			}
+			if len(parts) > 3 {
+				share.Share = parts[3]
+			}
+			if len(parts) > 4 {
+				share.Base = parts[4]
+			}
+			if len(parts) > 5 {
+				share.User = parts[5]
+			}
+			if len(parts) > 6 {
+				share.SavePass = true
+				rememberRemotePassword(share, parts[6], true)
+			}
+			share.ID = remoteShareID(share)
+			app.upsertRemoteShare(share)
+			app.goTo(remoteRoot(share), true)
+		}
+	case "remotedialog":
+		app.openRemoteDialog()
+	case "remoteedit":
+		share := app.remoteShareByID(arg)
+		if share.ID != "" {
+			app.editRemoteShare(share)
+		}
+	case "remoteproto":
+		if len(arg) > 0 {
+			app.remoteDraft.Protocol = arg
+			app.applyRemotePortDefault()
+		}
 	case "tasks":
 		app.tasksOpen = !app.tasksOpen
 		app.refresh()

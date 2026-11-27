@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/md5"
 	"encoding/hex"
 	"errors"
@@ -266,6 +267,12 @@ type DirResult struct {
 
 // Browse lists a folder the way the grid shows it.
 func (FS) Browse(req BrowseRequest) DirResult {
+	if isRemotePath(req.Path) {
+		if req.Limit <= 0 {
+			req.Limit = 4000
+		}
+		return remoteBrowse(req)
+	}
 	started := time.Now()
 	if req.Limit <= 0 {
 		req.Limit = 4000
@@ -389,6 +396,9 @@ func (FS) Browse(req BrowseRequest) DirResult {
 }
 
 func displayName(path string) string {
+	if isRemotePath(path) {
+		return remoteName(path)
+	}
 	clean := filepath.Clean(path)
 	vol := filepath.VolumeName(clean)
 	rest := strings.Trim(strings.TrimPrefix(clean, vol), string(os.PathSeparator))
@@ -399,6 +409,9 @@ func displayName(path string) string {
 }
 
 func isDriveRoot(path string) bool {
+	if isRemotePath(path) {
+		return remoteShareKey(path) == strings.TrimSuffix(path, "/")
+	}
 	clean := filepath.Clean(path)
 	vol := filepath.VolumeName(clean)
 	return vol != "" && strings.Trim(strings.TrimPrefix(clean, vol), string(os.PathSeparator)) == ""
@@ -577,6 +590,9 @@ func invalidateMedia(dir string) {
 
 // Tree lists the sub folders of path.
 func (FS) Tree(path string, showHidden bool) []TreeEntry {
+	if isRemotePath(path) {
+		return remoteTree(path, showHidden)
+	}
 	path = filepath.Clean(path)
 	entries, err := os.ReadDir(path)
 	if err != nil {
@@ -606,6 +622,11 @@ func (FS) Tree(path string, showHidden bool) []TreeEntry {
 // Sibling walks the disk order from path by direction (1 next, -1 previous)
 // to the nearest folder that holds images or videos.
 func (FS) Sibling(path string, direction int, showHidden bool) NavResult {
+	if isRemotePath(path) {
+		// Walking siblings would list the parent share folder per keystroke;
+		// stay put rather than turn navigation into a network round trip.
+		return NavResult{Path: path, Found: false}
+	}
 	path = filepath.Clean(path)
 	parent := filepath.Dir(path)
 	if parent == path {
@@ -647,6 +668,13 @@ func (FS) Sibling(path string, direction int, showHidden bool) NavResult {
 
 // Parent returns the folder above path.
 func (FS) Parent(path string) NavResult {
+	if isRemotePath(path) {
+		parent := remoteParent(path)
+		if parent == "" {
+			return NavResult{Path: path, Found: false}
+		}
+		return NavResult{Path: parent, Found: true}
+	}
 	path = filepath.Clean(path)
 	parent := filepath.Dir(path)
 	if parent == path {
@@ -723,4 +751,156 @@ func (FS) Exists(path string) ExistsResult {
 		return ExistsResult{}
 	}
 	return ExistsResult{OK: true, Path: clean}
+}
+
+// ------------------------------------------------------------- remote store
+
+// internRemote records a remote entry. A virtual path is unique per share, so
+// the same cache and the same shortID scheme the local store uses apply; only
+// the stat comes from the directory listing instead of the file system.
+func (s *Store) internRemote(path string, entry remoteEntry) *Item {
+	name := entry.Name
+	kind, ext := classify(name)
+	size, mtime := entry.Size, entry.ModTime.Unix()
+	if entry.IsDir {
+		kind, ext, size = "folder", "", 0
+	}
+	id := shortID(path)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if old, ok := s.byID[id]; ok {
+		updated := *old
+		oldKind := updated.Kind
+		updated.Name = name
+		updated.Path = path
+		updated.Kind = kind
+		updated.Ext = ext
+		updated.Video = kind == "video"
+		updated.Play = kind == "video" && browserPlayable[ext]
+		dimsChanged := updated.Mtime != mtime || updated.Size != size || oldKind != kind
+		updated.Size = size
+		updated.Mtime = mtime
+		if dimsChanged {
+			updated.W, updated.H, updated.Orient = 0, 0, 0
+		}
+		s.byID[id] = &updated
+		out := updated
+		return &out
+	}
+	it := &Item{
+		ID: id, Name: name, Path: path, Kind: kind, Ext: ext,
+		Size: size, Mtime: mtime, Video: kind == "video",
+		Play: kind == "video" && browserPlayable[ext],
+	}
+	s.byID[id] = it
+	return it
+}
+
+// remoteBrowse lists a virtual folder. Recursion is bounded by the same entry
+// limit as a local folder, so a share with a deep tree cannot keep the app
+// walking a slow link for minutes.
+func remoteBrowse(req BrowseRequest) DirResult {
+	started := time.Now()
+	path := strings.TrimSuffix(req.Path, "/")
+	res := DirResult{Path: path, Name: remoteName(path), IsDrive: path == remoteShareKey(path)}
+	ctx, cancel := context.WithTimeout(context.Background(), remoteListTimeout)
+	defer cancel()
+	entries, err := remoteListFn(ctx, path)
+	if err != nil {
+		res.Error = err.Error()
+		return res
+	}
+	if parent := remoteParent(path); parent != "" {
+		res.Parent = parent
+	}
+
+	list := make([]*Item, 0, len(entries))
+	countKind := func(it *Item) {
+		switch it.Kind {
+		case "image":
+			res.Images++
+		case "video":
+			res.Videos++
+		case "folder":
+			res.Folders++
+		default:
+			res.Others++
+		}
+	}
+
+	var walk func(dir string, depth int, budget *int)
+	walk = func(dir string, depth int, budget *int) {
+		current := entries
+		if depth > 0 {
+			ctx, cancel := context.WithTimeout(context.Background(), remoteListTimeout)
+			listed, err := remoteListFn(ctx, dir)
+			cancel()
+			if err != nil {
+				return
+			}
+			current = listed
+		}
+		for _, e := range current {
+			if *budget <= 0 {
+				res.Truncated = true
+				return
+			}
+			if !req.ShowHidden && strings.HasPrefix(e.Name, ".") {
+				continue
+			}
+			full := buildRemotePath(dir, e.Name)
+			if e.IsDir && !req.Recursive {
+				it := items.internRemote(full, e)
+				list = append(list, it)
+				*budget--
+				continue
+			}
+			if e.IsDir && req.Recursive {
+				walk(full, depth+1, budget)
+				continue
+			}
+			kind, _ := classify(e.Name)
+			if kind == "other" && !req.ShowOther {
+				continue
+			}
+			it := items.internRemote(full, e)
+			list = append(list, it)
+			*budget--
+		}
+	}
+	budget := req.Limit
+	walk(path, 0, &budget)
+
+	for _, it := range list {
+		countKind(it)
+	}
+	res.Items = list
+	res.Total = len(list)
+	res.ElapsedMS = time.Since(started).Milliseconds()
+	return res
+}
+
+// remoteTree lists the subfolders of a virtual folder for the sidebar tree.
+func remoteTree(path string, showHidden bool) []TreeEntry {
+	ctx, cancel := context.WithTimeout(context.Background(), remoteListTimeout)
+	defer cancel()
+	entries, err := remoteListFn(ctx, path)
+	if err != nil {
+		return []TreeEntry{}
+	}
+	out := []TreeEntry{}
+	for _, e := range entries {
+		if !e.IsDir || (!showHidden && strings.HasPrefix(e.Name, ".")) {
+			continue
+		}
+		full := buildRemotePath(path, e.Name)
+		out = append(out, TreeEntry{
+			Name:        e.Name,
+			Path:        full,
+			HasMedia:    true,
+			HasChildren: true,
+		})
+	}
+	sort.SliceStable(out, func(i, j int) bool { return naturalLess(out[i].Name, out[j].Name) })
+	return out
 }

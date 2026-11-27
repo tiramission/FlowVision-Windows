@@ -21,11 +21,23 @@ type KV struct {
 // the file once and reuses the handle for the EXIF scan; the old version
 // opened the same JPEG twice for every directory item.
 func probeImageDims(path string) dimInfo {
-	f, err := os.Open(path)
-	if err != nil {
-		return dimInfo{}
+	var f io.ReadSeeker
+	if isRemotePath(path) {
+		// One request per image, not one per question: dimensions and EXIF
+		// both come out of the same prefix.
+		head := remoteHead(path)
+		if len(head) == 0 {
+			return dimInfo{}
+		}
+		f = bytes.NewReader(head)
+	} else {
+		file, err := os.Open(path)
+		if err != nil {
+			return dimInfo{}
+		}
+		defer file.Close()
+		f = file
 	}
-	defer f.Close()
 	cfg, _, err := image.DecodeConfig(f)
 	if err != nil || cfg.Width <= 0 || cfg.Height <= 0 {
 		return dimInfo{}
@@ -85,6 +97,13 @@ var exifTags = map[uint16]string{
 }
 
 func readExif(path string) exifData {
+	if isRemotePath(path) {
+		head := remoteHead(path)
+		if len(head) == 0 {
+			return exifData{}
+		}
+		return readExifFile(bytes.NewReader(head))
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return exifData{}
@@ -96,7 +115,7 @@ func readExif(path string) exifData {
 // readExifFile parses EXIF from an already-open JPEG. It seeks back to the
 // beginning because callers such as probeImageDims may have read the image
 // header first.
-func readExifFile(f *os.File) exifData {
+func readExifFile(f io.ReadSeeker) exifData {
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return exifData{}
 	}
@@ -141,9 +160,16 @@ func readExifFile(f *os.File) exifData {
 			if off+4+segLen <= len(buf) {
 				seg = buf[off+4 : off+4+segLen]
 			} else if segLen <= 1024*1024 {
-				seg = make([]byte, segLen)
-				if _, err := f.ReadAt(seg, int64(off+4)); err != nil {
-					return exifData{}
+				// The buffer is a prefix, so a larger APP1 is read from the
+				// stream when it can seek and skipped otherwise.
+				if seeker, ok := f.(io.ReadSeeker); ok {
+					seg = make([]byte, segLen)
+					if _, err := seeker.Seek(int64(off+4), io.SeekStart); err != nil {
+						return exifData{}
+					}
+					if _, err := io.ReadFull(seeker, seg); err != nil {
+						return exifData{}
+					}
 				}
 			}
 			if bytes.HasPrefix(seg, []byte("Exif\x00\x00")) {

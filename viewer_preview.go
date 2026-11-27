@@ -217,7 +217,7 @@ func loadViewerPreviewData(it *Item) (*viewerPreviewResult, error) {
 		return loadViewerPreviewFallback(it, d, p)
 	}
 
-	f, err := os.Open(it.Path)
+	f, err := openItemFile(it)
 	if err != nil {
 		return nil, err
 	}

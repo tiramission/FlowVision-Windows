@@ -343,6 +343,20 @@ type App struct {
 	fillStoppedTab *Tab
 	fillStoppedGen int
 
+	// Remote connection dialog and its draft. The password never leaves the
+	// process unencrypted; DPAPI covers the remembered copy.
+	remoteDialogOpen bool
+	remoteEditing    bool
+	remoteDraft      remoteShare
+	remotePortDraft  float64
+	remotePass       string
+	remoteBusy       bool
+	remoteErr        string
+
+	// A short note in the status bar, for actions that do not open a dialog.
+	statusNotice   string
+	statusNoticeAt time.Time
+
 	// Background task list shown in the status bar and its popover.
 	tasks            []*backgroundTask
 	taskSeq          int
@@ -543,12 +557,25 @@ func (a *App) loadTab(t *Tab, keepScroll bool) {
 				}
 			}
 			if a.win != nil {
-				a.win.SetTitle(t.Name + " — FlowVision")
+				a.setWindowTitle(t)
 			}
 			a.persist()
 			a.refresh()
 		})
 	}()
+}
+
+// setWindowTitle names the window after the tab. A share shows its full
+// address: "PHOTOS" alone does not say which machine it came from.
+func (a *App) setWindowTitle(t *Tab) {
+	if a.win == nil || t == nil {
+		return
+	}
+	name := t.Name
+	if isRemotePath(t.Path) {
+		name = t.Path
+	}
+	a.win.SetTitle(name + " — FlowVision")
 }
 
 func (a *App) reloadActive() {
@@ -566,7 +593,7 @@ func (a *App) activateTab(i int) {
 		a.loadTab(t, false)
 	} else if t.Loaded {
 		if a.win != nil {
-			a.win.SetTitle(t.Name + " — FlowVision")
+			a.setWindowTitle(t)
 		}
 	}
 	a.persist()
@@ -623,7 +650,7 @@ func (a *App) goTo(path string, pushHistory bool) {
 	if t == nil || path == "" {
 		return
 	}
-	path = filepath.Clean(path)
+	path = cleanDisplayPath(path)
 	if strings.EqualFold(path, t.Path) && t.Loaded {
 		return
 	}
@@ -681,6 +708,11 @@ func (a *App) sibling(dir int) {
 
 func (a *App) openPathArgument(path string) {
 	path = strings.Trim(path, `"`)
+	if isRemotePath(path) {
+		// A virtual path has no os.Stat and no file name to select.
+		a.goTo(path, true)
+		return
+	}
 	st, err := os.Stat(path)
 	if err != nil {
 		path = strings.TrimSpace(path)
@@ -695,7 +727,7 @@ func (a *App) openPathArgument(path string) {
 		want = filepath.Dir(path)
 		selectName = filepath.Base(path)
 	}
-	want = filepath.Clean(want)
+	want = cleanDisplayPath(want)
 	for i, t := range a.tabs {
 		if strings.EqualFold(t.Path, want) {
 			a.active = i
@@ -751,7 +783,15 @@ func (a *App) revealSelected() {
 		return
 	}
 	if it := t.selectedOne(); it != nil {
+		if isRemotePath(it.Path) {
+			a.showStatusNotice("网络位置不在资源管理器里显示")
+			return
+		}
 		_ = (AppSvc{}).Reveal(it.Path)
+		return
+	}
+	if isRemotePath(t.Path) {
+		a.showStatusNotice("网络位置不在资源管理器里显示")
 		return
 	}
 	_ = (AppSvc{}).OpenFolder(t.Path)
@@ -759,6 +799,10 @@ func (a *App) revealSelected() {
 
 func (a *App) openSelectedExternal() {
 	if it := a.tab().selectedOne(); it != nil {
+		if isRemotePath(it.Path) {
+			a.showStatusNotice("网络位置只在应用内浏览，不能交给其他程序打开")
+			return
+		}
 		_ = (AppSvc{}).OpenExternal(it.Path)
 	}
 }
@@ -774,10 +818,10 @@ func (a *App) toggleFavorite() {
 	if t == nil {
 		return
 	}
-	p := strings.ToLower(filepath.Clean(t.Path))
+	p := strings.ToLower(cleanDisplayPath(t.Path))
 	found := -1
 	for i, f := range a.settings.Favorites {
-		if strings.ToLower(filepath.Clean(f)) == p {
+		if strings.ToLower(cleanDisplayPath(f)) == p {
 			found = i
 			break
 		}
@@ -794,7 +838,7 @@ func (a *App) toggleFavorite() {
 func (a *App) removeFavorite(path string) {
 	out := a.settings.Favorites[:0]
 	for _, f := range a.settings.Favorites {
-		if !strings.EqualFold(filepath.Clean(f), filepath.Clean(path)) {
+		if !strings.EqualFold(cleanDisplayPath(f), cleanDisplayPath(path)) {
 			out = append(out, f)
 		}
 	}
@@ -805,7 +849,7 @@ func (a *App) removeFavorite(path string) {
 
 func (a *App) isFavorite(path string) bool {
 	for _, f := range a.settings.Favorites {
-		if strings.EqualFold(filepath.Clean(f), filepath.Clean(path)) {
+		if strings.EqualFold(cleanDisplayPath(f), cleanDisplayPath(path)) {
 			return true
 		}
 	}
@@ -1100,6 +1144,10 @@ func (a *App) clearCache() {
 }
 
 func (a *App) beginRename() {
+	if a.tabReadOnly() {
+		a.showStatusNotice("网络位置是只读的，不能重命名")
+		return
+	}
 	it := a.tab().selectedOne()
 	if it == nil {
 		return
@@ -1165,6 +1213,10 @@ func (a *App) commitRename() {
 }
 
 func (a *App) beginNewFolder() {
+	if a.tabReadOnly() {
+		a.showStatusNotice("网络位置是只读的，不能新建文件夹")
+		return
+	}
 	a.newFolderOpen = true
 	a.newFolderDraft = "新建文件夹"
 	a.newFolderErr = ""
@@ -1190,6 +1242,10 @@ func (a *App) commitNewFolder() {
 }
 
 func (a *App) askDelete(permanent bool) {
+	if a.tabReadOnly() {
+		a.showStatusNotice("网络位置是只读的，不能删除文件")
+		return
+	}
 	if len(a.tab().Selected) == 0 {
 		return
 	}
@@ -1230,8 +1286,8 @@ func (a *App) doDelete() {
 
 func (a *App) invalidateTree(dir string) {
 	a.treeGen++
-	a.treeLoaded[filepath.Clean(dir)] = false
-	delete(a.treeKids, filepath.Clean(dir))
+	a.treeLoaded[cleanDisplayPath(dir)] = false
+	delete(a.treeKids, cleanDisplayPath(dir))
 	invalidateMedia(dir)
 	a.refresh()
 }
@@ -1350,6 +1406,8 @@ func (a *App) activateItem(it *Item) {
 		a.goTo(it.Path, true)
 	case isMediaKind(it.Kind):
 		a.openViewer(it)
+	case isRemotePath(it.Path):
+		a.showStatusNotice("网络位置只在应用内浏览，不能交给其他程序打开")
 	default:
 		if err := (AppSvc{}).OpenExternal(it.Path); err != nil {
 			a.showError(err.Error())
@@ -1461,7 +1519,19 @@ func (a *App) loadViewerMedia(it *Item) {
 	}
 	switch it.Kind {
 	case "video":
-		player, err := mvideo.Open(it.Path)
+		var player *ui.VideoPlayer
+		var err error
+		if isRemotePath(it.Path) {
+			// Media Foundation cannot open a share with this app's credentials,
+			// so the local media server hands it a loopback URL that answers
+			// Range requests straight from the share.
+			var mediaURL string
+			if mediaURL, err = remoteMediaServer.URL(it.Path); err == nil {
+				player, err = mvideo.OpenURL(mediaURL)
+			}
+		} else {
+			player, err = mvideo.Open(it.Path)
+		}
 		a.update(func() {
 			if a.viewer.Gen != gen || a.viewer.Item != it {
 				if player != nil {
@@ -2152,7 +2222,10 @@ func (a *App) endThumbFrame(frame uint64) {
 // turning the feature off cancels what is still queued; a decode already in
 // flight just finishes and leaves a valid cache file behind.
 func (a *App) pumpThumbPrefetch(t *Tab) {
-	if thumbDir == "" || a.thumbQueue == nil || !a.settings.ThumbPrefetch || t == nil || !t.Loaded || t.Loading {
+	if thumbDir == "" || a.thumbQueue == nil || !a.settings.ThumbPrefetch || t == nil || !t.Loaded || t.Loading ||
+		// A whole-folder fill over SMB would saturate the share and the
+		// cache budget alike; network folders fill as they scroll.
+		isRemotePath(t.Path) {
 		a.cancelThumbPrefetch()
 		a.dropTasksOfKind(taskKindFill)
 		return
@@ -2267,6 +2340,10 @@ func (a *App) thumbWorker() {
 // runThumbTask loads one queued thumbnail and applies the result on the main
 // thread.
 func (a *App) runThumbTask(task *thumbTask) {
+	if !task.preload && isRemotePath(task.item.Path) {
+		remoteThumbSlots <- struct{}{}
+		defer func() { <-remoteThumbSlots }()
+	}
 	if task.preload {
 		// Background fill: stop at the disk cache. No bitmap, no dims, no
 		// repaint; the card decodes from cache when it becomes visible.
@@ -2410,7 +2487,7 @@ func (a *App) treeOpenPtr(path string) *bool {
 }
 
 func (a *App) ensureTree(path string) {
-	p := filepath.Clean(path)
+	p := cleanDisplayPath(path)
 	if a.treeLoaded[p] || a.treeLoading[p] {
 		return
 	}
