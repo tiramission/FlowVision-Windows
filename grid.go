@@ -459,10 +459,14 @@ func (a *App) drawGrid(p *ui.Painter, r ui.Rect, layout gridLayout, th *ui.Theme
 				p.Icon(icon, ui.Rect{X: imgR.X + (imgR.W-side)/2, Y: imgR.Y + (imgR.H-side)/2, W: side, H: side}, th.TextMuted.Alpha(.78))
 			}
 			if it.Kind == "video" {
-				badge := ui.Rect{X: imgR.X + 8, Y: imgR.Y + 8, W: 56, H: 22}
-				p.Fill(badge, ui.RGBA(0, 0, 0, 150), 11)
-				p.Icon(lucide.Play(), ui.Rect{X: badge.X + 7, Y: badge.Y + 6, W: 10, H: 10}, ui.RGBA(255, 255, 255, 235))
-				drawInterfaceText(p, badge.X+20, badge.Y+4, "视频", 10.5, 0, ui.RGBA(255, 255, 255, 235))
+				// A play mark alone: it says "video" without a word, and its
+				// geometry is arithmetic, so no font or script can knock it off
+				// centre. A label beside it had to be nudged by a factor
+				// measured from the interface font, which broke as soon as the
+				// user chose another one.
+				g := videoBadgeGeometry(ui.Rect{X: imgR.X + 8, Y: imgR.Y + 8})
+				p.Fill(g.Pill, ui.RGBA(0, 0, 0, 150), g.Pill.H/2)
+				p.Icon(lucide.Play(), g.Icon, ui.RGBA(255, 255, 255, 240))
 			}
 		} else {
 			p.Fill(imgR, th.SurfaceHover, tileRadius)
@@ -601,4 +605,29 @@ func (a *App) selectGridIndex(tab *Tab, layout gridLayout, idx int) {
 		tab.Scroll.Y = 0
 	}
 	a.refresh()
+}
+
+// badgeGeometry is where the video badge lands, shared by the painter and the
+// tests. Its pill is a circle around the play mark: with no label to size
+// against, the badge needs no text measurement at all.
+type badgeGeometry struct {
+	Pill ui.Rect
+	Icon ui.Rect
+}
+
+// videoBadgeGeometry lays out the video badge at origin. The mark is centred
+// in a round pill by plain arithmetic, so it cannot drift with the interface
+// font, the display scale or the text direction.
+func videoBadgeGeometry(origin ui.Rect) badgeGeometry {
+	const side, iconSide = float32(24), float32(12)
+	pill := ui.Rect{X: origin.X, Y: origin.Y, W: side, H: side}
+	return badgeGeometry{
+		Pill: pill,
+		Icon: ui.Rect{
+			X: pill.X + (side-iconSide)/2,
+			Y: pill.Y + (side-iconSide)/2,
+			W: iconSide,
+			H: iconSide,
+		},
+	}
 }

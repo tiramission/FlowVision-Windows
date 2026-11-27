@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/egoist/mygo/ui"
 )
 
 func newJPEG(t *testing.T, path string, w, h int) {
@@ -400,5 +402,33 @@ func TestInvalidWindowsNamesRejected(t *testing.T) {
 	}
 	if st, err := os.Stat(got); err != nil || !st.IsDir() {
 		t.Fatalf("valid folder missing: %v", err)
+	}
+}
+
+// TestVideoBadgeIsAFontIndependentMark pins the badge geometry: a round pill
+// with the play mark centred by arithmetic alone. A label beside the mark used
+// to need a nudge measured from the interface font, which the user can change,
+// so the badge carries the mark only.
+func TestVideoBadgeIsAFontIndependentMark(t *testing.T) {
+	g := videoBadgeGeometry(ui.Rect{X: 100, Y: 40})
+
+	if g.Pill.W != g.Pill.H {
+		t.Fatalf("pill is not round: %.1f x %.1f", g.Pill.W, g.Pill.H)
+	}
+	// Centred on both axes, to the pixel.
+	wantIconX := g.Pill.X + (g.Pill.W-g.Icon.W)/2
+	wantIconY := g.Pill.Y + (g.Pill.H-g.Icon.H)/2
+	if g.Icon.X != wantIconX || g.Icon.Y != wantIconY {
+		t.Fatalf("mark at (%.1f, %.1f), want (%.1f, %.1f)", g.Icon.X, g.Icon.Y, wantIconX, wantIconY)
+	}
+	// The mark keeps a margin inside the pill, so it never touches the edge.
+	if g.Icon.X <= g.Pill.X || g.Icon.Y <= g.Pill.Y ||
+		g.Icon.X+g.Icon.W >= g.Pill.X+g.Pill.W ||
+		g.Icon.Y+g.Icon.H >= g.Pill.Y+g.Pill.H {
+		t.Fatalf("mark %+v does not sit inside the pill %+v", g.Icon, g.Pill)
+	}
+	// It stays in the corner it was given.
+	if g.Pill.X != 100 || g.Pill.Y != 40 {
+		t.Fatalf("pill ignored its origin: %+v", g.Pill)
 	}
 }
