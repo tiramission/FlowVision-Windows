@@ -405,7 +405,7 @@ func (a *App) drawGrid(p *ui.Painter, r ui.Rect, layout gridLayout, th *ui.Theme
 			p.Icon(lucide.Folder(), ui.Rect{X: imgR.X + (imgR.W-side)/2, Y: iconY, W: side, H: side}, th.Accent.Alpha(.86))
 			label := "文件夹"
 			w, _ := p.MeasureText(0, ui.Span{Text: label, Size: 10.5, Weight: 500})
-			p.Text(imgR.X+(imgR.W-w)/2, iconY+side+4, label, 10.5, th.TextMuted.Alpha(.9))
+			drawInterfaceText(p, imgR.X+(imgR.W-w)/2, iconY+side+4, label, 10.5, 500, th.TextMuted.Alpha(.9))
 		} else if it.Kind == "image" || it.Kind == "video" {
 			bmp := a.thumb(it, a.settings.ThumbSize)
 			if bmp != nil {
@@ -425,7 +425,7 @@ func (a *App) drawGrid(p *ui.Painter, r ui.Rect, layout gridLayout, th *ui.Theme
 				badge := ui.Rect{X: imgR.X + 8, Y: imgR.Y + 8, W: 56, H: 22}
 				p.Fill(badge, ui.RGBA(0, 0, 0, 150), 11)
 				p.Icon(lucide.Play(), ui.Rect{X: badge.X + 7, Y: badge.Y + 6, W: 10, H: 10}, ui.RGBA(255, 255, 255, 235))
-				p.Text(badge.X+20, badge.Y+4, "视频", 10.5, ui.RGBA(255, 255, 255, 235))
+				drawInterfaceText(p, badge.X+20, badge.Y+4, "视频", 10.5, 0, ui.RGBA(255, 255, 255, 235))
 			}
 		} else {
 			p.Fill(imgR, th.SurfaceHover, tileRadius)
@@ -437,7 +437,7 @@ func (a *App) drawGrid(p *ui.Painter, r ui.Rect, layout gridLayout, th *ui.Theme
 			side := float32(30)
 			p.Icon(icon, ui.Rect{X: imgR.X + (imgR.W-side)/2, Y: imgR.Y + (imgR.H-side)/2 - 8, W: side, H: side}, th.TextMuted)
 			w, _ := p.MeasureText(0, ui.Span{Text: ext, Size: 12, Weight: 600})
-			p.Text(imgR.X+(imgR.W-w)/2, imgR.Y+imgR.H/2+10, ext, 12, th.TextMuted)
+			drawInterfaceText(p, imgR.X+(imgR.W-w)/2, imgR.Y+imgR.H/2+10, ext, 12, 600, th.TextMuted)
 		}
 		captionY := imgR.Y + imgR.H + 8
 		if layout.Captions || it.Kind == "folder" {
@@ -446,7 +446,7 @@ func (a *App) drawGrid(p *ui.Painter, r ui.Rect, layout gridLayout, th *ui.Theme
 				if selected {
 					color = th.Accent
 				}
-				p.Text(imgR.X+7, captionY, it.Name, 11, color)
+				drawInterfaceText(p, imgR.X+7, captionY, it.Name, 11, 0, color)
 			})
 		} else if i == hover {
 			// With captions hidden the wall stays clean, but a hovered tile
@@ -457,7 +457,7 @@ func (a *App) drawGrid(p *ui.Painter, r ui.Rect, layout gridLayout, th *ui.Theme
 			pill := ui.Rect{X: imgR.X + 8, Y: imgR.Y + imgR.H - 34, W: max(0, pillW), H: 25}
 			p.Fill(pill, ui.RGBA(10, 10, 11, 176), 8)
 			p.Clip(ui.Rect{X: pill.X + 10, Y: pill.Y + 5, W: max(0, pill.W-20), H: 16}, 0, func() {
-				p.Text(pill.X+10, pill.Y+5, label, 11, ui.RGBA(255, 255, 255, 240))
+				drawInterfaceText(p, pill.X+10, pill.Y+5, label, 11, 500, ui.RGBA(255, 255, 255, 240))
 			})
 		}
 

@@ -118,6 +118,11 @@ func viewerPalette() *ui.Theme {
 // applyThemePreferences keeps the app's existing accessibility behavior after
 // a custom palette replaces Onevra's defaults.
 func applyThemePreferences(t *ui.Theme, c *ui.Context) {
+	// The interface font is an appearance preference like the palette, so it
+	// applies to the gallery and the viewer chrome alike.
+	if family := interfaceFont(); family != "" {
+		t.Font = family
+	}
 	p := c.Preferences()
 	if p.HighContrast {
 		t.Border = t.Border.Mix(t.Text, 0.45)
@@ -128,4 +133,12 @@ func applyThemePreferences(t *ui.Theme, c *ui.Context) {
 	if s := p.TextScale; s > 0 && s != 1 {
 		t.FontSize *= s
 	}
+}
+
+// drawInterfaceText paints one line of custom-drawn text in the interface
+// font. Painter.Text lays text out with the platform's default family, which
+// left the grid captions and the viewer HUD in the system font while every
+// component already used the theme's family.
+func drawInterfaceText(p *ui.Painter, x, y float32, s string, size float32, weight int, c ui.Color) {
+	p.RichText(x, y, 0, ui.Span{Text: s, Size: size, Weight: weight, Color: c})
 }

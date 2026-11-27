@@ -73,3 +73,11 @@ module cache used to build this release.
 This notice is informational; the GPL-3.0 license in `LICENSE` governs the
 FlowVision source as a whole. The MIT and BSD licenses above apply only to
 their respective components.
+
+## MiSans（可选）
+
+- Project: https://hyperos.mi.com/font/zh
+- Used for: the interface font, when the build ships it in `resources/fonts`.
+- License: MiSans 字体知识产权许可协议（小米科技有限责任公司）。字体按官方发布
+  的原文件使用，未做子集化、转换或改名；About 窗口与本文档注明使用了 MiSans。
+  随应用分发的字体文件不属于 GPL-3.0。

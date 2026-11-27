@@ -204,7 +204,7 @@ func (a *App) drawViewerStatusPill(p *ui.Painter, r ui.Rect, th *ui.Theme, text 
 	}
 	p.Fill(pill, bg, 10)
 	p.Stroke(pill, th.Border.Alpha(.72*alpha), 10, 1)
-	p.Text(x+pad, y+7, text, size, fg)
+	drawInterfaceText(p, x+pad, y+7, text, size, 500, fg)
 }
 
 func (a *App) drawViewerDebugHUD(p *ui.Painter, r ui.Rect, th *ui.Theme) {
@@ -227,6 +227,6 @@ func (a *App) drawViewerDebugHUD(p *ui.Painter, r ui.Rect, th *ui.Theme) {
 	y := r.Y + 10
 	p.Fill(ui.Rect{X: x - 8, Y: y - 4, W: 296, H: float32(len(lines)*15 + 8)}, ui.RGBA(8, 8, 12, 0.62), 8)
 	for i, line := range lines {
-		p.Text(x, y+float32(i)*15+4, line, 9, ui.RGBA(210, 220, 235, 0.9))
+		drawInterfaceText(p, x, y+float32(i)*15+4, line, 9, 0, ui.RGBA(210, 220, 235, 0.9))
 	}
 }

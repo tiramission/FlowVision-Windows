@@ -715,7 +715,7 @@ func (a *App) viewerCanvas(c *ui.Context, it *Item, th *ui.Theme) {
 						msg = err.Error()
 					}
 					w, _ := p.MeasureText(0, ui.Span{Text: msg, Size: 13})
-					p.Text(r.X+(r.W-w)/2, r.Y+r.H/2, msg, 13, ui.RGBA(230, 230, 235, 255))
+					drawInterfaceText(p, r.X+(r.W-w)/2, r.Y+r.H/2, msg, 13, 0, ui.RGBA(230, 230, 235, 255))
 				}
 			case a.viewer.Bitmap == nil && a.viewer.Placeholder != nil:
 				p.Fill(r, ui.Hex("#0a0a0b"), 0)
@@ -737,7 +737,7 @@ func (a *App) viewerCanvas(c *ui.Context, it *Item, th *ui.Theme) {
 					msg = a.viewer.Err
 				}
 				w, _ := p.MeasureText(0, ui.Span{Text: msg, Size: 13})
-				p.Text(r.X+(r.W-w)/2, r.Y+r.H/2, msg, 13, ui.RGBA(230, 230, 235, 255))
+				drawInterfaceText(p, r.X+(r.W-w)/2, r.Y+r.H/2, msg, 13, 0, ui.RGBA(230, 230, 235, 255))
 			default:
 				bw, bh := a.viewer.Bitmap.Size()
 				if bw <= 0 || bh <= 0 {

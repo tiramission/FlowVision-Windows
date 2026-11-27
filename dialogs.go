@@ -192,6 +192,9 @@ func (a *App) aboutModal(c *ui.Context) {
 			components.Text(c, "Windows 重写：Go 后端与 MyGo 原生 ui 包，Onevra 提供主题与控件；不使用 WebView2、HTML 或 JavaScript。").
 				FontSize(10.5).TextColor(th.TextMuted)
 			components.Text(c, "许可证：GPL-3.0").FontSize(10.5)
+			if family := interfaceFont(); family != "" {
+				components.Text(c, "界面字体："+family+"（小米科技有限责任公司）").FontSize(10.5).TextColor(th.TextMuted)
+			}
 			ui.Row(c).Justify(ui.SpaceBetween).Children(func() {
 				if components.Button(c, "检查更新", components.ButtonSecondary).Clicked() {
 					a.checkForUpdates()

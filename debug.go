@@ -66,6 +66,8 @@ type debugState struct {
 	TasksRunning             int      `json:"tasksRunning"`
 	TasksFirst               string   `json:"tasksFirst"`
 	ThumbBackend             string   `json:"thumbBackend"`
+	InterfaceFont            string   `json:"interfaceFont,omitempty"`
+	InterfaceFontFiles       int      `json:"interfaceFontFiles"`
 	Goroutines               int      `json:"goroutines"`
 	Sidebar                  bool     `json:"sidebar"`
 	Recursive                bool     `json:"recursive"`
@@ -162,6 +164,8 @@ func debugSnapshot() debugState {
 		st.TasksFirst = taskProgressText(visible[0])
 	}
 	st.ThumbBackend = thumbBackendMode()
+	st.InterfaceFont = interfaceFont()
+	st.InterfaceFontFiles = len(interfaceFontFiles())
 	st.Goroutines = runtime.NumGoroutine()
 	st.Recursive = app.settings.Recursive
 	st.ShowHidden = app.settings.ShowHidden

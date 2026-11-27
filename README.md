@@ -6,7 +6,7 @@
 
 把本地图片和视频变成可浏览、可沉浸查看的瀑布流。FlowVision for Windows 是 [netdcy/FlowVision](https://github.com/netdcy/FlowVision)（macOS，Swift/AppKit）的 Windows 重写版：**Go + MyGo 原生 `ui` + Onevra**，不使用 WebView2、HTML 或 JavaScript，也不需要 cgo、Swift 或 Xcode。
 
-当前版本 **1.8.0**：新增后台任务面板（状态栏「后台 N」+ 进度 + 取消，查看器沉浸时走 HUD 单行）；修复超大图无法回到 100% 的缩放上限。1.7.0 的整目录缩略图补载、查看器原图预热与 `thumbs` / `previews` 缓存拆分保持不变。
+当前版本 **1.9.0**：界面与查看器 chrome 统一改用 MiSans（官方可变字体 `MiSans VF`，100–900 全字重，随安装包分发），瀑布流卡片文字与查看器 HUD 也一并跟随主题字体；1.8.0 的后台任务面板与超大图 100% 缩放修复保持不变。
 
 ## 下载与安装
 
@@ -39,6 +39,7 @@ irm https://github.com/tiramission/FlowVision-Windows/releases/latest/download/i
 - **侧键与预加载**：设置 → 控制里为查看器的“上一张 / 下一张”分别录制单击和长按快捷键，物理侧键可直接按下识别；查看器可预加载前后各若干张的 2560 预览（默认 2 张，384 MB 预算，不预取原图），当前图的原图由“自动载入当前图原图”在预览完成后补上；鼠标在左右边带停留 220 ms 会优先预取该方向相邻图片，`ViewerPreload=0` 时同步关闭。
 - **文件操作**：回收站删除、永久删除、重命名、新建文件夹、资源管理器定位、默认程序打开、复制路径；右键菜单与键盘操作并存。
 - **原生界面**：Onevra 的暖白画廊/中性暗房主题、陶土色强调色、Sidebar、IconButton、TextBox、Switch、Badge 与 Lucide 矢量图标；照片网格由 Go 侧的 `ui.Box.Draw` 虚拟化绘制。
+- **界面字体**：`resources/fonts` 里的 MiSans（官方可变字体 `MiSans VF.ttf`，一个文件覆盖 100–900 全部字重）在启动时用 `ui.RegisterFont` 注册为 DirectWrite 内存字体集合（Windows 10 1703+），字重轴覆盖 100–900，界面用到的 400 / 500 / 600 / 700 都是真字重；缺少文件时回退系统字体，系统装过 MiSans 也会自动启用，`FLOWVISION_UI_FONT` 可临时指定其他字体对照。许可与体积见 `resources/fonts/README.md`。
 - **签名更新**：MyGo `Updater` 校验 Ed25519 签名，支持增量补丁；应用内更新面板负责检查、显示中文发布说明、下载进度、安装与重启，不再使用 MyGo 自带更新窗口。
 - **后台任务**：状态栏右侧在耗时任务运行时出现「后台 N」，点开可看进度并取消；目前覆盖整目录缩略图补载与查看器原图载入。1 秒内的短任务不出现，完成的消息 4 秒后自动消失，失败的需要手动关闭。查看器沉浸时改用底部 HUD 单行显示进度，不额外弹层。
 
