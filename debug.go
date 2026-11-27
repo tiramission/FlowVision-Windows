@@ -9,6 +9,7 @@ package main
 // the native layout.
 
 import (
+	"context"
 	"encoding/json"
 	"net"
 	"net/http"
@@ -61,6 +62,13 @@ type debugState struct {
 	ThumbPrefetchNext        int      `json:"thumbPrefetchNext"`
 	ThumbPrefetchActive      int      `json:"thumbPrefetchActive"`
 	ThumbPrefetchTotal       int      `json:"thumbPrefetchTotal"`
+	MultiSelect              bool     `json:"multiSelect"`
+	SelectedCount            int      `json:"selectedCount"`
+	Favorites                []string `json:"favorites"`
+	ShowPlaces               bool     `json:"showPlaces"`
+	ThumbPrefetchMin         int      `json:"thumbPrefetchMin"`
+	Notice                   string   `json:"notice,omitempty"`
+	RemoteShares             []string `json:"remoteShares"`
 	TasksOpen                bool     `json:"tasksOpen"`
 	TasksVisible             int      `json:"tasksVisible"`
 	TasksRunning             int      `json:"tasksRunning"`
@@ -157,7 +165,20 @@ func debugSnapshot() debugState {
 	if t := app.tab(); t != nil {
 		st.ThumbPrefetchTotal = len(t.All)
 	}
+	st.Notice = app.notice
+	for _, sh := range app.settings.RemoteShares {
+		st.RemoteShares = append(st.RemoteShares, sh.Protocol+"|"+sh.Host+"|"+strconv.Itoa(sh.Port)+"|"+sh.Share+"|"+sh.Base)
+	}
 	st.TasksOpen = app.tasksOpen
+	if t := app.tab(); t != nil {
+		st.MultiSelect = t.MultiSelect
+		st.SelectedCount = len(t.Selected)
+	}
+	for _, f := range app.settings.Favorites {
+		st.Favorites = append(st.Favorites, f.Kind+"|"+f.Path)
+	}
+	st.ShowPlaces = app.settings.ShowPlaces
+	st.ThumbPrefetchMin = app.settings.ThumbPrefetchMin
 	st.TasksRunning = app.runningTaskCount()
 	st.TasksVisible = len(app.visibleTasks(time.Now()))
 	if visible := app.visibleTasks(time.Now()); len(visible) > 0 {
@@ -495,6 +516,49 @@ func debugCommand(name, arg string) {
 		if share.ID != "" {
 			app.editRemoteShare(share)
 		}
+	case "remoteport":
+		if n, err := strconv.Atoi(arg); err == nil {
+			app.remotePortDraft = float64(n)
+			app.remoteDraft.Port = n
+		}
+	case "remotesecure":
+		app.remoteDraft.Secure = arg == "on"
+	case "remoteskipverify":
+		app.remoteDraft.SkipVerify = arg == "on"
+	case "remotebase":
+		app.remoteDraft.Base = arg
+	case "remotename":
+		app.remoteDraft.Name = arg
+	case "remotehost":
+		app.remoteDraft.Host = arg
+	case "remotecommit":
+		app.commitRemoteShare()
+	case "remotedial":
+		// remotedial tries the current draft for real and reports the result,
+		// so the certificate switch can be checked end to end.
+		draft := app.remoteDraft
+		draft.Port = int(app.remotePortDraft)
+		draft.Protocol = remoteWebDAV
+		draft.ID = remoteShareID(draft)
+		password := app.remotePass
+		go func() {
+			_, err := remotePoolInstance.connect(context.Background(), draft, password)
+			msg := "ok"
+			if err != nil {
+				msg = err.Error()
+			}
+			app.update(func() { app.notice = msg })
+		}()
+	case "remotedebug":
+		// The URL the dialog would dial right now, reported through the
+		// status notice so it can be read from /state.
+		app.notice = webdavBaseURL(remoteShare{
+			Protocol: remoteWebDAV,
+			Host:     app.remoteDraft.Host,
+			Port:     int(app.remotePortDraft),
+			Base:     app.remoteDraft.Base,
+			Secure:   app.remoteDraft.Secure,
+		})
 	case "remoteproto":
 		if len(arg) > 0 {
 			app.remoteDraft.Protocol = arg
@@ -619,7 +683,76 @@ func debugCommand(name, arg string) {
 	case "error":
 		app.showError(arg)
 	case "favorite":
-		app.toggleFavorite()
+		// favorite=<index> collects that tile; no argument collects the
+		// selected one.
+		if t != nil {
+			if arg != "" {
+				i, _ := strconv.Atoi(arg)
+				if i >= 0 && i < len(t.Items) {
+					t.Selected = map[string]bool{t.Items[i].ID: true}
+				}
+			}
+			app.toggleItemFavorites()
+		}
+	case "favoritemulti":
+		// favoritemulti=0,2,3 selects those indices and stars them.
+		if t != nil {
+			t.Selected = map[string]bool{}
+			for _, part := range strings.Split(arg, ",") {
+				i, _ := strconv.Atoi(strings.TrimSpace(part))
+				if i >= 0 && i < len(t.Items) {
+					t.Selected[t.Items[i].ID] = true
+				}
+			}
+			app.toggleItemFavorites()
+		}
+	case "multi":
+		app.setMultiSelect(arg == "on")
+	case "clickmod":
+		// clickmod=<index>,ctrl|shift reproduces a modified click on a tile,
+		// so the multi-select entry points can be checked from outside.
+		parts := strings.Split(arg, ",")
+		if t != nil && len(parts) == 2 {
+			i, _ := strconv.Atoi(strings.TrimSpace(parts[0]))
+			if i >= 0 && i < len(t.Items) {
+				id := t.Items[i].ID
+				switch strings.TrimSpace(parts[1]) {
+				case "ctrl":
+					t.MultiSelect = true
+					app.toggleSelect(id, true)
+				case "shift":
+					t.MultiSelect = true
+					app.selectRange(id)
+				}
+			}
+		}
+	case "selectmenu":
+		app.openSelectMenu()
+	case "gridmenu":
+		// gridmenu=<index> opens the item menu for that tile; "empty" opens the
+		// folder menu. Used to check which entries a location offers.
+		if t != nil {
+			app.gridMenuX, app.gridMenuY = 420, 260
+			if arg == "empty" {
+				app.contextIDs = nil
+				app.contextEmpty = true
+			} else {
+				i, _ := strconv.Atoi(arg)
+				app.contextIDs = nil
+				app.contextEmpty = false
+				if i >= 0 && i < len(t.Items) {
+					t.Selected = map[string]bool{t.Items[i].ID: true}
+					app.contextIDs = []string{t.Items[i].ID}
+				}
+			}
+			app.openGridMenu(app.gridMenuX, app.gridMenuY, false)
+		}
+	case "openfav":
+		// openfav=<index> opens a saved favorite the way the sidebar does.
+		i, _ := strconv.Atoi(arg)
+		if i >= 0 && i < len(app.settings.Favorites) {
+			app.openFavorite(app.settings.Favorites[i])
+		}
 	case "newfolder":
 		app.newFolderDraft = arg
 		app.newFolderOpen = true

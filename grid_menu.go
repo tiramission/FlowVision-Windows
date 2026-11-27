@@ -267,7 +267,13 @@ func (a *App) gridMenuEntries() []gridMenuEntry {
 				a.later(func() { _ = (AppSvc{}).CopyText(path) })
 			}
 		}},
+		{label: favoriteMenuLabel(a, ids), action: func() {
+			a.later(a.toggleItemFavorites)
+		}},
 		{divider: true},
+		{label: "选择…", action: func() {
+			a.later(func() { a.openSelectMenu() })
+		}},
 		{label: "重命名…", shortcut: "F2", disabled: one == nil, write: true, action: func() {
 			if one != nil {
 				a.later(a.beginRename)
@@ -290,6 +296,29 @@ func (a *App) gridMenuEntries() []gridMenuEntry {
 		}},
 	}
 	return withoutWriteEntries(a.tabReadOnly(), entries)
+}
+
+// favoriteMenuLabel reads "收藏" or "取消收藏" depending on what the menu is
+// about to do, so the same row never needs a second click to explain itself.
+func favoriteMenuLabel(a *App, ids []string) string {
+	saved, media := 0, 0
+	for _, id := range ids {
+		it, ok := items.Get(id)
+		if !ok || !isMediaKind(it.Kind) {
+			continue
+		}
+		media++
+		if a.isFavorite(it.Path) {
+			saved++
+		}
+	}
+	switch {
+	case media == 0:
+		return "收藏到收藏夹"
+	case saved == media:
+		return "移出收藏夹"
+	}
+	return "收藏到收藏夹"
 }
 
 // withoutWriteEntries hides the entries that change files on a read-only

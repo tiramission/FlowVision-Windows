@@ -66,8 +66,43 @@ type remoteShare struct {
 	SavePass bool   `json:"savePass,omitempty"`
 	// Secure picks HTTPS for WebDAV. Many NAS boxes serve plain HTTP on their
 	// WebDAV port, so it is a choice rather than an assumption.
-	Secure   bool `json:"secure,omitempty"`
-	Insecure bool `json:"insecure,omitempty"` // accept a self-signed certificate
+	Secure bool `json:"secure,omitempty"`
+	// SkipVerify turns off certificate checking entirely, for a NAS whose
+	// certificate is self-signed, expired or issued for another name. It is
+	// one switch rather than a policy enum because every case it covers needs
+	// the same thing, and a finer split would only add states to explain.
+	SkipVerify bool `json:"skipVerify,omitempty"`
+}
+
+// remoteAlias is the label a share is shown under, or "" when it has none.
+// An alias is per connection, not per folder: every path inside the share uses
+// it as the first breadcrumb, which is what keeps a long address out of the
+// interface.
+func remoteAlias(s remoteShare) string {
+	return strings.TrimSpace(s.Name)
+}
+
+// remoteShareForPath finds the saved share a virtual path belongs to.
+func remoteShareForPath(p string) (remoteShare, bool) {
+	key := remoteShareKey(p)
+	if key == "" {
+		return remoteShare{}, false
+	}
+	for _, s := range getSettings().RemoteShares {
+		if remoteShareKey(remoteRoot(s)) == key {
+			return s, true
+		}
+	}
+	return remoteShare{}, false
+}
+
+// remoteAliasForPath is the alias of the share a path belongs to, or "".
+func remoteAliasForPath(p string) string {
+	s, ok := remoteShareForPath(p)
+	if !ok {
+		return ""
+	}
+	return remoteAlias(s)
 }
 
 // remoteRoot is the virtual path a share opens at.
@@ -108,7 +143,14 @@ func hostPort(host string, port int) string {
 
 // isRemotePath reports whether p is a virtual remote path.
 func isRemotePath(p string) bool {
-	return strings.HasPrefix(p, remoteSMB+"://") || strings.HasPrefix(p, remoteWebDAV+"://")
+	// The scheme is matched case-insensitively: a favorite or a pasted address
+	// can arrive as SMB://, and treating it as a local path would send it
+	// through filepath.Clean and lose the slashes.
+	if len(p) < 6 {
+		return false
+	}
+	lower := strings.ToLower(p)
+	return strings.HasPrefix(lower, remoteSMB+"://") || strings.HasPrefix(lower, remoteWebDAV+"://")
 }
 
 // remoteShareKey returns the share a virtual path belongs to, as
@@ -138,14 +180,17 @@ func remoteShareKey(p string) string {
 }
 
 // remoteName is the display name of a virtual path: its last segment.
+// remoteName is the label a tab or breadcrumb shows. The virtual path stores
+// escaped segments, so the name is decoded before it reaches the interface:
+// a folder should read 相册, not %E7%9B%B8%E5%86%8C.
 func remoteName(p string) string {
 	trimmed := strings.TrimSuffix(p, "/")
 	if i := strings.LastIndex(trimmed, "/"); i >= 0 && i > strings.Index(trimmed, "://")+2 {
 		if name := trimmed[i+1:]; name != "" {
-			return name
+			return unescapeRemoteName(name)
 		}
 	}
-	return trimmed
+	return unescapeRemoteName(trimmed)
 }
 
 // remoteParent is the folder above a virtual path, or "" at a share root.
@@ -164,13 +209,36 @@ func remoteParent(p string) string {
 
 // remotePathOnShare turns a virtual path into the path a backend wants, and the
 // share it belongs to.
+//
+// The virtual path escapes each segment (so a name with a space, a "#" or a
+// Chinese character survives a URL), but a backend wants the real name: SMB2
+// hands the string straight to the server, and a server looks for a folder
+// literally called "%E7%9B%B8" if that is what it is given. Decoding happens
+// here, at the one boundary between the two forms.
 func remotePathOnShare(p string) (key, rel string) {
 	key = remoteShareKey(p)
 	if key == "" || p == key {
 		return key, ""
 	}
 	rel = strings.TrimPrefix(strings.TrimSuffix(p, "/")[len(key):], "/")
-	return key, rel
+	// A WebDAV share's base path is part of the address, not part of the
+	// relative path: the backend already prefixes it. Leaving it in produced
+	// /sub/sub for a share whose base is /sub.
+	if base := shareBaseForKey(key); base != "" {
+		rel = strings.TrimPrefix(strings.TrimPrefix(rel, base), "/")
+	}
+	return key, unescapeRemoteName(rel)
+}
+
+// shareBaseForKey is the base path of the saved share a virtual path belongs
+// to, or "" when it has none (SMB, or a WebDAV root).
+func shareBaseForKey(key string) string {
+	for _, s := range getSettings().RemoteShares {
+		if remoteShareKey(remoteRoot(s)) == key {
+			return strings.Trim(s.Base, "/")
+		}
+	}
+	return ""
 }
 
 // buildRemotePath joins a share root and a relative entry name into a virtual
@@ -401,6 +469,14 @@ var errRemoteNeedsPassword = errors.New("需要重新输入密码：请在侧边
 // keeps its scheme and forward slashes; only a local path goes through
 // filepath.Clean, which would turn smb://nas/photos into smb:\nas\photos.
 func cleanDisplayPath(p string) string {
+	// A virtual path keeps its scheme and forward slashes. filepath.Clean
+	// would fold a share or the favorites folder into a backslash path, which
+	// no lookup recognises.
+	if isFavoritesPath(p) {
+		// One canonical spelling, so path comparisons and tab restoration
+		// agree on which folder this is.
+		return favoritesPath
+	}
 	if isRemotePath(p) {
 		return strings.TrimSuffix(p, "/")
 	}

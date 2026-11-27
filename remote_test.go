@@ -564,29 +564,374 @@ func TestSMBDialReportsTranslatedError(t *testing.T) {
 	t.Logf("error: %v", err)
 }
 func TestRemoteBreadcrumbItems(t *testing.T) {
-	labels, paths := breadcrumbItems("smb://nas/photos/2024", "2024")
-	if len(labels) != 2 || labels[0] != "smb://nas/photos" || labels[1] != "2024" {
+	// Crumbs start at the share root, so the share has to be saved.
+	share := remoteShare{Protocol: remoteSMB, Host: "nas", Share: "photos"}
+	withShares(t, share)
+	root := remoteRoot(share)
+
+	labels, paths := breadcrumbItems(root+"/2024", "2024")
+	if len(labels) != 2 || labels[0] != root || labels[1] != "2024" {
 		t.Fatalf("labels = %v", labels)
 	}
-	if paths[0] != "smb://nas/photos" || paths[1] != "smb://nas/photos/2024" {
+	if paths[0] != root || paths[1] != root+"/2024" {
 		t.Fatalf("paths = %v", paths)
 	}
-	// The share root is a single, non-interactive-looking crumb.
-	labels, paths = breadcrumbItems("smb://nas/photos", "photos")
-	if len(labels) != 1 || labels[0] != "smb://nas/photos" || paths[0] != "smb://nas/photos" {
+
+	// The share root is a single crumb.
+	labels, paths = breadcrumbItems(root, "photos")
+	if len(labels) != 1 || paths[0] != root {
 		t.Fatalf("root = %v %v", labels, paths)
 	}
+
 	// Escaped names decode for display but keep their escaped form in paths.
-	labels, paths = breadcrumbItems("smb://nas/photos/2024%20%E6%97%85%E8%A1%8C", "")
+	escaped := buildRemotePath(root, "2024 旅行")
+	labels, paths = breadcrumbItems(escaped, "")
 	if labels[len(labels)-1] != "2024 旅行" {
 		t.Fatalf("escaped label = %q", labels[len(labels)-1])
 	}
-	if paths[len(paths)-1] != "smb://nas/photos/2024%20%E6%97%85%E8%A1%8C" {
+	if paths[len(paths)-1] != escaped {
 		t.Fatalf("escaped path = %q", paths[len(paths)-1])
 	}
+
 	// A local path still uses drive crumbs.
-	labels, paths = breadcrumbItems(`C:\Pictures\2024`, "2024")
-	if len(labels) != 3 || labels[0] != "C:" || paths[0] != `C:\` {
+	labels, paths = breadcrumbItems("C:"+"\\"+"Pictures"+"\\"+"2024", "2024")
+	if len(labels) != 3 || labels[0] != "C:" || labels[1] != "Pictures" {
 		t.Fatalf("local = %v %v", labels, paths)
+	}
+	if paths[0] != "C:"+"\\" {
+		t.Fatalf("local root = %q", paths[0])
+	}
+}
+
+// TestRemotePathOnShareDecodesSegments covers the bug where a Chinese folder
+// would not open: the virtual path stores escaped segments, and passing that
+// form to SMB2 made the server look for a folder literally named "%E7%9B%B8".
+func TestRemotePathOnShareDecodesSegments(t *testing.T) {
+	root := "smb://192.168.1.12/共享存储"
+	escaped := buildRemotePath(root, "相册")
+	if !strings.Contains(escaped, "%E7%9B%B8") {
+		t.Fatalf("virtual path is not escaped: %q", escaped)
+	}
+	key, rel := remotePathOnShare(escaped)
+	if key != root {
+		t.Fatalf("key = %q", key)
+	}
+	if rel != "相册" {
+		t.Fatalf("backend path = %q, want the real name", rel)
+	}
+
+	// Nested and mixed names decode segment by segment.
+	nested := buildRemotePath(buildRemotePath(root, "相册"), "2024 旅行/a b.jpg")
+	_, rel = remotePathOnShare(nested)
+	if rel != "相册/2024 旅行/a b.jpg" {
+		t.Fatalf("nested path = %q", rel)
+	}
+}
+
+func TestRemoteNameDecodesForDisplay(t *testing.T) {
+	root := "smb://nas/photos"
+	if got := remoteName(buildRemotePath(root, "相册")); got != "相册" {
+		t.Fatalf("remoteName = %q", got)
+	}
+	if got := displayName(buildRemotePath(root, "相册")); got != "相册" {
+		t.Fatalf("displayName = %q", got)
+	}
+	// A plain ASCII name is unchanged by the round trip.
+	if got := remoteName(buildRemotePath(root, "2024")); got != "2024" {
+		t.Fatalf("ascii name = %q", got)
+	}
+}
+
+// TestRemoteBrowseChineseFolder builds the listing the way the SMB backend
+// sees it, then checks the grid gets readable names and usable paths.
+func TestRemoteBrowseChineseFolder(t *testing.T) {
+	prev := remoteListFn
+	var asked string
+	remoteListFn = func(ctx context.Context, p string) ([]remoteEntry, error) {
+		asked = p
+		return []remoteEntry{{Name: "照片.jpg", Size: 100}, {Name: "相册", IsDir: true}}, nil
+	}
+	defer func() { remoteListFn = prev }()
+
+	root := "smb://192.168.1.12/共享存储"
+	res := remoteBrowse(BrowseRequest{Path: root, Limit: 50})
+	if res.Error != "" {
+		t.Fatalf("browse: %s", res.Error)
+	}
+	if asked != root {
+		t.Fatalf("asked for %q", asked)
+	}
+	if len(res.Items) != 2 {
+		t.Fatalf("items = %+v", itemNames(res.Items))
+	}
+	// Names are readable, and each item's path is the escaped virtual form.
+	for _, it := range res.Items {
+		if strings.Contains(it.Name, "%") {
+			t.Fatalf("name is still escaped: %q", it.Name)
+		}
+	}
+	// The folder item must open with the real name handed to the backend.
+	folder := res.Items[1]
+	if folder.Name != "相册" {
+		t.Fatalf("folder name = %q", folder.Name)
+	}
+	_, rel := remotePathOnShare(folder.Path)
+	if rel != "相册" {
+		t.Fatalf("folder backend path = %q", rel)
+	}
+}
+
+// TestEditingPathReplacesShare is the duplicate-row bug: the share id is
+// derived from the address, so changing the path produced a new id and the
+// save appended a second row instead of replacing the edited one.
+func TestEditingPathReplacesShare(t *testing.T) {
+	prev := getSettings()
+	settingsMu.Lock()
+	settingsData.RemoteShares = nil
+	settingsMu.Unlock()
+	defer func() {
+		settingsMu.Lock()
+		settingsData = prev
+		settingsMu.Unlock()
+	}()
+
+	a := newViewTestApp()
+	original := remoteShare{Protocol: remoteWebDAV, Host: "192.168.1.12", Port: 5005}
+	original.ID = remoteShareID(original)
+	a.settings.RemoteShares = []remoteShare{original}
+
+	// Edit the path.
+	a.editRemoteShare(original)
+	a.remoteDraft.Base = "共享存储"
+	edited := a.remoteDraft
+	edited.Base = strings.Trim(edited.Base, "/")
+	edited.ID = remoteShareID(edited)
+	a.upsertRemoteShare(edited)
+
+	if len(a.settings.RemoteShares) != 1 {
+		t.Fatalf("edit produced %d rows: %+v", len(a.settings.RemoteShares), a.settings.RemoteShares)
+	}
+	if got := a.settings.RemoteShares[0].Base; got != "共享存储" {
+		t.Fatalf("base = %q", got)
+	}
+}
+
+// TestEditingAddressKeepsSingleRow covers the same path with a changed host or
+// port, and checks that an unrelated share survives the edit.
+func TestEditingAddressKeepsSingleRow(t *testing.T) {
+	prev := getSettings()
+	settingsMu.Lock()
+	settingsData.RemoteShares = nil
+	settingsMu.Unlock()
+	defer func() {
+		settingsMu.Lock()
+		settingsData = prev
+		settingsMu.Unlock()
+	}()
+
+	a := newViewTestApp()
+	first := remoteShare{Protocol: remoteWebDAV, Host: "nas1", Port: 5005}
+	first.ID = remoteShareID(first)
+	second := remoteShare{Protocol: remoteSMB, Host: "nas2", Share: "photos"}
+	second.ID = remoteShareID(second)
+	a.settings.RemoteShares = []remoteShare{first, second}
+
+	a.editRemoteShare(first)
+	edited := a.remoteDraft
+	edited.Port = 5006
+	edited.ID = remoteShareID(edited)
+	a.upsertRemoteShare(edited)
+
+	if len(a.settings.RemoteShares) != 2 {
+		t.Fatalf("rows = %+v", a.settings.RemoteShares)
+	}
+	if a.settings.RemoteShares[0].Port != 5006 {
+		t.Fatalf("edited row = %+v", a.settings.RemoteShares[0])
+	}
+	if a.settings.RemoteShares[1].Host != "nas2" {
+		t.Fatalf("unrelated row was disturbed: %+v", a.settings.RemoteShares[1])
+	}
+}
+
+// TestAddingNewShareAppends covers the non-editing path, which must still add
+// a row rather than replace the first one.
+func TestAddingNewShareAppends(t *testing.T) {
+	prev := getSettings()
+	settingsMu.Lock()
+	settingsData.RemoteShares = nil
+	settingsMu.Unlock()
+	defer func() {
+		settingsMu.Lock()
+		settingsData = prev
+		settingsMu.Unlock()
+	}()
+
+	a := newViewTestApp()
+	first := remoteShare{Protocol: remoteSMB, Host: "nas", Share: "photos"}
+	first.ID = remoteShareID(first)
+	a.settings.RemoteShares = []remoteShare{first}
+
+	a.openRemoteDialog() // clears any edit marker
+	added := remoteShare{Protocol: remoteWebDAV, Host: "nas", Port: 5005}
+	added.ID = remoteShareID(added)
+	a.upsertRemoteShare(added)
+
+	if len(a.settings.RemoteShares) != 2 {
+		t.Fatalf("rows = %+v", a.settings.RemoteShares)
+	}
+}
+
+// TestEditingKeepsSavedPassword makes sure a path edit does not lose the
+// remembered password: the new id would have none.
+func TestEditingKeepsSavedPassword(t *testing.T) {
+	dir := t.TempDir()
+	prevDir := remoteCredDirOverride
+	remoteCredDirOverride = dir
+	prevSettings := getSettings()
+	settingsMu.Lock()
+	settingsData.RemoteShares = nil
+	settingsMu.Unlock()
+	defer func() {
+		remoteCredDirOverride = prevDir
+		clearRemoteCredCache()
+		settingsMu.Lock()
+		settingsData = prevSettings
+		settingsMu.Unlock()
+	}()
+
+	a := newViewTestApp()
+	original := remoteShare{Protocol: remoteWebDAV, Host: "nas", Port: 5005, User: "me", SavePass: true}
+	original.ID = remoteShareID(original)
+	a.settings.RemoteShares = []remoteShare{original}
+	rememberRemotePassword(original, "s3cr3t", true)
+
+	a.editRemoteShare(original)
+	if got := passwordForID(a.remoteEditID, true); got != "s3cr3t" {
+		t.Fatalf("password for the edited share = %q", got)
+	}
+	// The new address has no password of its own, which is why the lookup by
+	// the original id matters.
+	edited := a.remoteDraft
+	edited.Base = "dav"
+	edited.ID = remoteShareID(edited)
+	if got := passwordForShare(edited); got != "" {
+		t.Fatalf("new id unexpectedly has a password: %q", got)
+	}
+}
+
+// withShares installs a settings snapshot for the duration of a test.
+func withShares(t *testing.T, shares ...remoteShare) {
+	t.Helper()
+	for i := range shares {
+		shares[i].ID = remoteShareID(shares[i])
+	}
+	prev := getSettings()
+	settingsMu.Lock()
+	settingsData.RemoteShares = shares
+	settingsMu.Unlock()
+	t.Cleanup(func() {
+		settingsMu.Lock()
+		settingsData = prev
+		settingsMu.Unlock()
+	})
+}
+
+// TestRemoteAliasIsUsedForDisplay covers the alias: the sidebar label and the
+// first breadcrumb show it, while the address stays available for the tooltip.
+func TestRemoteAliasIsUsedForDisplay(t *testing.T) {
+	share := remoteShare{
+		Protocol: remoteWebDAV, Host: "192.168.1.12", Port: 5005,
+		Base: "共享存储", Name: "家里照片",
+	}
+	withShares(t, share)
+
+	root := remoteRoot(share)
+	if got := remoteAliasForPath(root); got != "家里照片" {
+		t.Fatalf("alias = %q", got)
+	}
+
+	// The share root is the first crumb, labelled with the alias.
+	labels, paths := breadcrumbItems(root, "")
+	if len(labels) != 1 || labels[0] != "家里照片" {
+		t.Fatalf("root crumbs = %v", labels)
+	}
+	if paths[0] != root {
+		t.Fatalf("root path = %q, want %q", paths[0], root)
+	}
+
+	// A folder below it keeps the alias as the first crumb.
+	inner := root + "/2024"
+	labels, paths = breadcrumbItems(inner, "2024")
+	if len(labels) != 2 || labels[0] != "家里照片" || labels[1] != "2024" {
+		t.Fatalf("inner crumbs = %v", labels)
+	}
+	if paths[0] != root {
+		t.Fatalf("first crumb path = %q, want the share root %q", paths[0], root)
+	}
+}
+
+// TestBreadcrumbNeverOffersTheHostAlone is the "远程位置已不存在" bug: a crumb
+// pointing at webdav://host is above the share and cannot be opened.
+func TestBreadcrumbNeverOffersTheHostAlone(t *testing.T) {
+	share := remoteShare{Protocol: remoteWebDAV, Host: "192.168.1.12", Port: 5005, Base: "共享存储"}
+	withShares(t, share)
+	root := remoteRoot(share)
+
+	for _, p := range []string{root, root + "/2024", root + "/2024/a.jpg"} {
+		_, paths := breadcrumbItems(p, "")
+		for _, path := range paths {
+			if _, err := shareForPath(path); err != nil {
+				t.Fatalf("crumb %q is not openable: %v", path, err)
+			}
+		}
+	}
+}
+
+func TestRemoteAliasEmptyFallsBackToAddress(t *testing.T) {
+	share := remoteShare{Protocol: remoteSMB, Host: "nas", Share: "photos"}
+	withShares(t, share)
+	labels, _ := breadcrumbItems(remoteRoot(share), "")
+	if len(labels) != 1 || labels[0] != "smb://nas/photos" {
+		t.Fatalf("crumbs without an alias = %v", labels)
+	}
+}
+
+func TestDisplayNameUsesAliasForShareRoot(t *testing.T) {
+	share := remoteShare{Protocol: remoteWebDAV, Host: "192.168.1.12", Port: 5005, Base: "共享存储", Name: "家里照片"}
+	withShares(t, share)
+	root := remoteRoot(share)
+	if got := displayName(root); got != "家里照片" {
+		t.Fatalf("root displayName = %q", got)
+	}
+	// A folder inside the share keeps its own name.
+	if got := displayName(root + "/2024"); got != "2024" {
+		t.Fatalf("inner displayName = %q", got)
+	}
+	// Without an alias the last segment is used, as before.
+	plain := remoteShare{Protocol: remoteWebDAV, Host: "nas", Port: 5005, Base: "dav"}
+	withShares(t, plain)
+	if got := displayName(remoteRoot(plain)); got != "dav" {
+		t.Fatalf("plain root displayName = %q", got)
+	}
+}
+
+// TestRemoteBrowseNamesShareRootByAlias covers the tab title: the listing's
+// Name is what a tab shows, so the alias has to come from here.
+func TestRemoteBrowseNamesShareRootByAlias(t *testing.T) {
+	share := remoteShare{Protocol: remoteWebDAV, Host: "nas", Port: 5005, Base: "dav", Name: "家里照片"}
+	withShares(t, share)
+
+	prev := remoteListFn
+	remoteListFn = func(ctx context.Context, p string) ([]remoteEntry, error) { return nil, nil }
+	defer func() { remoteListFn = prev }()
+
+	res := remoteBrowse(BrowseRequest{Path: remoteRoot(share), Limit: 10})
+	if res.Name != "家里照片" {
+		t.Fatalf("share root Name = %q", res.Name)
+	}
+	// A folder below the share keeps its own name.
+	res = remoteBrowse(BrowseRequest{Path: remoteRoot(share) + "/2024", Limit: 10})
+	if res.Name != "2024" {
+		t.Fatalf("inner Name = %q", res.Name)
 	}
 }

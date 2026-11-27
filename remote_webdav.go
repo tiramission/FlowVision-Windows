@@ -24,30 +24,59 @@ type remoteWebDAVSession struct {
 	client *http.Client
 }
 
-func dialRemoteWebDAV(ctx context.Context, share remoteShare, password string) (remoteBackend, error) {
+// tlsConfigFor builds the certificate policy for a share. It returns nil for
+// the default, so the common case keeps Go's own settings instead of a
+// hand-made equivalent.
+func tlsConfigFor(share remoteShare) *tls.Config {
+	if !share.SkipVerify {
+		return nil
+	}
+	return &tls.Config{InsecureSkipVerify: true}
+}
+
+// webdavBaseURL is the URL the dialog dials and the one shown back in errors,
+// so it is worth being able to test on its own. The rules:
+//   - HTTP unless the share says HTTPS.
+//   - An explicit share.Port wins over everything.
+//   - Otherwise a host that already carries a port keeps it.
+//   - Otherwise the scheme's default port (80 / 443) is used.
+//
+// The last two steps matter: without them an HTTPS share on a NAS's 5006 either
+// lost its port or kept a stale one, which is how https://192.168.1.12:80 was
+// sent to a server that was listening on 5006.
+func webdavBaseURL(share remoteShare) string {
 	scheme := "http"
+	port := share.Port
 	if share.Secure {
 		scheme = "https"
 	}
-	port := share.Port
-	if port <= 0 && share.Secure {
-		port = 443
+	if port <= 0 {
+		if _, _, err := net.SplitHostPort(share.Host); err != nil {
+			port = 80
+			if share.Secure {
+				port = 443
+			}
+		}
 	}
 	base := strings.TrimSuffix(share.Base, "/")
 	if base != "" && !strings.HasPrefix(base, "/") {
 		base = "/" + base
 	}
+	return fmt.Sprintf("%s://%s%s", scheme, hostPort(share.Host, port), base)
+}
+
+func dialRemoteWebDAV(ctx context.Context, share remoteShare, password string) (remoteBackend, error) {
 	transport := &http.Transport{
 		DialContext:           (&net.Dialer{Timeout: 12 * time.Second}).DialContext,
 		TLSHandshakeTimeout:   12 * time.Second,
 		ResponseHeaderTimeout: 20 * time.Second,
 		ForceAttemptHTTP2:     false,
 	}
-	if share.Insecure {
-		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	if cfg := tlsConfigFor(share); cfg != nil {
+		transport.TLSClientConfig = cfg
 	}
 	session := &remoteWebDAVSession{
-		base:   fmt.Sprintf("%s://%s%s", scheme, hostPort(share.Host, port), base),
+		base:   webdavBaseURL(share),
 		user:   share.User,
 		pass:   password,
 		client: &http.Client{Transport: transport},
@@ -252,7 +281,7 @@ func webdavError(err error) error {
 	text := err.Error()
 	switch {
 	case strings.Contains(text, "x509"), strings.Contains(text, "certificate"):
-		return fmt.Errorf("证书不受信任：可在连接设置里允许自签名证书")
+		return fmt.Errorf("证书验证失败：可打开「跳过证书验证」（自签名、过期或名字不符时）")
 	// Windows says "actively refused it" where Go's own dialer says
 	// "connection refused", and a closed port is the usual cause.
 	case strings.Contains(text, "connection refused"), strings.Contains(text, "actively refused"),

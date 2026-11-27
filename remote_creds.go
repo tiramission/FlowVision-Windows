@@ -236,3 +236,43 @@ func randomToken() string {
 	}
 	return base64.RawURLEncoding.EncodeToString(buf)
 }
+
+// passwordForID reads a remembered password by share id, for the case where the
+// share being edited no longer produces that id (its address changed).
+func passwordForID(id string, remember bool) string {
+	remotePasswordMu.Lock()
+	if pass, ok := remotePasswordCache[id]; ok {
+		remotePasswordMu.Unlock()
+		return pass
+	}
+	remotePasswordMu.Unlock()
+	if !remember {
+		return ""
+	}
+	encrypted := loadRemoteCredentials()[id]
+	if encrypted == "" {
+		return ""
+	}
+	pass, err := unprotectSecret(encrypted)
+	if err != nil {
+		logf("remote credentials: %v", err)
+		return ""
+	}
+	remotePasswordMu.Lock()
+	remotePasswordCache[id] = pass
+	remotePasswordMu.Unlock()
+	return pass
+}
+
+// forgetRemotePasswordByID drops a remembered password by share id.
+func forgetRemotePasswordByID(id string) {
+	remotePasswordMu.Lock()
+	delete(remotePasswordCache, id)
+	remotePasswordMu.Unlock()
+	creds := loadRemoteCredentials()
+	if _, ok := creds[id]; !ok {
+		return
+	}
+	delete(creds, id)
+	saveRemoteCredentials(creds)
+}

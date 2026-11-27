@@ -111,7 +111,7 @@ func (AppSvc) ResolveDrop(path string) (string, error) {
 var errReadOnlyRemote = errors.New("网络位置是只读的")
 
 func (AppSvc) Delete(path string, permanent bool) error {
-	if isRemotePath(path) {
+	if isRemotePath(path) || isFavoritesPath(path) {
 		return errReadOnlyRemote
 	}
 	st, err := os.Stat(path)
@@ -181,7 +181,7 @@ func checkName(name string) error {
 
 // Rename gives path a new name in its own folder and returns the new path.
 func (AppSvc) Rename(path, newName string) (string, error) {
-	if isRemotePath(path) {
+	if isRemotePath(path) || isFavoritesPath(path) {
 		return "", errReadOnlyRemote
 	}
 	newName = strings.TrimSpace(newName)
@@ -221,7 +221,7 @@ func (AppSvc) Rename(path, newName string) (string, error) {
 
 // NewFolder creates a folder inside dir.
 func (AppSvc) NewFolder(dir, name string) (string, error) {
-	if isRemotePath(dir) {
+	if isRemotePath(dir) || isFavoritesPath(dir) {
 		return "", errReadOnlyRemote
 	}
 	name = strings.TrimSpace(name)

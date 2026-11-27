@@ -49,6 +49,7 @@ func (a *App) view(c *ui.Context) {
 
 	a.selectionBar(c)
 	a.gridMenuOverlay(c)
+	a.selectMenuOverlay(c)
 	a.tasksOverlay(c)
 	a.overlays(c)
 	a.runPending()
@@ -262,22 +263,21 @@ func (a *App) sidebarView(c *ui.Context) {
 		ui.Scroll(c).Grow(1).Padding(8, 6, 8, 8).Children(func() {
 			components.Sidebar(c).Children(func() {
 				components.SidebarSection(c, "收藏", func() {
+					a.sidebarFavoritesRow(c)
 					if len(a.settings.Favorites) == 0 {
-						components.Text(c, "用工具栏的星标收藏文件夹").FontSize(10.5).TextColor(th.TextMuted).
+						components.Text(c, "右键图片或视频即可收藏").FontSize(10.5).TextColor(th.TextMuted).
 							Padding(2, 6).SingleLine()
-					}
-					for _, fav := range a.settings.Favorites {
-						fav := fav
-						a.sidebarPathRow(c, fav, lucide.Star(), true)
 					}
 				})
 
-				components.SidebarSection(c, "位置", func() {
-					for _, p := range a.places {
-						p := p
-						a.sidebarPathRow(c, p.Path, placeIcon(p.Icon), false, p.Name)
-					}
-				})
+				if a.settings.ShowPlaces {
+					components.SidebarSection(c, "位置", func() {
+						for _, p := range a.places {
+							p := p
+							a.sidebarPathRow(c, p.Path, placeIcon(p.Icon), false, p.Name)
+						}
+					})
+				}
 
 				components.SidebarSection(c, "驱动器", func() {
 					for _, p := range a.drives {
@@ -327,6 +327,59 @@ func (a *App) sidebarView(c *ui.Context) {
 				components.Text(c, "v"+appVersion()).FontSize(9.5).TextColor(th.TextMuted.Alpha(.75)).Padding(0, 4)
 			})
 	})
+}
+
+// sidebarFavoritesRow is the entry to the virtual favorites folder. It is one
+// row, not a list: the collected files are a folder of their own, shown in the
+// grid like any other.
+func (a *App) sidebarFavoritesRow(c *ui.Context) {
+	th := c.Theme()
+	count := len(a.settings.Favorites)
+	active := false
+	if t := a.tab(); t != nil {
+		active = isFavoritesPath(t.Path) && !a.viewer.Open
+	}
+	label := favoritesName
+	if count > 0 {
+		label = fmt.Sprintf("%s (%d)", favoritesName, count)
+	}
+	row := components.SidebarItemWithLeading(c, label, active, func(c *ui.Context, size float32) {
+		color := th.TextMuted.Alpha(.9)
+		if count > 0 {
+			color = th.Accent.Alpha(.72)
+		}
+		if active {
+			color = th.Accent
+		}
+		components.Icon(c, lucide.Star()).Size(size, size).TextColor(color)
+	})
+	row.Key("sidebar-favorites").Tooltip("收藏夹 · 只收图片和视频")
+	if row.Clicked() {
+		a.goTo(favoritesPath, true)
+	}
+	components.ContextMenu(c, row, func(m *components.Menu) {
+		if m.Item("打开收藏夹").Chosen() {
+			a.later(func() { a.goTo(favoritesPath, true) })
+		}
+		if m.Item("清空收藏夹").Disabled(count == 0).Chosen() {
+			a.later(a.clearFavorites)
+		}
+	})
+}
+
+// clearFavorites empties the virtual folder.
+func (a *App) clearFavorites() {
+	if len(a.settings.Favorites) == 0 {
+		return
+	}
+	n := len(a.settings.Favorites)
+	a.settings.Favorites = nil
+	_ = saveSettings(a.settings)
+	a.showStatusNotice(fmt.Sprintf("已清空收藏夹（%d 项）", n))
+	if t := a.tab(); t != nil && isFavoritesPath(t.Path) {
+		a.reloadActive()
+	}
+	a.refresh()
 }
 
 func (a *App) sidebarPathRow(c *ui.Context, path string, icon *ui.SVG, favorite bool, label ...string) {
@@ -760,41 +813,81 @@ func (a *App) toolbar(c *ui.Context) {
 		}
 	}
 
+	// Sort field and direction are one control. They act on the same setting —
+	// which order the folder is in — and as two neighbours, a bordered select
+	// next to a bare arrow, they read as unrelated buttons.
+	//
+	// Sort field and direction are one control: one row per field, and the
+	// direction is a property of the field already in use. Choosing the field
+	// that is already sorted flips it, the way a column header does in a file
+	// list; choosing another switches to it, ascending. Listing both directions
+	// as separate rows would double the menu for one setting, and a button
+	// nested in the trigger is invisible to the accessibility tree.
 	buildSort := func() {
-		sortWidth := float32(92)
+		sortWidth := float32(104)
 		if compact {
-			sortWidth = 84
+			sortWidth = 92
 		}
 		sortSel := components.Select(c.Key("sort"), &tab.Sort)
-		sortSel.Trigger.Width(sortWidth).Label("排序")
+		sortSel.Trigger.Width(sortWidth).Label("排序方式，再次选择同一项切换升序降序")
 		sortSel.Trigger.Children(func() {
-			components.Text(c, sortLabel(tab.Sort)).SingleLine()
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(3).Children(func() {
+				components.Icon(c, sortDirectionIcon(tab.Desc)).Size(12, 12).
+					TextColor(th.TextMuted).Shrink(0)
+				components.Text(c, sortLabel(tab.Sort)).Grow(1).MinWidth(0).
+					SingleLine().FontSize(12).TextColor(th.Text)
+			})
 		})
+		// A click on the field already in use does not change the select's
+		// value, so its Changed stays quiet; the row reports the click itself.
+		// The field is captured before the select runs, because applying the
+		// click already writes the new one into tab.Sort.
+		beforeSort := tab.Sort
+		flip, switched := false, ""
 		sortSel.Popup(func(panel ui.Element) {
 			for _, key := range []string{"name", "date", "size", "type"} {
 				key := key
 				item := sortSel.Item(key)
 				item.Children(func() {
-					components.Text(c, sortLabel(key)).SingleLine()
+					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(8).Children(func() {
+						components.Text(c, sortLabel(key)).Grow(1).SingleLine()
+						if key == tab.Sort {
+							// The direction belongs to the field in use, so it
+							// shows on that row only.
+							ui.Row(c).AlignItems(ui.Center).Gap(3).Children(func() {
+								components.Text(c, sortDirectionLabel(tab.Desc)).FontSize(10).
+									TextColor(th.TextMuted)
+								components.Icon(c, sortDirectionIcon(tab.Desc)).Size(11, 11).
+									TextColor(th.TextMuted)
+							})
+						}
+					})
 				})
+				if item.Clicked() {
+					if key == beforeSort {
+						flip = true
+					} else {
+						switched = key
+					}
+				}
 			}
 		})
-		if sortSel.Trigger.Changed() {
+		if flip {
+			tab.Desc = !tab.Desc
+			a.persist()
+			a.loadTab(tab, true)
+		} else if switched != "" {
+			// The select wrote the new field; a field change starts ascending.
+			tab.Sort, tab.Desc = switched, false
+			a.persist()
+			a.loadTab(tab, true)
+		} else if sortSel.Trigger.Changed() {
+			// A row that does not report its own click still changed the
+			// field, as assistive technology choosing it does.
+			tab.Desc = false
 			a.persist()
 			a.loadTab(tab, true)
 		}
-		dirIcon := lucide.ArrowUp()
-		dirLabel := "升序，点击切换为降序"
-		if tab.Desc {
-			dirIcon = lucide.ArrowDown()
-			dirLabel = "降序，点击切换为升序"
-		}
-		components.IconButton(c, dirIcon, dirLabel, components.IconButtonPlain).
-			OnClick(func() {
-				tab.Desc = !tab.Desc
-				a.persist()
-				a.loadTab(tab, true)
-			})
 	}
 
 	// Recursive scanning, card captions and hidden files are set-and-forget
@@ -804,14 +897,7 @@ func (a *App) toolbar(c *ui.Context) {
 		more := components.IconButton(c, lucide.Ellipsis(), "更多操作", components.IconButtonPlain)
 		components.MenuButton(c, more, func(m *components.Menu) {
 			m.Group("当前文件夹", func(m *components.Menu) {
-				favorite := m.Item("收藏此文件夹").Checked(a.isFavorite(tab.Path))
-				if favorite.Chosen() {
-					a.toggleFavorite()
-				}
-				if m.Item("刷新当前文件夹").Shortcut("F5").Chosen() {
-					t := tab
-					a.later(func() { a.loadTab(t, false) })
-				}
+
 				if m.Item("上一文件夹").Chosen() {
 					a.later(func() { a.sibling(-1) })
 				}
@@ -881,6 +967,14 @@ func (a *App) toolbar(c *ui.Context) {
 		buildFilter()
 		buildSort()
 		divider()
+		// Refresh sits outside the overflow menu: it is the one action used
+		// repeatedly while browsing, and hiding it behind a menu made a folder
+		// refresh a two-step operation.
+		components.IconButton(c, lucide.RefreshCw(), "刷新 (F5)", components.IconButtonPlain).
+			OnClick(func() {
+				t := tab
+				a.later(func() { a.loadTab(t, false) })
+			})
 		buildViewMenu()
 		if !a.sidebar {
 			components.IconButton(c, lucide.Settings(), "设置", components.IconButtonPlain).
@@ -935,13 +1029,28 @@ func breadcrumbItems(path, name string) ([]string, []string) {
 // remoteBreadcrumbItems splits smb://nas/photos/2024 into a scheme root and
 // the folders below it. The share is part of the root link: a NAS has nothing
 // to show above it, and listing one would be another network round trip.
+// remoteBreadcrumbItems splits a virtual path into crumbs, starting at the
+// share's own root rather than at its host.
+//
+// The first crumb must be the share root: "webdav://host:5005" on its own is
+// not a location the app can open — it is above the share, and clicking it
+// produced "远程位置已不存在". The crumb is labelled with the alias when the
+// share has one, so the address stays out of the toolbar.
 func remoteBreadcrumbItems(path, name string) ([]string, []string) {
-	root := remoteShareKey(path)
-	if root == "" {
+	share, ok := remoteShareForPath(path)
+	if !ok {
+		// An unsaved path: show it whole rather than inventing a hierarchy.
 		return []string{path}, []string{path}
 	}
-	labels := []string{root}
+	root := remoteRoot(share)
+	rootLabel := remoteAlias(share)
+	if rootLabel == "" {
+		rootLabel = root
+	}
+	labels := []string{rootLabel}
 	paths := []string{root}
+	// Everything below the share root becomes its own crumb. The base path is
+	// part of the root, so it must not appear again here.
 	rest := strings.Trim(strings.TrimPrefix(strings.TrimSuffix(path, "/"), root), "/")
 	if rest != "" {
 		current := root
@@ -1087,14 +1196,17 @@ func emptyState(c *ui.Context, icon *ui.SVG, title, detail string, action func(*
 	})
 }
 
+// selectionBar is the floating action bar for a multi-select run. It appears
+// only in multi-select mode: a single click selects one tile for the keyboard
+// and the context menu, and a bar following every click was noise.
 func (a *App) selectionBar(c *ui.Context) {
 	th := c.Theme()
 	tab := a.tab()
-	if tab == nil || len(tab.Selected) == 0 {
+	if tab == nil || !tab.MultiSelect || len(tab.Selected) == 0 {
 		return
 	}
 	if a.showSettings || a.showHelp || a.showAbout || a.updateOpen || a.errorMsg != "" ||
-		a.renameOpen || a.newFolderOpen || a.confirmDeleteOpen {
+		a.renameOpen || a.newFolderOpen || a.confirmDeleteOpen || a.viewer.Open {
 		return
 	}
 	winW, _ := c.Size()
@@ -1102,22 +1214,49 @@ func (a *App) selectionBar(c *ui.Context) {
 	width := winW - left
 	one := tab.selectedOne()
 	n := len(tab.Selected)
-	items := []components.FloatingButtonGroupItem{
-		{ID: "open", Label: "打开", Icon: lucide.ExternalLink, Disabled: one == nil},
-		{ID: "reveal", Label: "定位", Icon: lucide.Locate, Disabled: one == nil},
-		{ID: "copy", Label: "复制路径", Icon: lucide.Copy, Disabled: one == nil},
-		{Separator: true},
-		{ID: "delete", Label: "删除", Icon: lucide.Trash, Shortcut: "Delete"},
-		{ID: "clear", Label: "取消选择", Icon: lucide.X, Shortcut: "Esc"},
+	readOnly := a.tabReadOnly()
+	allFavorited := a.selectionAllFavorited(tab)
+	favLabel, favIcon := "收藏", lucide.Star
+	if allFavorited {
+		favLabel, favIcon = "取消收藏", lucide.StarOff
 	}
+	// "Open" and "Locate" only make sense for one tile, so they disappear in a
+	// multi-selection instead of sitting there greyed out: a bar of disabled
+	// buttons reads as a broken toolbar.
+	items := make([]components.FloatingButtonGroupItem, 0, 8)
+	if one != nil {
+		items = append(items, components.FloatingButtonGroupItem{ID: "open", Label: "打开", Icon: lucide.ExternalLink})
+	}
+	items = append(items,
+		components.FloatingButtonGroupItem{ID: "favorite", Label: favLabel, Icon: favIcon},
+		components.FloatingButtonGroupItem{ID: "copy", Label: "复制路径", Icon: lucide.Copy},
+	)
+	if !readOnly {
+		if one != nil {
+			items = append(items, components.FloatingButtonGroupItem{ID: "reveal", Label: "定位", Icon: lucide.Locate})
+		}
+		items = append(items,
+			components.FloatingButtonGroupItem{Separator: true},
+			components.FloatingButtonGroupItem{ID: "delete", Label: "删除", Icon: lucide.Trash, Shortcut: "Delete"},
+		)
+	}
+	items = append(items, components.FloatingButtonGroupItem{ID: "clear", Label: "取消选择", Icon: lucide.X, Shortcut: "Esc"})
 	ui.Overlay(c, func() {
 		ui.Row(c).Absolute().Left(left).Width(width).Bottom(bottomBarHeight + 12).Height(52).
 			Justify(ui.Center).AlignItems(ui.Center).Children(func() {
 			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+				// The count alone says how many, not what: a run of videos and a
+				// run of folders read the same. One short breakdown answers the
+				// question the actions beside it are about to act on.
 				ui.Box(c).Padding(9, 4).Radius(pillRadius).Background(th.Surface).
 					BorderWidth(1).BorderColor(th.Border.Alpha(.8)).Children(func() {
-					components.Text(c, fmt.Sprintf("已选 %d 项", n)).FontSize(11).FontWeight(600).
-						TextColor(th.Text)
+					ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+						components.Text(c, fmt.Sprintf("已选 %d 项", n)).FontSize(11).FontWeight(600).
+							TextColor(th.Text)
+						if detail := selectionBreakdown(tab); detail != "" {
+							components.Text(c, detail).FontSize(10).TextColor(th.TextMuted).SingleLine()
+						}
+					})
 				})
 				group := components.FloatingButtonGroup(c, "选中项操作", components.FloatingButtonGroupRaised, ui.Horizontal, items)
 				switch group.Clicked() {
@@ -1125,6 +1264,8 @@ func (a *App) selectionBar(c *ui.Context) {
 					if one != nil {
 						a.later(func() { a.activateItem(one) })
 					}
+				case "favorite":
+					a.later(a.toggleItemFavorites)
 				case "reveal":
 					a.later(a.revealSelected)
 				case "copy":
@@ -1132,11 +1273,27 @@ func (a *App) selectionBar(c *ui.Context) {
 				case "delete":
 					a.later(func() { a.askDelete(false) })
 				case "clear":
-					a.later(a.clearSelection)
+					a.later(a.exitMultiSelect)
 				}
 			})
 		})
 	})
+}
+
+// selectionAllFavorited reports whether every selected media file is already
+// starred, which decides whether the bar's button adds or removes.
+func (a *App) selectionAllFavorited(tab *Tab) bool {
+	media := 0
+	for _, it := range tab.selectedItems() {
+		if !isMediaKind(it.Kind) {
+			continue
+		}
+		media++
+		if !a.isFavorite(it.Path) {
+			return false
+		}
+	}
+	return media > 0
 }
 
 func (a *App) statusBar(c *ui.Context) {
@@ -1171,7 +1328,12 @@ func (a *App) statusBar(c *ui.Context) {
 				components.Badge(c, "隐藏", components.BadgeOptions{Tone: components.BadgeNeutral}).
 					AlignSelf(ui.Center)
 			}
-			if a.tabReadOnly() {
+			if t := a.tab(); t != nil && isFavoritesPath(t.Path) {
+				// The favorites folder is read-only for a different reason than
+				// a share, and the badge should say which.
+				components.Badge(c, "虚拟目录", components.BadgeOptions{Tone: components.BadgeNeutral}).
+					AlignSelf(ui.Center)
+			} else if a.tabReadOnly() {
 				components.Badge(c, "网络 · 只读", components.BadgeOptions{Tone: components.BadgeNeutral}).
 					AlignSelf(ui.Center)
 			}
@@ -1192,4 +1354,52 @@ func countKind(items []*Item, kind string) int {
 		}
 	}
 	return n
+}
+
+// selectionBreakdown summarises a multi-selection by kind, skipping zero counts
+// so the pill stays short: "3 图片 · 1 视频".
+func selectionBreakdown(tab *Tab) string {
+	if tab == nil || len(tab.Selected) < 2 {
+		return ""
+	}
+	images, videos, folders, others := 0, 0, 0, 0
+	for _, it := range tab.selectedItems() {
+		switch it.Kind {
+		case "image":
+			images++
+		case "video":
+			videos++
+		case "folder":
+			folders++
+		default:
+			others++
+		}
+	}
+	parts := make([]string, 0, 4)
+	add := func(n int, label string) {
+		if n > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", n, label))
+		}
+	}
+	add(images, "图片")
+	add(videos, "视频")
+	add(folders, "文件夹")
+	add(others, "其他")
+	return strings.Join(parts, " · ")
+}
+
+// sortDirectionLabel names the two orders for the sort menu.
+func sortDirectionLabel(desc bool) string {
+	if desc {
+		return "降序"
+	}
+	return "升序"
+}
+
+// sortDirectionIcon is the arrow the sort control shows for an order.
+func sortDirectionIcon(desc bool) *ui.SVG {
+	if desc {
+		return lucide.ArrowDown()
+	}
+	return lucide.ArrowUp()
 }

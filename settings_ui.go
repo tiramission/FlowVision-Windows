@@ -187,6 +187,15 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 					ID: "filter", Title: "文件显示",
 					Items: []components.SettingsItem{
 						{
+							ID: "places", Title: "显示「位置」栏",
+							Description: "侧边栏里的用户目录、桌面、图片等固定入口；只用收藏和驱动器导航时可以关掉",
+							Keywords:    []string{"sidebar", "places", "位置", "侧边栏", "用户目录"},
+							Leading:     settingsIcon(lucide.PanelLeft()),
+							Build: func(c *ui.Context) {
+								components.Switch(c, &a.draft.ShowPlaces, "显示「位置」栏", components.SwitchOptions{HideLabel: true, Compact: true})
+							},
+						},
+						{
 							ID: "hidden", Title: "显示隐藏文件",
 							Description: "包含以点开头或带隐藏属性的文件",
 							Keywords:    []string{"hidden", "隐藏"},
@@ -368,8 +377,21 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 							Description: "可见卡片加载完后继续把当前文件夹剩余的缩略图存进磁盘缓存；只写缓存不占内存，切换文件夹或关闭开关即停止",
 							Keywords:    []string{"prefetch", "preload", "background", "预加载", "后台", "整目录"},
 							Leading:     settingsIcon(lucide.Download()),
+							Stacked:     true,
 							Build: func(c *ui.Context) {
-								components.Switch(c, &a.draft.ThumbPrefetch, "后台预加载整个文件夹", components.SwitchOptions{HideLabel: true, Compact: true})
+								th := c.Theme()
+								ui.Column(c).Width(340).Gap(8).Children(func() {
+									components.Switch(c, &a.draft.ThumbPrefetch, "后台预加载整个文件夹", components.SwitchOptions{HideLabel: true, Compact: true})
+									ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+										components.NumberInput(c, &a.draftPrefetchMin, 0, 10000, 50).
+											Label("少于多少张时启用").Width(150).
+											Disabled(!a.draft.ThumbPrefetch)
+										components.Text(c, "张").FontSize(10.5).TextColor(th.TextMuted)
+										ui.Spacer(c)
+										components.Text(c, a.prefetchMinHint()).FontSize(10.5).
+											TextColor(th.TextMuted).SingleLine().Ellipsis("…")
+									})
+								})
 							},
 						},
 						{
@@ -546,4 +568,16 @@ func (a *App) settingsCategoryIcon(id string, icon *ui.SVG) func(*ui.Context, fl
 		}
 		components.Icon(c, icon).Size(size, size).TextColor(color)
 	}
+}
+
+// prefetchMinHint explains the threshold in terms of what the user will see.
+func (a *App) prefetchMinHint() string {
+	n := int(math.Round(a.draftPrefetchMin))
+	switch {
+	case !a.draft.ThumbPrefetch:
+		return "已关闭"
+	case n <= 0:
+		return "任何文件夹都补载"
+	}
+	return fmt.Sprintf("%d 张以上才补载", n)
 }

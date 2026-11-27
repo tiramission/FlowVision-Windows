@@ -391,6 +391,22 @@ func (a *App) viewerHeader(c *ui.Context, it *Item, th *ui.Theme, floating bool)
 				}
 			}
 		})
+		// Starring from the viewer is the natural place for it: the photo is
+		// open, and the grid may be scrolled far away from it.
+		starLabel := "收藏 (Space)"
+		starIcon := lucide.Star()
+		if a.isFavorite(it.Path) {
+			starLabel = "取消收藏 (Space)"
+			starIcon = lucide.StarOff()
+		}
+		star := components.IconButton(c, starIcon, starLabel, components.IconButtonPlain)
+		if a.isFavorite(it.Path) {
+			star.TextColor(th.Accent)
+		}
+		if star.Clicked() {
+			item := it
+			a.later(func() { a.toggleViewerFavorite(item) })
+		}
 		if !floating {
 			infoLabel := "显示信息 (I)"
 			if a.viewer.ShowInfo {
@@ -432,6 +448,9 @@ func (a *App) viewerShortcuts(c *ui.Context, it *Item) {
 	}
 	c.OnWindowShortcut(0, ui.KeyF11, func() { a.viewerToggleImmersive() })
 	if it.Kind == "video" {
+		// Space plays a video, so starring a video uses Shift+Space; an image
+		// has no transport control to compete with.
+		c.OnWindowShortcut(ui.Shift, ui.KeySpace, func() { a.toggleViewerFavorite(it) })
 		c.OnWindowShortcut(0, ui.KeySpace, func() { a.viewerTogglePlay() })
 		c.OnWindowShortcut(0, ui.KeyJ, func() { a.viewerSeekBy(-10 * time.Second) })
 		c.OnWindowShortcut(0, ui.KeyL, func() { a.viewerSeekBy(10 * time.Second) })
@@ -440,6 +459,7 @@ func (a *App) viewerShortcuts(c *ui.Context, it *Item) {
 		c.OnWindowShortcut(ui.Shift, ui.KeyRight, func() { a.viewerSeekBy(10 * time.Second) })
 		return
 	}
+	c.OnWindowShortcut(0, ui.KeySpace, func() { a.toggleViewerFavorite(it) })
 	c.OnWindowShortcut(0, ui.KeyEqual, func() { a.viewerZoom(1.25) })
 	// "+" is Shift+"=" on a US keyboard; accept both spellings.
 	c.OnWindowShortcut(ui.Shift, ui.KeyEqual, func() { a.viewerZoom(1.25) })

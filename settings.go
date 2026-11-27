@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -37,19 +36,26 @@ type Settings struct {
 	PlayVideo           bool          `json:"playVideo"`
 	LoopVideo           bool          `json:"loopVideo"`
 	LastPath            string        `json:"lastPath"`
-	Favorites           []string      `json:"favorites"`
+	Favorites           []Favorite    `json:"favorites"`
 	RemoteShares        []remoteShare `json:"remoteShares,omitempty"`
-	Tabs                []TabState    `json:"tabs"`
-	ActiveTab           int           `json:"activeTab"`
-	CacheLimitMB        int           `json:"cacheLimitMB"`
-	ThumbPrefetch       bool          `json:"thumbPrefetch"`
-	ViewerPreload       int           `json:"viewerPreload"`
-	ViewerAutoFullRes   bool          `json:"viewerAutoFullRes"`
-	ViewerHUD           string        `json:"viewerHUD"` // off | auto | always
-	SidePrev            SideBinding   `json:"sidePrev"`
-	SideNext            SideBinding   `json:"sideNext"`
-	SidePrevHold        SideBinding   `json:"sidePrevHold"`
-	SideNextHold        SideBinding   `json:"sideNextHold"`
+	// ShowPlaces hides the sidebar's well-known folders section for users who
+	// only navigate through favorites and drives.
+	ShowPlaces bool `json:"showPlaces"`
+	// ThumbPrefetchMin is the folder size at which the background fill starts.
+	// Below it the visible cards already cover the folder, so filling would
+	// only add a task row and disk churn.
+	ThumbPrefetchMin  int         `json:"thumbPrefetchMin"`
+	Tabs              []TabState  `json:"tabs"`
+	ActiveTab         int         `json:"activeTab"`
+	CacheLimitMB      int         `json:"cacheLimitMB"`
+	ThumbPrefetch     bool        `json:"thumbPrefetch"`
+	ViewerPreload     int         `json:"viewerPreload"`
+	ViewerAutoFullRes bool        `json:"viewerAutoFullRes"`
+	ViewerHUD         string      `json:"viewerHUD"` // off | auto | always
+	SidePrev          SideBinding `json:"sidePrev"`
+	SideNext          SideBinding `json:"sideNext"`
+	SidePrevHold      SideBinding `json:"sidePrevHold"`
+	SideNextHold      SideBinding `json:"sideNextHold"`
 }
 
 func defaultSettings() Settings {
@@ -71,6 +77,8 @@ func defaultSettings() Settings {
 		LoopVideo:           false,
 		CacheLimitMB:        1500,
 		ThumbPrefetch:       true,
+		ThumbPrefetchMin:    200,
+		ShowPlaces:          true,
 		ViewerPreload:       2,
 		ViewerAutoFullRes:   true,
 		ViewerHUD:           "auto",
@@ -92,6 +100,9 @@ func initSettings() {
 		return
 	}
 	settingsPath = filepath.Join(dir, "settings.json")
+	// Favorites changed from a path list to objects; rewrite the document once
+	// so the rest of the app only ever sees the current shape.
+	migrateFavorites(settingsPath)
 	data, err := os.ReadFile(settingsPath)
 	if err == nil {
 		if s, ok := parseSettings(data); ok {
@@ -104,11 +115,18 @@ func initSettings() {
 // by an older build (or edited by hand) keeps sane values for omitted fields.
 func parseSettings(data []byte) (Settings, bool) {
 	// An editor that saves as "UTF-8 with BOM" must not reset every preference.
-	data = bytes.TrimPrefix(data, []byte("\xef\xbb\xbf"))
+	data = trimBOM(data)
 	def := defaultSettings()
 	s := def
-	if json.Unmarshal(data, &s) != nil {
+	// Favorites are decoded separately: a 1.9 document stores plain paths, and
+	// the typed field would make the whole settings load fail on them.
+	favorites, hasFavorites := parseFavorites(rawField(data, "favorites"))
+	rest, err := withoutField(data, "favorites")
+	if err != nil || json.Unmarshal(rest, &s) != nil {
 		return defaultSettings(), false
+	}
+	if hasFavorites {
+		s.Favorites = favorites
 	}
 	// Older settings have no preload field. Keep the default instead of
 	// treating the zero value as an explicit "off" choice.
@@ -122,6 +140,12 @@ func parseSettings(data []byte) (Settings, bool) {
 		}
 		if _, ok := fields["viewerAutoFullRes"]; !ok {
 			s.ViewerAutoFullRes = def.ViewerAutoFullRes
+		}
+		if _, ok := fields["showPlaces"]; !ok {
+			s.ShowPlaces = def.ShowPlaces
+		}
+		if _, ok := fields["thumbPrefetchMin"]; !ok {
+			s.ThumbPrefetchMin = def.ThumbPrefetchMin
 		}
 	}
 	return mergeSettings(def, s), true
@@ -162,13 +186,19 @@ func mergeSettings(def, s Settings) Settings {
 	if s.ViewerPreload > 8 {
 		s.ViewerPreload = 8
 	}
+	if s.ThumbPrefetchMin < 0 {
+		s.ThumbPrefetchMin = 0
+	}
+	if s.ThumbPrefetchMin > 10000 {
+		s.ThumbPrefetchMin = 10000
+	}
 	switch s.ViewerHUD {
 	case "off", "auto", "always":
 	default:
 		s.ViewerHUD = def.ViewerHUD
 	}
 	if s.Favorites == nil {
-		s.Favorites = []string{}
+		s.Favorites = []Favorite{}
 	}
 	if s.RemoteShares == nil {
 		s.RemoteShares = []remoteShare{}

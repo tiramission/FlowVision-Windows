@@ -257,8 +257,19 @@ func (a *App) gridView(c *ui.Context, tab *Tab) {
 				mods := box.ClickModifiers()
 				switch {
 				case mods&ui.Shift != 0 && tab.Anchor != "":
+					// Shift extends from the anchor, and doing so is itself a
+					// multi-selection: enter the mode rather than making the
+					// user press Ctrl+M first.
+					tab.MultiSelect = true
 					a.selectRange(it.ID)
 				case mods&ui.Cmd != 0:
+					// Ctrl+click builds a selection one tile at a time, which is
+					// the other way into multi-select.
+					tab.MultiSelect = true
+					a.toggleSelect(it.ID, true)
+				case tab.MultiSelect:
+					// Already in the mode: a plain click toggles too, so a run
+					// of photos is one click each.
 					a.toggleSelect(it.ID, true)
 				default:
 					a.selectOnly(it.ID)
@@ -293,22 +304,48 @@ func (a *App) gridView(c *ui.Context, tab *Tab) {
 				a.later(func() { a.activateItem(it) })
 			}
 		})
-		box.OnShortcut(0, ui.KeySpace, func() {
-			if it := tab.selectedOne(); it != nil {
-				a.later(func() { a.activateItem(it) })
-			}
-		})
 		box.OnShortcut(0, ui.KeyDelete, func() {
 			if a.settings.ShowOther || len(tab.Selected) > 0 {
 				a.later(func() { a.askDelete(false) })
 			}
 		})
 		box.OnShortcut(ui.Cmd, ui.KeyA, func() { a.later(a.selectAll) })
+		// Multi-select has its own mode, so it also has its own key: Ctrl+M
+		// enters, Escape leaves and clears.
+		box.OnShortcut(ui.Cmd, ui.KeyM, func() {
+			a.later(func() {
+				if tab.MultiSelect {
+					a.exitMultiSelect()
+					return
+				}
+				a.setMultiSelect(true)
+			})
+		})
 		box.OnShortcut(0, ui.KeyEscape, func() { a.later(a.clearSelection) })
+		// Space stars the selected tile, matching the viewer's shortcut. It
+		// used to open the item, which duplicated Enter and left no keyboard
+		// way to favorite from the grid.
+		box.OnShortcut(0, ui.KeySpace, func() {
+			if tab.selectedOne() != nil {
+				a.later(a.toggleItemFavorites)
+			}
+		})
 		box.OnShortcut(0, ui.KeyF2, func() {
 			if tab.selectedOne() != nil {
 				a.later(a.beginRename)
 			}
+		})
+		box.OnShortcut(ui.Shift, ui.KeyLeft, func() {
+			a.extendGridSelection(tab, layout, -1, 0)
+		})
+		box.OnShortcut(ui.Shift, ui.KeyRight, func() {
+			a.extendGridSelection(tab, layout, 1, 0)
+		})
+		box.OnShortcut(ui.Shift, ui.KeyUp, func() {
+			a.extendGridSelection(tab, layout, 0, -1)
+		})
+		box.OnShortcut(ui.Shift, ui.KeyDown, func() {
+			a.extendGridSelection(tab, layout, 0, 1)
 		})
 		box.OnShortcut(0, ui.KeyLeft, func() {
 			a.moveGridSelection(tab, layout, -1, 0)
@@ -495,11 +532,61 @@ func (a *App) moveGridSelection(tab *Tab, layout gridLayout, dx, dy float32) {
 	}
 }
 
+// extendGridSelection grows the selection from its anchor to the tile one step
+// away, entering multi-select on the way. The anchor stays put, so repeated
+// Shift+arrow walks the run rather than dragging it along.
+func (a *App) extendGridSelection(tab *Tab, layout gridLayout, dx, dy float32) {
+	anchor := -1
+	if tab.Anchor != "" {
+		anchor = tab.indexOf(tab.Anchor)
+	}
+	if anchor < 0 {
+		a.selectGridIndex(tab, layout, 0)
+		return
+	}
+	// The step starts from the moving end of the run, not from the anchor:
+	// stepping from the anchor twice would select the same neighbour again.
+	edge := anchor
+	if tab.MultiSelect && len(tab.Selected) > 1 {
+		for i, it := range tab.Items {
+			if tab.Selected[it.ID] && i != anchor {
+				edge = i
+			}
+		}
+	}
+	next := layout.nearestFrom(edge, dx, dy)
+	if next < 0 || next >= len(tab.Items) {
+		return
+	}
+	tab.MultiSelect = true
+	a.selectRangeKeepingAnchor(tab, tab.Items[next].ID)
+}
+
+// selectRangeKeepingAnchor selects the span between the anchor and to, without
+// moving the anchor itself.
+func (a *App) selectRangeKeepingAnchor(tab *Tab, toID string) {
+	to := tab.indexOf(toID)
+	from := tab.indexOf(tab.Anchor)
+	if from < 0 || to < 0 {
+		return
+	}
+	if from > to {
+		from, to = to, from
+	}
+	tab.Selected = map[string]bool{}
+	for i := from; i <= to; i++ {
+		tab.Selected[tab.Items[i].ID] = true
+	}
+	a.refresh()
+}
+
 func (a *App) selectGridIndex(tab *Tab, layout gridLayout, idx int) {
 	if idx < 0 || idx >= len(layout.Cells) || idx >= len(tab.Items) {
 		return
 	}
 	it := tab.Items[idx]
+	// Moving with the arrow keys replaces the selection, as it does in a file
+	// list; Shift+arrow is handled separately and extends from the anchor.
 	tab.Selected = map[string]bool{it.ID: true}
 	tab.Anchor = it.ID
 	_, cy := layout.center(idx)

@@ -170,8 +170,16 @@ func TestNativeSearchFiltersGrid(t *testing.T) {
 
 func TestNativeSelectionAndViewerOverlay(t *testing.T) {
 	a := newViewTestApp()
-	a.selectOnly("2")
 	tt := ui.NewTester(a.view, 1280, 800)
+	// A plain click selects one tile and nothing more: no floating bar over the
+	// folder until the user actually enters multi-select.
+	a.selectOnly("2")
+	tt.Frame()
+	if tt.HasText("已选 1 项") {
+		t.Fatalf("single click showed the selection bar: %q", tt.Texts())
+	}
+	a.setMultiSelect(true)
+	tt.Frame()
 	if !tt.HasText("已选 1 项") {
 		t.Fatalf("selection status missing: %q", tt.Texts())
 	}
@@ -182,8 +190,8 @@ func TestNativeSelectionAndViewerOverlay(t *testing.T) {
 		t.Fatalf("clear selection: %v", err)
 	}
 	tt.Frame()
-	if len(a.tab().Selected) != 0 {
-		t.Fatalf("clear selection left %v", a.tab().Selected)
+	if len(a.tab().Selected) != 0 || a.tab().MultiSelect {
+		t.Fatalf("clear selection left %v (multi=%v)", a.tab().Selected, a.tab().MultiSelect)
 	}
 	a.selectOnly("2")
 	a.viewer = Viewer{Open: true, Item: a.tab().Items[1], Zoom: 1, ShowInfo: true}
@@ -267,7 +275,10 @@ func TestNativeToolbarSortBinding(t *testing.T) {
 	if a.tab().Sort != "name" {
 		t.Fatalf("initial sort: %q", a.tab().Sort)
 	}
-	trigger, ok := tt.AccessByRole(ui.RolePopUpButton, "排序")
+	// The direction starts from the saved setting, so pin it for the test.
+	a.tab().Desc = false
+	tt.Frame()
+	trigger, ok := tt.AccessByRole(ui.RolePopUpButton, "排序方式，再次选择同一项切换升序降序")
 	if !ok {
 		t.Fatalf("sort trigger missing: %q", tt.Texts())
 	}
@@ -280,6 +291,72 @@ func TestNativeToolbarSortBinding(t *testing.T) {
 	if a.tab().Sort != "date" {
 		t.Fatalf("toolbar sort did not write the tab: %q", a.tab().Sort)
 	}
+	if a.tab().Desc {
+		t.Fatalf("switching field should start ascending: desc=%v", a.tab().Desc)
+	}
+
+	// Switching away from a descending field drops the direction, so a new
+	// field never inherits the previous one's order.
+	a.tab().Desc = true
+	tt.Frame()
+	tt.ClickAt(trigger.Bounds.X+trigger.Bounds.W/2, trigger.Bounds.Y+trigger.Bounds.H/2)
+	tt.Frame()
+	if err := tt.Click("大小"); err != nil {
+		t.Fatalf("sort option: %v", err)
+	}
+	tt.Frame()
+	if a.tab().Sort != "size" || a.tab().Desc {
+		t.Fatalf("switch from descending: sort=%q desc=%v", a.tab().Sort, a.tab().Desc)
+	}
+}
+
+// TestNativeToolbarSortDirection covers the direction half of the sort
+// control: one row per field, and choosing the field in use flips the order.
+func TestNativeToolbarSortDirection(t *testing.T) {
+	a := newViewTestApp()
+	a.tab().Sort, a.tab().Desc = "name", false
+	tt := ui.NewTester(a.view, 1280, 800)
+	tt.Frame()
+
+	trigger, ok := tt.AccessByRole(ui.RolePopUpButton, "排序方式，再次选择同一项切换升序降序")
+	if !ok {
+		t.Fatalf("sort trigger missing: %q", tt.Texts())
+	}
+	tt.ClickAt(trigger.Bounds.X+trigger.Bounds.W/2, trigger.Bounds.Y+trigger.Bounds.H/2)
+	tt.Frame()
+
+	// One row per field; the direction is not a second set of rows.
+	for _, label := range []string{"名称", "日期", "大小", "类型"} {
+		if !tt.HasText(label) {
+			t.Fatalf("sort menu missing %q: %q", label, tt.Texts())
+		}
+	}
+	if tt.HasText("升序") && countText(tt.Texts(), "升序") > 1 {
+		t.Fatalf("the menu lists directions as rows again: %q", tt.Texts())
+	}
+
+	// Choosing the field already in use flips the order.
+	if err := tt.Click("名称"); err != nil {
+		t.Fatalf("click 名称: %v", err)
+	}
+	tt.Frame()
+	if !a.tab().Desc {
+		t.Fatalf("re-choosing the field did not flip the order: desc=%v", a.tab().Desc)
+	}
+	if a.tab().Sort != "name" {
+		t.Fatalf("field changed while flipping: %q", a.tab().Sort)
+	}
+}
+
+// countText counts how many of texts are label.
+func countText(texts []string, label string) int {
+	n := 0
+	for _, text := range texts {
+		if text == label {
+			n++
+		}
+	}
+	return n
 }
 
 func TestNativeToolbarViewMenuRecursive(t *testing.T) {
@@ -734,7 +811,7 @@ func TestSettingsDirtyTracksEditableFields(t *testing.T) {
 		t.Fatal("changed preference was not dirty")
 	}
 	a.draft = a.settings
-	a.draft.Favorites = append(a.draft.Favorites, `C:\Pictures`)
+	a.draft.Favorites = append(a.draft.Favorites, Favorite{Path: `C:\Pictures`, Kind: "folder"})
 	if a.settingsDirty() {
 		t.Fatal("favorites are not an editable preference")
 	}
@@ -990,4 +1067,31 @@ func itemNames(items []*Item) []string {
 		out = append(out, fmt.Sprintf("%s(%s)", it.Name, it.ID))
 	}
 	return out
+}
+
+// TestNativeSortMenuRowsSnapshot records the sort menu's shape: one row per
+// field, with the direction shown on the field in use.
+func TestNativeSortMenuRowsSnapshot(t *testing.T) {
+	a := newViewTestApp()
+	a.tab().Sort, a.tab().Desc = "date", true
+	tt := ui.NewTester(a.view, 1280, 800)
+	tt.Frame()
+	trigger, ok := tt.AccessByRole(ui.RolePopUpButton, "排序方式，再次选择同一项切换升序降序")
+	if !ok {
+		t.Fatalf("trigger missing")
+	}
+	tt.ClickAt(trigger.Bounds.X+trigger.Bounds.W/2, trigger.Bounds.Y+trigger.Bounds.H/2)
+	tt.Frame()
+
+	texts := tt.Texts()
+	for _, label := range []string{"名称", "日期", "大小", "类型"} {
+		if countText(texts, label) < 1 {
+			t.Fatalf("%q missing from the menu: %q", label, texts)
+		}
+	}
+	// The order shows once, on the field in use, not on every row. The trigger
+	// carries the same order as an arrow, which has no text.
+	if got := countText(texts, "降序"); got != 1 {
+		t.Fatalf("降序 appears %d times, want only the active row: %q", got, texts)
+	}
 }

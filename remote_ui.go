@@ -16,10 +16,15 @@ import (
 
 const statusNoticeLinger = 2600 * time.Millisecond
 
-// tabReadOnly reports whether the active tab shows a remote location.
+// tabReadOnly reports whether the active tab shows a location where write
+// actions make no sense: a remote share, or the favorites folder, whose
+// contents are references rather than a place on disk.
 func (a *App) tabReadOnly() bool {
 	t := a.tab()
-	return t != nil && isRemotePath(t.Path)
+	if t == nil {
+		return false
+	}
+	return isRemotePath(t.Path) || isFavoritesPath(t.Path)
 }
 
 func (a *App) showStatusNotice(text string) {
@@ -56,6 +61,7 @@ func remoteProtocolIcon(protocol string) *ui.SVG {
 
 // openRemoteDialog starts a new connection.
 func (a *App) openRemoteDialog() {
+	a.remoteEditID = ""
 	a.remoteDraft = remoteShare{Protocol: remoteSMB, Port: 445}
 	a.remotePass = ""
 	a.remoteErr = ""
@@ -68,6 +74,7 @@ func (a *App) openRemoteDialog() {
 
 // editRemoteShare reopens a saved connection.
 func (a *App) editRemoteShare(share remoteShare) {
+	a.remoteEditID = remoteShareID(share)
 	a.remoteDraft = share
 	a.remotePass = ""
 	a.remoteErr = ""
@@ -91,6 +98,11 @@ func (a *App) commitRemoteShare() {
 	draft.Share = strings.TrimSpace(strings.Trim(draft.Share, `/`))
 	draft.Base = strings.Trim(strings.TrimSpace(draft.Base), "/")
 	draft.User = strings.TrimSpace(draft.User)
+	draft.Name = strings.TrimSpace(draft.Name)
+	// The port field is the authority, not a copy kept in sync when a widget
+	// notices a change: typing 5006 and clicking 连接 in the same frame used to
+	// send the old default, which produced URLs like https://nas:80.
+	draft.Port = int(a.remotePortDraft)
 	if err := validateRemoteShare(draft); err != nil {
 		a.remoteErr = err.Error()
 		a.refresh()
@@ -99,8 +111,16 @@ func (a *App) commitRemoteShare() {
 	draft.ID = remoteShareID(draft)
 	password := a.remotePass
 	if draft.SavePass && password == "" {
-		// Keep the remembered password when the field is left blank.
-		password = passwordForShare(draft)
+		// Keep the remembered password when the field is left blank. On an
+		// edit the address may have changed, which changes the id, so look the
+		// password up under the entry being edited first: otherwise a path
+		// edit would silently lose the saved password.
+		if a.remoteEditID != "" {
+			password = passwordForID(a.remoteEditID, draft.SavePass)
+		}
+		if password == "" {
+			password = passwordForShare(draft)
+		}
 	}
 	a.remoteBusy = true
 	a.remoteErr = ""
@@ -126,8 +146,13 @@ func (a *App) commitRemoteShare() {
 				return
 			}
 			rememberRemotePassword(draft, password, draft.SavePass)
+			if old := a.remoteEditID; old != "" && old != draft.ID {
+				// The password moved to the new id; the old one is dead.
+				forgetRemotePasswordByID(old)
+			}
 			a.upsertRemoteShare(draft)
 			a.remoteDialogOpen = false
+			a.remoteEditID = ""
 			a.remotePass = ""
 			a.goTo(root, true)
 			a.refresh()
@@ -161,19 +186,38 @@ func validateRemoteShare(share remoteShare) error {
 }
 
 // upsertRemoteShare saves a connection in settings.
+// upsertRemoteShare saves a connection, replacing the entry it came from.
+//
+// The id is derived from the address, so editing the path or the port produces
+// a new one. Saving by id alone would then append a second row and leave the
+// old one behind, which is exactly what happened when a path was edited; the
+// edit therefore carries the original id and replaces that entry.
 func (a *App) upsertRemoteShare(share remoteShare) {
-	for i, existing := range a.settings.RemoteShares {
-		if remoteShareID(existing) == share.ID {
-			// A changed address loses the old session.
+	edited := a.remoteEditID
+	a.remoteEditID = ""
+	out := make([]remoteShare, 0, len(a.settings.RemoteShares)+1)
+	replaced := false
+	for _, existing := range a.settings.RemoteShares {
+		existingID := remoteShareID(existing)
+		// Drop the entry being edited, and any stale duplicate of the target
+		// address, so the list cannot hold the same share twice.
+		if existingID == edited || existingID == share.ID {
 			if remoteRoot(existing) != remoteRoot(share) {
-				remotePoolInstance.release(remoteShareID(existing))
+				// A changed address loses the old session.
+				remotePoolInstance.release(existingID)
 			}
-			a.settings.RemoteShares[i] = share
-			_ = saveSettings(a.settings)
-			return
+			if !replaced {
+				out = append(out, share)
+				replaced = true
+			}
+			continue
 		}
+		out = append(out, existing)
 	}
-	a.settings.RemoteShares = append(a.settings.RemoteShares, share)
+	if !replaced {
+		out = append(out, share)
+	}
+	a.settings.RemoteShares = out
 	_ = saveSettings(a.settings)
 }
 
@@ -207,9 +251,15 @@ func (a *App) sidebarRemoteRow(c *ui.Context, share remoteShare) {
 	if t := a.tab(); t != nil {
 		active = strings.EqualFold(remoteShareKey(t.Path), remoteShareKey(root))
 	}
-	name := share.Name
-	if strings.TrimSpace(name) == "" {
+	// The row shows the alias when there is one and the address otherwise; the
+	// tooltip always carries the address, so a short name never hides where it
+	// actually points.
+	name := remoteAlias(share)
+	tooltip := root + "\n远程位置（只读）"
+	if name == "" {
 		name = strings.TrimPrefix(strings.TrimPrefix(root, remoteSMB+"://"), remoteWebDAV+"://")
+	} else {
+		tooltip = name + "\n" + root + "\n远程位置（只读）"
 	}
 	row := components.SidebarItemWithLeading(c, name, active, func(c *ui.Context, size float32) {
 		color := th.TextMuted.Alpha(.9)
@@ -218,7 +268,7 @@ func (a *App) sidebarRemoteRow(c *ui.Context, share remoteShare) {
 		}
 		components.Icon(c, remoteProtocolIcon(share.Protocol)).Size(size, size).TextColor(color)
 	})
-	row.Key(root).Tooltip(root + "\n远程位置（只读）")
+	row.Key(root).Tooltip(tooltip)
 	if row.Clicked() {
 		a.goTo(root, true)
 	}
@@ -249,6 +299,9 @@ func (a *App) remoteDialog(c *ui.Context) {
 		title = "编辑远程位置"
 	}
 	ui.Modal(c, &a.remoteDialogOpen, func() {
+		// Runs before any field is built, so the port it shows is the one the
+		// current protocol implies.
+		a.syncPortToProtocol()
 		ui.Column(c).Width(480).Gap(11).Children(func() {
 			dialogHeader(c, lucide.Network(), title, "连接只在应用内建立；远程位置为只读")
 
@@ -265,9 +318,8 @@ func (a *App) remoteDialog(c *ui.Context) {
 					if components.Button(c, protocol.label, variant).Clicked() {
 						if a.remoteDraft.Protocol != protocol.id {
 							a.remoteDraft.Protocol = protocol.id
-							a.applyRemotePortDefault()
+							a.refresh()
 						}
-						a.refresh()
 					}
 				}
 			})
@@ -276,10 +328,7 @@ func (a *App) remoteDialog(c *ui.Context) {
 			host.Label("主机").Placeholder("主机名或 IP，例如 nas 或 192.168.1.10")
 
 			ui.Row(c).Gap(8).FillWidth().Children(func() {
-				port := components.NumberInput(c, &a.remotePortDraft, 1, 65535, 1).Label("端口").Width(120)
-				if port.Changed() {
-					a.remoteDraft.Port = int(a.remotePortDraft)
-				}
+				components.NumberInput(c, &a.remotePortDraft, 1, 65535, 1).Label("端口").Width(120)
 				user := components.TextBox(c, &a.remoteDraft.User, components.TextBoxOptions{}).Grow(1).MinWidth(0)
 				user.Label("用户名").Placeholder("用户名（留空为匿名／当前会话）")
 			})
@@ -291,6 +340,12 @@ func (a *App) remoteDialog(c *ui.Context) {
 				base := components.TextBox(c, &a.remoteDraft.Base, components.TextBoxOptions{})
 				base.Label("路径").Placeholder("路径（可选），例如 dav/photos")
 			}
+
+			// The alias is what the sidebar and breadcrumb show; the address
+			// stays available on hover and in the dialog, so a long share does
+			// not have to be read every time.
+			name := components.TextBox(c, &a.remoteDraft.Name, components.TextBoxOptions{})
+			name.Label("别名").Placeholder("别名（可选），例如 家里照片")
 
 			pass := components.TextBox(c, &a.remotePass, components.TextBoxOptions{}).Password()
 			pass.Label("密码")
@@ -307,14 +362,26 @@ func (a *App) remoteDialog(c *ui.Context) {
 			})
 			if a.remoteDraft.Protocol == remoteWebDAV {
 				ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
-					if components.Switch(c, &a.remoteDraft.Secure, "使用 HTTPS", components.SwitchOptions{Compact: true}).Changed() {
-						a.applyRemotePortDefault()
-					}
+					components.Switch(c, &a.remoteDraft.Secure, "使用 HTTPS", components.SwitchOptions{Compact: true})
 					ui.Spacer(c)
 					components.Text(c, "群晖等 NAS 的 WebDAV 常是 http，按实际端口选").
 						FontSize(10).TextColor(th.TextMuted).SingleLine()
 				})
-				components.Switch(c, &a.remoteDraft.Insecure, "允许自签名证书", components.SwitchOptions{Compact: true})
+				// One switch, not a policy picker: a NAS certificate can be
+				// self-signed, expired or issued for another name, and all of
+				// those need the same thing. The warning is inline because the
+				// consequence is not obvious from the label alone.
+				ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
+					components.Switch(c, &a.remoteDraft.SkipVerify, "跳过证书验证", components.SwitchOptions{Compact: true})
+					ui.Spacer(c)
+					if a.remoteDraft.SkipVerify {
+						components.Text(c, "不校验证书，容易被中间人冒充").FontSize(10).
+							TextColor(th.Danger).SingleLine()
+					} else {
+						components.Text(c, "证书自签名或已过期时打开").FontSize(10).
+							TextColor(th.TextMuted).SingleLine()
+					}
+				})
 			}
 
 			if a.remoteErr != "" {
@@ -327,6 +394,7 @@ func (a *App) remoteDialog(c *ui.Context) {
 			ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
 				if components.Button(c, "取消", components.ButtonSecondary).Clicked() {
 					a.remoteDialogOpen = false
+					a.remoteEditID = ""
 				}
 				if components.Button(c, "连接", components.ButtonPrimary).Clicked() {
 					a.later(a.commitRemoteShare)
@@ -359,13 +427,42 @@ func isRemoteDefaultPort(port int) bool {
 	return false
 }
 
+// syncPortToProtocol moves the port field to the protocol's default when the
+// protocol or HTTPS switch changed since the last frame. It runs at the top of
+// the dialog, before the number field is built: the field copies its bound
+// value into local text while it renders, so changing the value after that
+// point is overwritten by the text it already had.
+func (a *App) syncPortToProtocol() {
+	if a.remotePortProtocol == a.remoteDraft.Protocol && a.remotePortSecure == a.remoteDraft.Secure {
+		return
+	}
+	first := a.remotePortProtocol == "" && a.remotePortSecure == false
+	a.remotePortProtocol = a.remoteDraft.Protocol
+	a.remotePortSecure = a.remoteDraft.Secure
+	if first {
+		// Opening the dialog seeds the field from the draft; nothing to move.
+		a.remotePortDraft = float64(remoteDefaultPort(a.remoteDraft.Protocol, a.remoteDraft.Secure))
+		if a.remoteDraft.Port > 0 {
+			a.remotePortDraft = float64(a.remoteDraft.Port)
+		}
+		return
+	}
+	if isRemoteDefaultPort(int(a.remotePortDraft)) {
+		a.remotePortDraft = float64(remoteDefaultPort(a.remoteDraft.Protocol, a.remoteDraft.Secure))
+	}
+}
+
 // applyRemotePortDefault moves the port along with the protocol or the HTTPS
 // switch, unless the user typed something of their own.
 func (a *App) applyRemotePortDefault() {
-	if isRemoteDefaultPort(a.remoteDraft.Port) {
-		a.remoteDraft.Port = remoteDefaultPort(a.remoteDraft.Protocol, a.remoteDraft.Secure)
+	// Read the field, not the draft's copy: it is the authority now, and a
+	// port the user typed must survive a protocol or HTTPS switch.
+	port := int(a.remotePortDraft)
+	if isRemoteDefaultPort(port) {
+		port = remoteDefaultPort(a.remoteDraft.Protocol, a.remoteDraft.Secure)
 	}
-	a.syncRemotePortDraft()
+	a.remoteDraft.Port = port
+	a.remotePortDraft = float64(port)
 }
 
 // remotePortDraft mirrors the port as a number for the input widget.

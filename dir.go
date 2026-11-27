@@ -267,6 +267,11 @@ type DirResult struct {
 
 // Browse lists a folder the way the grid shows it.
 func (FS) Browse(req BrowseRequest) DirResult {
+	// The favorites folder is virtual: its listing comes from settings, not
+	// from the disk, and each entry keeps pointing at its original file.
+	if isFavoritesPath(req.Path) {
+		return favoritesBrowse(req)
+	}
 	if isRemotePath(req.Path) {
 		if req.Limit <= 0 {
 			req.Limit = 4000
@@ -396,7 +401,17 @@ func (FS) Browse(req BrowseRequest) DirResult {
 }
 
 func displayName(path string) string {
+	if isFavoritesPath(path) {
+		return favoritesName
+	}
 	if isRemotePath(path) {
+		// The share root is named by its alias, so a tab reads "我的相册"
+		// instead of the last path segment, which is often the base folder.
+		if share, ok := remoteShareForPath(path); ok {
+			if alias := remoteAlias(share); alias != "" && strings.EqualFold(cleanDisplayPath(path), cleanDisplayPath(remoteRoot(share))) {
+				return alias
+			}
+		}
 		return remoteName(path)
 	}
 	clean := filepath.Clean(path)
@@ -409,6 +424,9 @@ func displayName(path string) string {
 }
 
 func isDriveRoot(path string) bool {
+	if isFavoritesPath(path) {
+		return true
+	}
 	if isRemotePath(path) {
 		return remoteShareKey(path) == strings.TrimSuffix(path, "/")
 	}
@@ -590,6 +608,10 @@ func invalidateMedia(dir string) {
 
 // Tree lists the sub folders of path.
 func (FS) Tree(path string, showHidden bool) []TreeEntry {
+	if isFavoritesPath(path) {
+		// A virtual folder has no sub folders to walk.
+		return []TreeEntry{}
+	}
 	if isRemotePath(path) {
 		return remoteTree(path, showHidden)
 	}
@@ -668,6 +690,9 @@ func (FS) Sibling(path string, direction int, showHidden bool) NavResult {
 
 // Parent returns the folder above path.
 func (FS) Parent(path string) NavResult {
+	if isFavoritesPath(path) {
+		return NavResult{Path: path, Found: false}
+	}
 	if isRemotePath(path) {
 		parent := remoteParent(path)
 		if parent == "" {
@@ -802,7 +827,9 @@ func (s *Store) internRemote(path string, entry remoteEntry) *Item {
 func remoteBrowse(req BrowseRequest) DirResult {
 	started := time.Now()
 	path := strings.TrimSuffix(req.Path, "/")
-	res := DirResult{Path: path, Name: remoteName(path), IsDrive: path == remoteShareKey(path)}
+	// displayName, not remoteName: the share root is named by its alias, and
+	// the tab title comes from this field.
+	res := DirResult{Path: path, Name: displayName(path), IsDrive: path == remoteShareKey(path)}
 	ctx, cancel := context.WithTimeout(context.Background(), remoteListTimeout)
 	defer cancel()
 	entries, err := remoteListFn(ctx, path)

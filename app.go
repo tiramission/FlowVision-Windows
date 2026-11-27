@@ -45,6 +45,10 @@ type Tab struct {
 	Items        []*Item
 	Selected     map[string]bool
 	Anchor       string
+	// MultiSelect turns a plain click into a toggle. The grid starts in
+	// single-select mode so clicking a photo never leaves a selection bar
+	// hovering over the folder; multi-select is entered from the context menu.
+	MultiSelect bool
 	// pendingSelect names a file to select once the next listing arrives; it is
 	// used after a rename, where the grid is still showing the pre-rename rows.
 	pendingSelect string
@@ -219,6 +223,7 @@ type App struct {
 	draftGridGap       float64
 	draftSidebarW      float64
 	draftCacheLimit    float64
+	draftPrefetchMin   float64
 	draftPreload       float64
 	draftTheme         string
 	draftSort          string
@@ -309,6 +314,9 @@ type App struct {
 
 	contextIDs   []string
 	contextEmpty bool
+	// pendingOpenPath is a file to open in the viewer once the folder it lives
+	// in has finished loading; a favorite can point at a file in any folder.
+	pendingOpenPath string
 
 	// The grid context menu lives in a window-level overlay so its material
 	// is not clipped by the scrolling content and its placement can flip at
@@ -321,7 +329,12 @@ type App struct {
 	gridMenuRefocus    bool
 	gridMenuTabID      int
 	gridFocusHandle    ui.Handle
-	pending            []func()
+	// The selection submenu is its own overlay so it can sit above the grid
+	// menu and return to it on Escape.
+	selectMenuOpen       bool
+	selectMenuFocusFirst bool
+	selectMenuTabID      int
+	pending              []func()
 
 	thumbs              map[string]*thumbEntry
 	thumbLoad           map[string]bool
@@ -348,11 +361,21 @@ type App struct {
 	remoteDialogOpen bool
 	remoteEditing    bool
 	remoteDraft      remoteShare
-	remotePortDraft  float64
-	remotePass       string
-	remoteBusy       bool
-	remoteErr        string
+	// remoteEditID is the id of the share being edited. The id is derived from
+	// the address, so editing the path changes it; keeping the original lets
+	// the save replace that entry instead of adding a second one.
+	remoteEditID    string
+	remotePortDraft float64
+	// The protocol and HTTPS state the port field was last derived from, so a
+	// change can be detected before the field is built.
+	remotePortProtocol string
+	remotePortSecure   bool
+	remotePass         string
+	remoteBusy         bool
+	remoteErr          string
 
+	// notice is free-form text the debug endpoint can report back.
+	notice string
 	// A short note in the status bar, for actions that do not open a dialog.
 	statusNotice   string
 	statusNoticeAt time.Time
@@ -549,6 +572,18 @@ func (a *App) loadTab(t *Tab, keepScroll bool) {
 				}
 				t.pendingSelect = ""
 			}
+			if a.pendingOpenPath != "" {
+				want := a.pendingOpenPath
+				a.pendingOpenPath = ""
+				for _, cand := range t.Items {
+					if strings.EqualFold(cleanDisplayPath(cand.Path), cleanDisplayPath(want)) {
+						t.Selected = map[string]bool{cand.ID: true}
+						t.Anchor = cand.ID
+						a.openViewer(cand)
+						break
+					}
+				}
+			}
 			if !keepScroll {
 				// A new folder starts at the top, unless a restored tab had a
 				// saved offset for this path.
@@ -571,9 +606,16 @@ func (a *App) setWindowTitle(t *Tab) {
 	if a.win == nil || t == nil {
 		return
 	}
+	// A share shows its alias when it has one and its address otherwise: the
+	// alias is what the user named it, and the address is the fallback that
+	// still says which machine it came from.
 	name := t.Name
 	if isRemotePath(t.Path) {
-		name = t.Path
+		if alias := remoteAliasForPath(t.Path); alias != "" {
+			name = alias
+		} else {
+			name = t.Path
+		}
 	}
 	a.win.SetTitle(name + " — FlowVision")
 }
@@ -664,6 +706,9 @@ func (a *App) goTo(path string, pushHistory bool) {
 	t.Name = displayName(path)
 	t.Selected = map[string]bool{}
 	t.Anchor = ""
+	// Multi-select is a mode for the folder being viewed. Carrying it into the
+	// next folder would make the first click there toggle instead of select.
+	t.MultiSelect = false
 	t.pendingSelect = ""
 	t.Scroll.Y = 0
 	a.loadTab(t, false)
@@ -679,6 +724,8 @@ func (a *App) goBack() {
 	t.Path = path
 	t.Name = displayName(path)
 	t.Selected = map[string]bool{}
+	t.Anchor = ""
+	t.MultiSelect = false
 	t.pendingSelect = ""
 	t.Scroll.Y = 0
 	a.loadTab(t, false)
@@ -807,53 +854,157 @@ func (a *App) openSelectedExternal() {
 	}
 }
 
+// copySelectedPath copies one path, or every selected path one per line. The
+// selection bar offers it for a run too, because pasting a list of photos into
+// another tool is the common reason to select several in the first place.
 func (a *App) copySelectedPath() {
-	if it := a.tab().selectedOne(); it != nil {
-		_ = (AppSvc{}).CopyText(it.Path)
-	}
-}
-
-func (a *App) toggleFavorite() {
 	t := a.tab()
 	if t == nil {
 		return
 	}
-	p := strings.ToLower(cleanDisplayPath(t.Path))
-	found := -1
-	for i, f := range a.settings.Favorites {
-		if strings.ToLower(cleanDisplayPath(f)) == p {
-			found = i
-			break
+	if it := t.selectedOne(); it != nil {
+		_ = (AppSvc{}).CopyText(it.Path)
+		a.showStatusNotice("已复制路径")
+		return
+	}
+	selected := t.selectedItems()
+	if len(selected) == 0 {
+		return
+	}
+	paths := make([]string, 0, len(selected))
+	for _, it := range selected {
+		paths = append(paths, it.Path)
+	}
+	// Windows clipboard consumers expect CRLF between lines.
+	_ = (AppSvc{}).CopyText(strings.Join(paths, "\r\n"))
+	a.showStatusNotice(fmt.Sprintf("已复制 %d 条路径", len(paths)))
+}
+
+// toggleFavoritePath adds an image or video to the favorites folder, or
+// removes it when it is already there.
+func (a *App) toggleFavoritePath(path string) {
+	if strings.TrimSpace(path) == "" {
+		return
+	}
+	if a.isFavorite(path) {
+		a.removeFavorite(path)
+		return
+	}
+	kind, _ := classify(path)
+	if !isMediaKind(kind) {
+		a.showStatusNotice("收藏夹只收图片和视频")
+		return
+	}
+	fav := Favorite{Path: path, Name: displayName(path), Kind: kind}
+	if !isRemotePath(path) {
+		if st, err := os.Stat(path); err == nil {
+			fav.Size = st.Size()
+			fav.Mtime = st.ModTime().Unix()
 		}
 	}
-	if found >= 0 {
-		a.settings.Favorites = append(a.settings.Favorites[:found], a.settings.Favorites[found+1:]...)
-	} else {
-		a.settings.Favorites = append(a.settings.Favorites, t.Path)
-	}
+	a.settings.Favorites = append(a.settings.Favorites, fav)
 	_ = saveSettings(a.settings)
+	a.showStatusNotice("已加入收藏夹")
+	a.refreshFavoritesTab()
 	a.refresh()
 }
 
+// toggleItemFavorites collects the selected images and videos, or removes them
+// when all of them are already collected. A mixed selection adds the missing
+// ones, which is what a user pressing the same button twice expects to undo.
+func (a *App) toggleItemFavorites() {
+	t := a.tab()
+	if t == nil {
+		return
+	}
+	media := make([]*Item, 0, len(t.Selected))
+	for _, it := range t.selectedItems() {
+		if isMediaKind(it.Kind) {
+			media = append(media, it)
+		}
+	}
+	if len(media) == 0 {
+		a.showStatusNotice("收藏夹只收图片和视频")
+		return
+	}
+	allSaved := true
+	for _, it := range media {
+		if !a.isFavorite(it.Path) {
+			allSaved = false
+			break
+		}
+	}
+	if allSaved {
+		for _, it := range media {
+			a.removeFavorite(it.Path)
+		}
+		a.showStatusNotice(fmt.Sprintf("已移出收藏夹 %d 项", len(media)))
+		return
+	}
+	added := 0
+	for _, it := range media {
+		if a.isFavorite(it.Path) {
+			continue
+		}
+		a.settings.Favorites = append(a.settings.Favorites, favoriteFromItem(it))
+		added++
+	}
+	_ = saveSettings(a.settings)
+	a.showStatusNotice(fmt.Sprintf("已加入收藏夹 %d 项", added))
+	a.refreshFavoritesTab()
+}
+
+// removeFavorite drops one entry. The filter copies instead of reusing the
+// backing array: an in-place append would leave the stored settings holding a
+// longer slice of the same array, and the next save would resurrect the entry.
 func (a *App) removeFavorite(path string) {
-	out := a.settings.Favorites[:0]
+	out := make([]Favorite, 0, len(a.settings.Favorites))
 	for _, f := range a.settings.Favorites {
-		if !strings.EqualFold(cleanDisplayPath(f), cleanDisplayPath(path)) {
+		if !sameFavorite(f, path) {
 			out = append(out, f)
 		}
 	}
 	a.settings.Favorites = out
 	_ = saveSettings(a.settings)
+	a.refreshFavoritesTab()
 	a.refresh()
+}
+
+// refreshFavoritesTab reloads the virtual folder when it is on screen. Its
+// listing comes from settings, not from the disk, so nothing else would tell
+// the grid that an entry was added or removed.
+func (a *App) refreshFavoritesTab() {
+	if t := a.tab(); t != nil && isFavoritesPath(t.Path) {
+		a.loadTab(t, true)
+	}
 }
 
 func (a *App) isFavorite(path string) bool {
 	for _, f := range a.settings.Favorites {
-		if strings.EqualFold(cleanDisplayPath(f), cleanDisplayPath(path)) {
+		if sameFavorite(f, path) {
 			return true
 		}
 	}
 	return false
+}
+
+// openFavorite opens a collected file from the favorites folder, which is
+// always the folder being viewed: the viewer's neighbours are the other
+// favorites, so stepping through them works without leaving the virtual folder.
+func (a *App) openFavorite(f Favorite) {
+	t := a.tab()
+	if t != nil && isFavoritesPath(t.Path) {
+		for _, it := range t.Items {
+			if sameFavorite(f, it.Path) {
+				a.selectOnly(it.ID)
+				a.openViewer(it)
+				return
+			}
+		}
+	}
+	// Not in the favorites tab: open it there first, then the file.
+	a.goTo(favoritesPath, true)
+	a.pendingOpenPath = f.Path
 }
 
 func (a *App) toggleSidebar() {
@@ -952,6 +1103,8 @@ func settingsEditingEqual(a, b Settings) bool {
 		a.SidePrevHold == b.SidePrevHold &&
 		a.SideNextHold == b.SideNextHold &&
 		a.ThumbPrefetch == b.ThumbPrefetch &&
+		a.ThumbPrefetchMin == b.ThumbPrefetchMin &&
+		a.ShowPlaces == b.ShowPlaces &&
 		a.ViewerAutoFullRes == b.ViewerAutoFullRes
 }
 
@@ -1007,7 +1160,7 @@ func (a *App) closeSettingsNow() {
 // been reset to the old value.
 func (a *App) fillSettingsDraft(s Settings) {
 	a.draft = s
-	a.draft.Favorites = append([]string(nil), s.Favorites...)
+	a.draft.Favorites = append([]Favorite(nil), s.Favorites...)
 	a.draft.Tabs = append([]TabState(nil), s.Tabs...)
 	a.draftTheme = s.Theme
 	a.draftSort = s.Sort
@@ -1015,6 +1168,7 @@ func (a *App) fillSettingsDraft(s Settings) {
 	a.draftGridGap = float64(s.GridGap)
 	a.draftSidebarW = float64(s.SidebarWidth)
 	a.draftCacheLimit = float64(s.CacheLimitMB)
+	a.draftPrefetchMin = float64(s.ThumbPrefetchMin)
 	a.draftPreload = float64(s.ViewerPreload)
 }
 
@@ -1027,12 +1181,13 @@ func (a *App) commitSettingsDraft() Settings {
 	a.draft.GridGap = int(math.Round(a.draftGridGap))
 	a.draft.SidebarWidth = int(math.Round(a.draftSidebarW))
 	a.draft.CacheLimitMB = int(math.Round(a.draftCacheLimit))
+	a.draft.ThumbPrefetchMin = int(math.Round(a.draftPrefetchMin))
 	a.draft.ViewerPreload = int(math.Round(a.draftPreload))
 	return a.draft
 }
 
 func (a *App) resetSettingsDraft() {
-	favorites := append([]string(nil), a.draft.Favorites...)
+	favorites := append([]Favorite(nil), a.draft.Favorites...)
 	tabs := append([]TabState(nil), a.draft.Tabs...)
 	active := a.draft.ActiveTab
 	lastPath := a.draft.LastPath
@@ -1069,8 +1224,12 @@ func (a *App) applySettings() {
 	a.treeGen++
 	a.treeLoaded = map[string]bool{}
 	a.treeKids = map[string][]TreeEntry{}
-	if !s.ThumbPrefetch {
+	// A raised threshold or a switched-off feature must stop the fill that is
+	// already running, not only the next one: reloadActive would leave the
+	// current listing's queued work in place until it drained.
+	if !s.ThumbPrefetch || s.ThumbPrefetchMin > 0 {
 		a.cancelThumbPrefetch()
+		a.dropTasksOfKind(taskKindFill)
 	}
 	a.reloadActive()
 	// The active tab's sort is part of persisted tab state, not only the
@@ -1321,6 +1480,74 @@ func (a *App) toggleSelect(id string, add bool) {
 	a.refresh()
 }
 
+// setMultiSelect turns the tab's multi-select mode on or off. Leaving the mode
+// keeps the selection: the user switched modes to act on what is selected, not
+// to throw it away.
+func (a *App) setMultiSelect(on bool) {
+	t := a.tab()
+	if t == nil {
+		return
+	}
+	t.MultiSelect = on
+	if !on && len(t.Selected) == 0 {
+		t.Anchor = ""
+	}
+	a.refresh()
+}
+
+// exitMultiSelect leaves the mode and clears what was selected.
+func (a *App) exitMultiSelect() {
+	t := a.tab()
+	if t == nil {
+		return
+	}
+	t.MultiSelect = false
+	t.Selected = map[string]bool{}
+	t.Anchor = ""
+	a.refresh()
+}
+
+// selectSameKind extends the selection to every visible item of the same kind
+// as the anchor, which is how "star all these videos" becomes one action.
+func (a *App) selectSameKind() {
+	t := a.tab()
+	if t == nil {
+		return
+	}
+	one := t.selectedOne()
+	if one == nil && t.Anchor != "" {
+		one = t.byID(t.Anchor)
+	}
+	if one == nil {
+		return
+	}
+	for _, it := range t.Items {
+		if it.Kind == one.Kind {
+			t.Selected[it.ID] = true
+		}
+	}
+	t.MultiSelect = true
+	t.Anchor = one.ID
+	a.refresh()
+}
+
+// invertSelection flips every visible item's selected state.
+func (a *App) invertSelection() {
+	t := a.tab()
+	if t == nil {
+		return
+	}
+	next := make(map[string]bool, len(t.Selected))
+	for _, it := range t.Items {
+		if !t.Selected[it.ID] {
+			next[it.ID] = true
+		}
+	}
+	t.Selected = next
+	t.MultiSelect = true
+	a.refresh()
+}
+
 func (a *App) selectRange(toID string) {
 	t := a.tab()
 	if t == nil {
@@ -1355,12 +1582,15 @@ func (a *App) selectAll() {
 	if len(t.Items) > 0 {
 		t.Anchor = t.Items[0].ID
 	}
+	t.MultiSelect = true
 	a.refresh()
 }
 
 func (a *App) clearSelection() {
 	if t := a.tab(); t != nil {
 		t.Selected = map[string]bool{}
+		t.MultiSelect = false
+		t.Anchor = ""
 	}
 	a.refresh()
 }
@@ -2225,7 +2455,10 @@ func (a *App) pumpThumbPrefetch(t *Tab) {
 	if thumbDir == "" || a.thumbQueue == nil || !a.settings.ThumbPrefetch || t == nil || !t.Loaded || t.Loading ||
 		// A whole-folder fill over SMB would saturate the share and the
 		// cache budget alike; network folders fill as they scroll.
-		isRemotePath(t.Path) {
+		isRemotePath(t.Path) ||
+		// A small folder is already covered by the visible cards, so filling it
+		// would add a task row and disk churn for nothing.
+		len(t.All) < a.settings.ThumbPrefetchMin {
 		a.cancelThumbPrefetch()
 		a.dropTasksOfKind(taskKindFill)
 		return
@@ -2506,4 +2739,14 @@ func (a *App) ensureTree(path string) {
 			a.refresh()
 		})
 	}()
+}
+
+// byID finds a visible item by its stable id.
+func (t *Tab) byID(id string) *Item {
+	for _, it := range t.Items {
+		if it.ID == id {
+			return it
+		}
+	}
+	return nil
 }
