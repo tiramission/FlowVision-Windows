@@ -58,6 +58,7 @@ func (a *App) gridMenuKeyboardAnchor(tab *Tab, layout gridLayout, bounds ui.Rect
 
 func (a *App) openGridMenu(x, y float32, keyboard bool) {
 	a.gridMenuOpen = true
+	a.tasksOpen = false
 	a.gridMenuX, a.gridMenuY = x, y
 	a.gridMenuFocusFirst = keyboard
 	a.gridMenuFocusPanel = !keyboard

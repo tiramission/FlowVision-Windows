@@ -49,6 +49,7 @@ func (a *App) view(c *ui.Context) {
 
 	a.selectionBar(c)
 	a.gridMenuOverlay(c)
+	a.tasksOverlay(c)
 	a.overlays(c)
 	a.runPending()
 }
@@ -1115,6 +1116,7 @@ func (a *App) statusBar(c *ui.Context) {
 				components.Text(c, "已截断").FontSize(11).TextColor(th.TextMuted).AlignSelf(ui.Center)
 			}
 			ui.Spacer(c)
+			a.taskChip(c, th)
 			if a.settings.Recursive {
 				components.Badge(c, "递归", components.BadgeOptions{Tone: components.BadgeWarning}).
 					AlignSelf(ui.Center)

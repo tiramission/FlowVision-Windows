@@ -338,6 +338,19 @@ type App struct {
 	prefetchGen    int
 	prefetchNext   int
 	prefetchActive int
+	// fillStopped marks a listing whose fill the user cancelled, so the next
+	// grid frame does not simply restart it.
+	fillStoppedTab *Tab
+	fillStoppedGen int
+
+	// Background task list shown in the status bar and its popover.
+	tasks            []*backgroundTask
+	taskSeq          int
+	tasksOpen        bool
+	taskTimer        *time.Timer
+	taskRefreshTimer *time.Timer
+	taskTimerPainted time.Time
+	lastTaskHUD      time.Time
 
 	treeOpen     map[string]*bool
 	treeRootOpen map[string]*bool
@@ -1387,6 +1400,8 @@ func (a *App) loadViewerMedia(it *Item) {
 	a.viewerGen++
 	a.viewer.Gen = a.viewerGen
 	gen := a.viewer.Gen
+	// The previous image's warm-up ends with the previous image, quietly.
+	a.dropTasksOfKind(taskKindWarmup)
 	a.startViewerChromeTicker(gen)
 	a.clearViewerHover()
 	a.stopViewerLoadTimers()
@@ -1613,6 +1628,7 @@ func (a *App) closeViewer() {
 	a.stopViewerSideMouseHook()
 	a.stopViewerLoadTimers()
 	a.clearViewerHover()
+	a.dropTasksOfKind(taskKindWarmup)
 	a.clearViewerFullRes()
 	a.clearViewerPendingActualSize()
 	a.releaseViewerOwnedBitmap()
@@ -1857,7 +1873,7 @@ func (a *App) viewerActualSize() {
 	if fit <= 0 {
 		return
 	}
-	a.viewer.Zoom = clampViewerZoom(viewerActualZoom(fit))
+	a.viewer.Zoom = clampViewerZoom(viewerActualZoom(fit), fit)
 	a.viewer.PanX = 0
 	a.viewer.PanY = 0
 	a.viewer.OneToOne = true
@@ -1892,12 +1908,12 @@ func (a *App) viewerActualSizeAt(x, y, w, h float32) {
 	if fit <= 0 {
 		return
 	}
-	actual := clampViewerZoom(viewerActualZoom(fit))
+	actual := clampViewerZoom(viewerActualZoom(fit), fit)
 	if a.viewer.Zoom >= actual {
 		return
 	}
 	a.viewer.Zoom, a.viewer.PanX, a.viewer.PanY = viewerZoomAtPoint(
-		a.viewer.Zoom, a.viewer.PanX, a.viewer.PanY, actual/a.viewer.Zoom, x, y, w, h)
+		a.viewer.Zoom, a.viewer.PanX, a.viewer.PanY, actual/a.viewer.Zoom, x, y, w, h, fit)
 	a.refresh()
 }
 
@@ -1952,13 +1968,24 @@ func (a *App) viewerZoom(delta float32) {
 	}
 	a.clearViewerPendingActualSize()
 	before := a.viewer.Zoom
-	a.viewer.Zoom = clampViewerZoom(a.viewer.Zoom * delta)
+	a.viewer.Zoom = clampViewerZoom(a.viewer.Zoom*delta, a.viewerFitForDisplay())
 	if a.viewer.Zoom != before {
 		a.viewer.OneToOne = false
 	}
 	a.maybeRequestViewerFullRes()
 	a.notifyViewer("zoom", fmt.Sprintf("%d%%", a.viewerPercent(nil)), viewerNoticeInfo, 1200*time.Millisecond)
 	a.refresh()
+}
+
+// viewerFitForDisplay is the fit scale of the bitmap on screen, which is what
+// the zoom ceiling is expressed against.
+func (a *App) viewerFitForDisplay() float32 {
+	if a.viewer.Bitmap == nil {
+		return 0
+	}
+	bw, bh := a.viewer.Bitmap.Size()
+	w, h := a.viewerCanvasSize(nil)
+	return viewerFitScale(bw, bh, a.viewer.Angle, w, h)
 }
 
 func (a *App) viewerZoomAt(delta, x, y, w, h float32) {
@@ -1973,8 +2000,13 @@ func (a *App) viewerZoomAt(delta, x, y, w, h float32) {
 	}
 	a.clearViewerPendingActualSize()
 	before := a.viewer.Zoom
+	fit := float32(0)
+	if a.viewer.Bitmap != nil {
+		bw, bh := a.viewer.Bitmap.Size()
+		fit = viewerFitScale(bw, bh, a.viewer.Angle, w, h)
+	}
 	a.viewer.Zoom, a.viewer.PanX, a.viewer.PanY = viewerZoomAtPoint(
-		a.viewer.Zoom, a.viewer.PanX, a.viewer.PanY, delta, x, y, w, h)
+		a.viewer.Zoom, a.viewer.PanX, a.viewer.PanY, delta, x, y, w, h, fit)
 	if a.viewer.Zoom != before {
 		a.viewer.OneToOne = false
 	}
@@ -2122,10 +2154,20 @@ func (a *App) endThumbFrame(frame uint64) {
 func (a *App) pumpThumbPrefetch(t *Tab) {
 	if thumbDir == "" || a.thumbQueue == nil || !a.settings.ThumbPrefetch || t == nil || !t.Loaded || t.Loading {
 		a.cancelThumbPrefetch()
+		a.dropTasksOfKind(taskKindFill)
+		return
+	}
+	if a.fillStoppedTab == t && a.fillStoppedGen == t.Gen {
+		// Checked before the identity reset below, so cancelling on the current
+		// folder keeps its "stopped" row instead of dropping it as stale.
+		a.cancelThumbPrefetch()
 		return
 	}
 	if a.prefetchTab != t || a.prefetchGen != t.Gen {
 		a.cancelThumbPrefetch()
+		// Another folder ends the old fill by itself; that is not a cancel the
+		// user asked for, so it leaves no row behind.
+		a.dropTasksOfKind(taskKindFill)
 		a.prefetchTab = t
 		a.prefetchGen = t.Gen
 	}
@@ -2150,6 +2192,49 @@ func (a *App) pumpThumbPrefetch(t *Tab) {
 			a.prefetchActive++
 		}
 	}
+	a.syncFillTask(t)
+}
+
+const (
+	taskKindFill   = "fill"
+	taskKindWarmup = "warmup"
+)
+
+// syncFillTask mirrors the folder fill into the task list: it starts a row on
+// the first frame that has work, reports how much is still outstanding, and
+// finishes it once the folder is exhausted.
+func (a *App) syncFillTask(t *Tab) {
+	if t == nil || len(t.All) == 0 {
+		return
+	}
+	total := len(t.All)
+	done := total - a.prefetchActive
+	if done < 0 {
+		done = 0
+	}
+	task := a.taskByKind(taskKindFill)
+	if a.prefetchNext >= total && a.prefetchActive == 0 {
+		if task != nil {
+			a.finishTask(task.ID)
+		}
+		return
+	}
+	if task == nil {
+		folder := t.Name
+		task = a.startTask(taskKindFill, "补载缩略图", folder, total, func() { a.stopThumbFill(t) })
+	}
+	a.setTaskProgress(task.ID, done, total)
+}
+
+// stopThumbFill is the user cancelling a folder fill. The marker keeps the next
+// grid frame from queueing the same work again.
+func (a *App) stopThumbFill(t *Tab) {
+	if t == nil {
+		return
+	}
+	a.fillStoppedTab = t
+	a.fillStoppedGen = t.Gen
+	a.cancelThumbPrefetch()
 }
 
 // cancelThumbPrefetch drops the queued remainder of a folder fill. The cursor

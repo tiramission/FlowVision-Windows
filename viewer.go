@@ -111,11 +111,29 @@ func viewerActualZoom(fit float32) float32 {
 	return 1 / fit
 }
 
-func clampViewerZoom(z float32) float32 {
+// viewerZoomMaxRelative is the ceiling for the relative zoom on ordinary
+// images. A 3000 px photo in a 1200 px canvas fits at 0.4, so 12× means a 480%
+// view before the wheel stops.
+const viewerZoomMaxRelative = 12
+
+// viewerZoomMax is the ceiling that keeps 100% reachable. Zoom is relative to
+// the fit scale, and a 20000 px image in a 1200 px canvas needs 16.7× fit for
+// 1:1: a fixed ceiling of 12 made actual size unreachable for exactly the
+// images that need it. Large images therefore get 100% plus a little headroom,
+// while ordinary images keep the old limit.
+func viewerZoomMax(fit float32) float32 {
+	limit := float32(viewerZoomMaxRelative)
+	if actual := viewerActualZoom(fit); actual > limit {
+		limit = actual * 1.5
+	}
+	return limit
+}
+
+func clampViewerZoom(z, fit float32) float32 {
 	if math.IsNaN(float64(z)) || math.IsInf(float64(z), 0) {
 		return 1
 	}
-	return max(0.15, min(12, z))
+	return max(0.15, min(viewerZoomMax(fit), z))
 }
 
 // viewerAnchorPan keeps a canvas point fixed while the image scale changes.
@@ -131,11 +149,11 @@ func viewerAnchorPan(px, py, w, h, panX, panY, ratio float32) (float32, float32)
 // viewerZoomAtPoint scales the image while keeping the bitmap point under the
 // pointer at the same canvas position. Pan is relative to the canvas center,
 // so both the pointer and the current pan are measured from that center.
-func viewerZoomAtPoint(zoom, panX, panY, delta, x, y, w, h float32) (newZoom, newPanX, newPanY float32) {
+func viewerZoomAtPoint(zoom, panX, panY, delta, x, y, w, h, fit float32) (newZoom, newPanX, newPanY float32) {
 	if zoom <= 0 || w <= 0 || h <= 0 || delta <= 0 {
 		return zoom, panX, panY
 	}
-	newZoom = clampViewerZoom(zoom * delta)
+	newZoom = clampViewerZoom(zoom*delta, fit)
 	if newZoom == zoom {
 		return zoom, panX, panY
 	}

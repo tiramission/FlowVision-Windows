@@ -61,6 +61,10 @@ type debugState struct {
 	ThumbPrefetchNext        int      `json:"thumbPrefetchNext"`
 	ThumbPrefetchActive      int      `json:"thumbPrefetchActive"`
 	ThumbPrefetchTotal       int      `json:"thumbPrefetchTotal"`
+	TasksOpen                bool     `json:"tasksOpen"`
+	TasksVisible             int      `json:"tasksVisible"`
+	TasksRunning             int      `json:"tasksRunning"`
+	TasksFirst               string   `json:"tasksFirst"`
 	ThumbBackend             string   `json:"thumbBackend"`
 	Goroutines               int      `json:"goroutines"`
 	Sidebar                  bool     `json:"sidebar"`
@@ -150,6 +154,12 @@ func debugSnapshot() debugState {
 	st.ThumbPrefetchActive = app.prefetchActive
 	if t := app.tab(); t != nil {
 		st.ThumbPrefetchTotal = len(t.All)
+	}
+	st.TasksOpen = app.tasksOpen
+	st.TasksRunning = app.runningTaskCount()
+	st.TasksVisible = len(app.visibleTasks(time.Now()))
+	if visible := app.visibleTasks(time.Now()); len(visible) > 0 {
+		st.TasksFirst = taskProgressText(visible[0])
 	}
 	st.ThumbBackend = thumbBackendMode()
 	st.Goroutines = runtime.NumGoroutine()
@@ -447,6 +457,14 @@ func debugCommand(name, arg string) {
 	case "find":
 		app.focusSearch = true
 		app.refresh()
+	case "tasks":
+		app.tasksOpen = !app.tasksOpen
+		app.refresh()
+	case "taskstop":
+		if visible := app.visibleTasks(time.Now()); len(visible) > 0 {
+			app.stopTask(visible[0].ID)
+			app.refresh()
+		}
 	case "scroll":
 		{
 			f, _ := strconv.ParseFloat(arg, 64)

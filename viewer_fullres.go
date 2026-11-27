@@ -48,33 +48,34 @@ func viewerFullResIsWanted(key string) bool {
 // preview stays visible while it runs and the "loading" notice only appears
 // when the decode takes long enough to notice.
 func (a *App) requestViewerFullRes() {
-	a.startViewerFullRes(false)
+	a.startViewerFullRes(false, "")
 }
 
 // requestViewerFullResQuiet warms the original in the background without any
-// notice; a failure leaves the preview in place silently.
-func (a *App) requestViewerFullResQuiet() {
-	a.startViewerFullRes(true)
+// notice; a failure leaves the preview in place silently. taskID, when set,
+// names the background task that reports this decode.
+func (a *App) requestViewerFullResQuiet(taskID string) {
+	a.startViewerFullRes(true, taskID)
 }
 
 // startViewerFullRes decodes and keeps one full-resolution bitmap. It never
 // marks the viewer as 1:1 preemptively: actual-size callers either apply
 // immediately when the bitmap is already ready, or wait for the pending flag
-// below.
-func (a *App) startViewerFullRes(silent bool) {
+// below. It reports whether a decode is now in flight.
+func (a *App) startViewerFullRes(silent bool, taskID string) bool {
 	it := a.viewer.Item
 	if it == nil || it.Kind != "image" {
-		return
+		return false
 	}
 	if a.viewer.FullResReady {
-		return
+		return false
 	}
 	if a.viewer.FullResLoading || a.viewer.FullResUnsupported {
-		return
+		return false
 	}
 	if a.viewerFullRes != nil && a.viewerFullRes.Key == viewerFullResKey(it) && a.viewerFullRes.Bmp != nil {
 		if a.viewer.Bitmap == nil {
-			return
+			return false
 		}
 		bw, bh := a.viewerFullRes.Bmp.Size()
 		oldW, oldH := a.viewer.Bitmap.Size()
@@ -84,7 +85,7 @@ func (a *App) startViewerFullRes(silent bool) {
 		a.viewer.Placeholder = nil
 		a.adjustViewerZoomForBitmapSwap(oldW, oldH, bw, bh)
 		a.refresh()
-		return
+		return false
 	}
 	w, h := it.W, it.H
 	if w <= 0 || h <= 0 {
@@ -94,7 +95,7 @@ func (a *App) startViewerFullRes(silent bool) {
 	// A preview at or below 2560 is already the full image; decoding it again
 	// would only add memory and change nothing on screen.
 	if w > 0 && h > 0 && w <= viewerPreviewMaxDim && h <= viewerPreviewMaxDim {
-		return
+		return false
 	}
 
 	gen := a.viewer.Gen
@@ -122,6 +123,13 @@ func (a *App) startViewerFullRes(silent bool) {
 				}
 				return
 			}
+			if !viewerFullResIsWanted(key) {
+				// The user cancelled the warm-up while this decode ran.
+				if bmp != nil {
+					bmp.ReleasePixels()
+				}
+				return
+			}
 			a.stopViewerFullTimer()
 			a.viewer.FullResLoading = false
 			if err != nil {
@@ -133,9 +141,12 @@ func (a *App) startViewerFullRes(silent bool) {
 				if !silent {
 					a.notifyViewer("fullres", "原图载入失败："+err.Error(), viewerNoticeError, 4*time.Second)
 				}
+				// A quiet warm-up failure is not actionable; it leaves no row.
+				a.dropTask(taskID)
 				a.refresh()
 				return
 			}
+			a.finishTask(taskID)
 			a.clearViewerFullRes()
 			oldBmp := a.viewer.Bitmap
 			oldOwned := a.viewer.BitmapOwned
@@ -161,6 +172,18 @@ func (a *App) startViewerFullRes(silent bool) {
 			a.refresh()
 		})
 	}()
+	return true
+}
+
+// cancelViewerWarmup abandons a background original decode without touching
+// the bitmap on screen. The decode cannot be interrupted mid-file, so it stops
+// at the next checkpoint and its result is dropped.
+func (a *App) cancelViewerWarmup(key string) {
+	viewerFullResWanted.Store("")
+	a.stopViewerFullTimer()
+	if key == "" || viewerFullResKey(a.viewer.Item) == key {
+		a.viewer.FullResLoading = false
+	}
 }
 
 func decodeViewerFullRes(it *Item) (*ui.Bitmap, int64, error) {
@@ -229,7 +252,7 @@ func (a *App) adjustViewerZoomForBitmapSwap(oldW, oldH, newW, newH int) {
 		return
 	}
 	if a.viewer.OneToOne {
-		a.viewer.Zoom = clampViewerZoom(viewerActualZoom(newFit))
+		a.viewer.Zoom = clampViewerZoom(viewerActualZoom(newFit), newFit)
 		return
 	}
 	// Zoom is relative to the current bitmap's fit. Preserving
@@ -241,7 +264,7 @@ func (a *App) adjustViewerZoomForBitmapSwap(oldW, oldH, newW, newH int) {
 	if displayWidth <= 0 || newWidthAtFit <= 0 {
 		return
 	}
-	a.viewer.Zoom = clampViewerZoom(displayWidth / newWidthAtFit)
+	a.viewer.Zoom = clampViewerZoom(displayWidth/newWidthAtFit, newFit)
 }
 
 // viewerNeedsFullResForActualSize reports whether 1:1 would enlarge a 2560
@@ -327,7 +350,7 @@ func (a *App) applyViewerPendingActualSize() {
 		a.clearViewerPendingActualSize()
 		return
 	}
-	actual := clampViewerZoom(viewerActualZoom(fit))
+	actual := clampViewerZoom(viewerActualZoom(fit), fit)
 	if at {
 		if px < 0 || py < 0 {
 			px, py = w/2, h/2
@@ -404,6 +427,11 @@ func (a *App) maybeAutoViewerFullRes() bool {
 	if busy {
 		return false
 	}
-	a.requestViewerFullResQuiet()
-	return a.viewer.FullResLoading
+	key := viewerFullResKey(a.viewer.Item)
+	task := a.startTask(taskKindWarmup, "载入原图", a.viewer.Item.Name, 0, func() { a.cancelViewerWarmup(key) })
+	if !a.startViewerFullRes(true, task.ID) {
+		a.dropTask(task.ID)
+		return false
+	}
+	return true
 }
