@@ -759,3 +759,97 @@ func TestRemoteDialogKeepsTypedPortAcrossProtocolSwitch(t *testing.T) {
 		t.Fatalf("typed port replaced on HTTPS switch: %d", got)
 	}
 }
+
+// TestFavoritesMenuHiddenForFolders covers a command that used to show on every
+// tile and then refuse the click: the favourites row now only appears where it
+// can act.
+func TestFavoritesMenuHiddenForFolders(t *testing.T) {
+	a := favoritesApp()
+	dir := t.TempDir()
+	folder := &Item{ID: "f1", Name: "相册", Path: filepath.Join(dir, "相册"), Kind: "folder"}
+	image := &Item{ID: "i1", Name: "a.jpg", Path: filepath.Join(dir, "a.jpg"), Kind: "image"}
+	items.byID[folder.ID] = folder
+	items.byID[image.ID] = image
+	t.Cleanup(func() {
+		delete(items.byID, folder.ID)
+		delete(items.byID, image.ID)
+	})
+	tab := a.tab()
+
+	// A folder alone: no favourites row.
+	tab.Selected = map[string]bool{folder.ID: true}
+	a.contextIDs = []string{folder.ID}
+	if hasEntry(a.gridMenuEntries(), "收藏到收藏夹") {
+		t.Fatal("favourites row shown for a folder")
+	}
+
+	// An image: the row is there.
+	tab.Selected = map[string]bool{image.ID: true}
+	a.contextIDs = []string{image.ID}
+	if !hasEntry(a.gridMenuEntries(), "收藏到收藏夹") {
+		t.Fatal("favourites row missing for an image")
+	}
+
+	// A folder and an image together: the image makes it apply.
+	tab.Selected = map[string]bool{folder.ID: true, image.ID: true}
+	a.contextIDs = []string{folder.ID, image.ID}
+	if !hasEntry(a.gridMenuEntries(), "收藏到收藏夹") {
+		t.Fatal("favourites row missing for a mixed selection")
+	}
+}
+
+// hasEntry reports whether the menu offers a row with this label.
+func hasEntry(entries []gridMenuEntry, label string) bool {
+	for _, e := range entries {
+		if e.label == label {
+			return true
+		}
+	}
+	return false
+}
+
+// TestStarredPathsAreSeparateFromTheFavoritesFolder covers the two things the
+// 收藏 section holds. The favorites folder collects images and videos into a
+// view; the starred paths remember folders. They are separate lists, so
+// starring a folder never shows up as a count in the favorites folder.
+func TestStarredPathsAreSeparateFromTheFavoritesFolder(t *testing.T) {
+	a := favoritesApp()
+	dir := t.TempDir()
+	folder := filepath.Join(dir, "相册")
+	image := filepath.Join(dir, "a.jpg")
+	writePNG(t, image, 8, 8)
+
+	a.toggleStarredPath(folder)
+	if !a.isStarredPath(folder) {
+		t.Fatal("folder path was not starred")
+	}
+	// The favorites folder is untouched by a starred folder: not its count,
+	// not its contents.
+	if got := len(a.settings.Favorites); got != 0 {
+		t.Fatalf("starring a folder added %d favorites", got)
+	}
+	if got := len(favoritesBrowse(BrowseRequest{Path: favoritesPath, Limit: 100}).Items); got != 0 {
+		t.Fatalf("favorites folder holds %d items after starring a folder", got)
+	}
+
+	// Collecting an image does not make it a starred path.
+	a.toggleFavoritePath(image)
+	if a.isStarredPath(image) {
+		t.Fatal("a collected image appeared as a starred path")
+	}
+	if got := len(a.settings.StarredPaths); got != 1 {
+		t.Fatalf("starred paths = %d, want 1", got)
+	}
+	if got := len(favoritesBrowse(BrowseRequest{Path: favoritesPath, Limit: 100}).Items); got != 1 {
+		t.Fatalf("favorites folder holds %d items, want the collected image", got)
+	}
+
+	// Unstarring removes only the folder.
+	a.toggleStarredPath(folder)
+	if a.isStarredPath(folder) {
+		t.Fatal("folder still starred after unstarring")
+	}
+	if !a.isFavorite(image) {
+		t.Fatal("unstarring the folder removed the media favorite")
+	}
+}

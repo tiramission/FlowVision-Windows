@@ -263,10 +263,18 @@ func (a *App) sidebarView(c *ui.Context) {
 		ui.Scroll(c).Grow(1).Padding(8, 6, 8, 8).Children(func() {
 			components.Sidebar(c).Children(func() {
 				components.SidebarSection(c, "收藏", func() {
+					// The favorites folder collects files; the rows below it
+					// keep folders. One section, because both answer "where do
+					// I go back to".
 					a.sidebarFavoritesRow(c)
-					if len(a.settings.Favorites) == 0 {
-						components.Text(c, "右键图片或视频即可收藏").FontSize(10.5).TextColor(th.TextMuted).
-							Padding(2, 6).SingleLine()
+					starred := a.settings.StarredPaths
+					if len(starred) == 0 && len(a.settings.Favorites) == 0 {
+						components.Text(c, "右键图片或视频加入收藏夹，点路径栏的星标收藏文件夹").
+							FontSize(10.5).TextColor(th.TextMuted).Padding(2, 6).SingleLine()
+					}
+					for _, f := range starred {
+						f := f
+						a.sidebarStarredPathRow(c, f)
 					}
 				})
 
@@ -963,6 +971,24 @@ func (a *App) toolbar(c *ui.Context) {
 			components.Text(c, tab.Name).FontSize(13).FontWeight(600).SingleLine().Ellipsis("…")
 		}
 
+		// Star the folder being viewed. This keeps a place, unlike the
+		// favorites folder, which collects images and videos.
+		if path := tab.Path; path != "" && !isFavoritesPath(path) && !isRemotePath(path) {
+			starred := a.isStarredPath(path)
+			icon := lucide.Star()
+			label := "收藏此路径"
+			if starred {
+				label = "取消收藏此路径"
+			}
+			button := components.IconButton(c, icon, label, components.IconButtonPlain)
+			if starred {
+				button.TextColor(th.Accent)
+			}
+			button.OnClick(func() {
+				a.later(func() { a.toggleStarredPath(path) })
+			})
+		}
+
 		buildSearch()
 		buildFilter()
 		buildSort()
@@ -1402,4 +1428,37 @@ func sortDirectionIcon(desc bool) *ui.SVG {
 		return lucide.ArrowDown()
 	}
 	return lucide.ArrowUp()
+}
+
+// sidebarStarredPathRow is one starred folder in the 收藏 section. Its tooltip
+// carries the full path, because the label is only the last segment.
+func (a *App) sidebarStarredPathRow(c *ui.Context, f Favorite) {
+	th := c.Theme()
+	active := false
+	if t := a.tab(); t != nil {
+		active = strings.EqualFold(cleanDisplayPath(f.Path), cleanDisplayPath(t.Path))
+	}
+	row := components.SidebarItemWithLeading(c, favoriteLabel(f), active, func(c *ui.Context, size float32) {
+		color := th.TextMuted.Alpha(.9)
+		if active {
+			color = th.Accent
+		}
+		components.Icon(c, lucide.FolderBookmark()).Size(size, size).TextColor(color)
+	})
+	row.Key("starred-" + favoriteKey(f.Path))
+	row.Tooltip(f.Path)
+	if row.Clicked() {
+		a.goTo(f.Path, true)
+	}
+	components.ContextMenu(c, row, func(m *components.Menu) {
+		if m.Item("打开").Chosen() {
+			a.later(func() { a.goTo(f.Path, true) })
+		}
+		if m.Item("在资源管理器中显示").Chosen() {
+			a.later(func() { _ = (AppSvc{}).OpenFolder(f.Path) })
+		}
+		if m.Item("取消收藏").Chosen() {
+			a.later(func() { a.toggleStarredPath(f.Path) })
+		}
+	})
 }

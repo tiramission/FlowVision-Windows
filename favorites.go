@@ -56,6 +56,57 @@ func favoriteLabel(f Favorite) string {
 	return displayName(f.Path)
 }
 
+// toggleStarredPath stars or unstars a folder location for the sidebar. It is
+// deliberately not the favorites folder: that one collects images and videos
+// into a view of their own, while this remembers where to go back to. Keeping
+// them in one list made the favorites folder count entries it did not show.
+func (a *App) toggleStarredPath(path string) {
+	if strings.TrimSpace(path) == "" {
+		return
+	}
+	path = cleanDisplayPath(path)
+	if a.isStarredPath(path) {
+		a.removeStarredPath(path)
+		a.showStatusNotice("已取消收藏该路径")
+		return
+	}
+	a.settings.StarredPaths = append(a.settings.StarredPaths, Favorite{
+		Path: path,
+		Name: displayName(path),
+		Kind: "folder",
+	})
+	_ = saveSettings(a.settings)
+	a.showStatusNotice("已收藏该路径")
+	a.refresh()
+}
+
+// isStarredPath reports whether a folder location is starred.
+func (a *App) isStarredPath(path string) bool {
+	key := favoriteKey(path)
+	for _, f := range a.settings.StarredPaths {
+		if favoriteKey(f.Path) == key {
+			return true
+		}
+	}
+	return false
+}
+
+// removeStarredPath drops one starred location. It copies instead of filtering
+// in place, for the same reason removeFavorite does.
+func (a *App) removeStarredPath(path string) {
+	key := favoriteKey(path)
+	out := make([]Favorite, 0, len(a.settings.StarredPaths))
+	for _, f := range a.settings.StarredPaths {
+		if favoriteKey(f.Path) == key {
+			continue
+		}
+		out = append(out, f)
+	}
+	a.settings.StarredPaths = out
+	_ = saveSettings(a.settings)
+	a.refresh()
+}
+
 // favoriteFromItem builds a favorite from a grid item.
 func favoriteFromItem(it *Item) Favorite {
 	return Favorite{

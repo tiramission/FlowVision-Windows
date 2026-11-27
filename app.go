@@ -1161,6 +1161,7 @@ func (a *App) closeSettingsNow() {
 func (a *App) fillSettingsDraft(s Settings) {
 	a.draft = s
 	a.draft.Favorites = append([]Favorite(nil), s.Favorites...)
+	a.draft.StarredPaths = append([]Favorite(nil), s.StarredPaths...)
 	a.draft.Tabs = append([]TabState(nil), s.Tabs...)
 	a.draftTheme = s.Theme
 	a.draftSort = s.Sort
@@ -1188,11 +1189,13 @@ func (a *App) commitSettingsDraft() Settings {
 
 func (a *App) resetSettingsDraft() {
 	favorites := append([]Favorite(nil), a.draft.Favorites...)
+	starred := append([]Favorite(nil), a.draft.StarredPaths...)
 	tabs := append([]TabState(nil), a.draft.Tabs...)
 	active := a.draft.ActiveTab
 	lastPath := a.draft.LastPath
 	s := defaultSettings()
 	s.Favorites = favorites
+	s.StarredPaths = starred
 	s.Tabs = tabs
 	s.ActiveTab = active
 	s.LastPath = lastPath

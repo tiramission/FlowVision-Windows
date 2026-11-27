@@ -17,6 +17,10 @@ type gridMenuEntry struct {
 	// localOnly marks an entry that hands a path to Windows. Nothing outside
 	// the app can reach a remote file, so a network tab hides those too.
 	localOnly bool
+	// mediaOnly marks an entry that only applies to images and videos, which
+	// the favourites folder collects. Showing it on a folder and then
+	// refusing the click reads as a broken command.
+	mediaOnly bool
 	action    func()
 }
 
@@ -267,7 +271,7 @@ func (a *App) gridMenuEntries() []gridMenuEntry {
 				a.later(func() { _ = (AppSvc{}).CopyText(path) })
 			}
 		}},
-		{label: favoriteMenuLabel(a, ids), action: func() {
+		{label: favoriteMenuLabel(a, ids), mediaOnly: true, action: func() {
 			a.later(a.toggleItemFavorites)
 		}},
 		{divider: true},
@@ -295,7 +299,17 @@ func (a *App) gridMenuEntries() []gridMenuEntry {
 			}
 		}},
 	}
-	return withoutWriteEntries(a.tabReadOnly(), entries)
+	return withoutInapplicableEntries(a.tabReadOnly(), !anyMedia(ids), entries)
+}
+
+// anyMedia reports whether the menu's target includes an image or a video.
+func anyMedia(ids []string) bool {
+	for _, id := range ids {
+		if it, ok := items.Get(id); ok && isMediaKind(it.Kind) {
+			return true
+		}
+	}
+	return false
 }
 
 // favoriteMenuLabel reads "收藏" or "取消收藏" depending on what the menu is
@@ -325,12 +339,25 @@ func favoriteMenuLabel(a *App, ids []string) string {
 // location, and the ones that would hand the path to Windows, then collapses
 // the dividers they leave behind.
 func withoutWriteEntries(readOnly bool, entries []gridMenuEntry) []gridMenuEntry {
-	if !readOnly {
+	return filterGridEntries(readOnly, false, entries)
+}
+
+// withoutInapplicableEntries drops the entries a read-only location forbids and
+// the ones that only apply to media when the target holds none.
+func withoutInapplicableEntries(readOnly, noMedia bool, entries []gridMenuEntry) []gridMenuEntry {
+	return filterGridEntries(readOnly, noMedia, entries)
+}
+
+func filterGridEntries(readOnly, noMedia bool, entries []gridMenuEntry) []gridMenuEntry {
+	if !readOnly && !noMedia {
 		return entries
 	}
 	out := entries[:0]
 	for _, e := range entries {
-		if e.write || e.localOnly {
+		if readOnly && (e.write || e.localOnly) {
+			continue
+		}
+		if noMedia && e.mediaOnly {
 			continue
 		}
 		if e.divider && (len(out) == 0 || out[len(out)-1].divider) {

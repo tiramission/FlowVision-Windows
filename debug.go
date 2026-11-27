@@ -682,6 +682,12 @@ func debugCommand(name, arg string) {
 		app.debugUpdateUI(arg)
 	case "error":
 		app.showError(arg)
+	case "star":
+		// star toggles the current folder in the 收藏 list, as the path bar's
+		// star does.
+		if t != nil && t.Path != "" {
+			app.toggleStarredPath(t.Path)
+		}
 	case "favorite":
 		// favorite=<index> collects that tile; no argument collects the
 		// selected one.

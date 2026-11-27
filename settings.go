@@ -20,24 +20,29 @@ type TabState struct {
 
 // Settings is the app's preferences, stored as settings.json in user data.
 type Settings struct {
-	Theme               string        `json:"theme"` // system | dark | light
-	ThumbSize           int           `json:"thumbSize"`
-	GridGap             int           `json:"gridGap"`
-	ShowCardNames       bool          `json:"showCardNames"`
-	Sort                string        `json:"sort"` // name | date | size | type
-	Desc                bool          `json:"desc"`
-	ShowHidden          bool          `json:"showHidden"`
-	ShowOther           bool          `json:"showOther"`
-	Recursive           bool          `json:"recursive"`
-	Sidebar             bool          `json:"sidebar"`
-	SidebarWidth        int           `json:"sidebarWidth"`
-	InfoPanel           bool          `json:"infoPanel"`
-	ViewerAutoImmersive bool          `json:"viewerAutoImmersive"`
-	PlayVideo           bool          `json:"playVideo"`
-	LoopVideo           bool          `json:"loopVideo"`
-	LastPath            string        `json:"lastPath"`
-	Favorites           []Favorite    `json:"favorites"`
-	RemoteShares        []remoteShare `json:"remoteShares,omitempty"`
+	Theme               string     `json:"theme"` // system | dark | light
+	ThumbSize           int        `json:"thumbSize"`
+	GridGap             int        `json:"gridGap"`
+	ShowCardNames       bool       `json:"showCardNames"`
+	Sort                string     `json:"sort"` // name | date | size | type
+	Desc                bool       `json:"desc"`
+	ShowHidden          bool       `json:"showHidden"`
+	ShowOther           bool       `json:"showOther"`
+	Recursive           bool       `json:"recursive"`
+	Sidebar             bool       `json:"sidebar"`
+	SidebarWidth        int        `json:"sidebarWidth"`
+	InfoPanel           bool       `json:"infoPanel"`
+	ViewerAutoImmersive bool       `json:"viewerAutoImmersive"`
+	PlayVideo           bool       `json:"playVideo"`
+	LoopVideo           bool       `json:"loopVideo"`
+	LastPath            string     `json:"lastPath"`
+	Favorites           []Favorite `json:"favorites"`
+	// StarredPaths keeps folder locations for the sidebar, separate from
+	// Favorites: that list collects images and videos into a virtual folder,
+	// while this one remembers where to go back to. Sharing one list made
+	// "收藏夹 (1)" count a starred folder the folder did not contain.
+	StarredPaths []Favorite    `json:"starredPaths,omitempty"`
+	RemoteShares []remoteShare `json:"remoteShares,omitempty"`
 	// ShowPlaces hides the sidebar's well-known folders section for users who
 	// only navigate through favorites and drives.
 	ShowPlaces bool `json:"showPlaces"`
