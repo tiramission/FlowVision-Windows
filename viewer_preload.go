@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/egoist/mygo/ui"
@@ -57,6 +58,13 @@ func (a *App) viewerPreloadItems(n int) []*Item {
 			out = append(out, t.Items[i])
 		}
 	}
+	// Running out of pictures on this side means the next step leaves the
+	// folder, so the fill carries on into the neighbour: the last picture of
+	// the folder before, or the first of the one after. Without it a folder
+	// boundary always waited for a decode.
+	if len(out) < n {
+		out = append(out, a.preloadAcrossFolder(t, -1, n-len(out))...)
+	}
 	next := 0
 	for i := cur + 1; i < len(t.Items) && next < n; i++ {
 		if t.Items[i].Kind == "image" {
@@ -64,7 +72,62 @@ func (a *App) viewerPreloadItems(n int) []*Item {
 			next++
 		}
 	}
+	if next < n {
+		out = append(out, a.preloadAcrossFolder(t, 1, n-next)...)
+	}
 	return out
+}
+
+// preloadAcrossFolder returns up to n images from the neighbouring folder, the
+// ones the viewer would reach first: the last images going back, the first
+// going forward.
+func (a *App) preloadAcrossFolder(t *Tab, dir, n int) []*Item {
+	if n <= 0 || t == nil || t.Path == "" {
+		return nil
+	}
+	res := (FS{}).Sibling(t.Path, dir, a.settings.ShowHidden)
+	if !res.Found || res.Path == "" || strings.EqualFold(res.Path, t.Path) {
+		return nil
+	}
+	listing := (FS{}).Browse(BrowseRequest{
+		Path:       res.Path,
+		Recursive:  a.settings.Recursive,
+		Sort:       t.Sort,
+		Desc:       t.Desc,
+		ShowHidden: a.settings.ShowHidden,
+		ShowOther:  a.settings.ShowOther,
+		Limit:      6000,
+	})
+	if listing.Error != "" {
+		return nil
+	}
+	// Only images preload: a video decodes as it plays.
+	var media []*Item
+	for _, it := range listing.Items {
+		if it.Kind == "image" {
+			media = append(media, it)
+		}
+	}
+	if len(media) == 0 {
+		return nil
+	}
+	if dir < 0 {
+		// The viewer enters at the end going back, so preload from the end.
+		start := len(media) - 1
+		end := start - n
+		if end < 0 {
+			end = 0
+		}
+		out := make([]*Item, 0, start-end+1)
+		for i := start; i >= end; i-- {
+			out = append(out, media[i])
+		}
+		return out
+	}
+	if n > len(media) {
+		n = len(media)
+	}
+	return media[:n]
 }
 
 // scheduleViewerPreload keeps the configured number of images on both sides

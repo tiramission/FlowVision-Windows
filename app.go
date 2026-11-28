@@ -223,7 +223,7 @@ type App struct {
 	draftGridGap       float64
 	draftSidebarW      float64
 	draftCacheLimit    float64
-	draftPrefetchMin   float64
+	draftPrefetchMax   float64
 	draftPreload       float64
 	draftTheme         string
 	draftSort          string
@@ -232,9 +232,19 @@ type App struct {
 	searchOpen         bool
 	searchHandle       ui.Handle
 	scrollActiveTab    bool
-	tabScroll          ui.ScrollState
-	places             []Place
-	drives             []Place
+	// centeredFolderTree is the folder the sidebar's 文件夹 section last
+	// centred. The section compares it with the current folder and centres when
+	// they differ, so it happens once per change, after the data it needs has
+	// arrived — a one-shot flag set when the folder changed would be spent by a
+	// build that ran before the parent's children were read.
+	centeredFolderTree string
+	// sidebarScroll keeps the sidebar's place, and lets the 文件夹 section be
+	// scrolled to the current folder: a container that tracks its scroll keeps
+	// it across rebuilds, which ScrollIntoView needs to stick.
+	sidebarScroll ui.ScrollState
+	tabScroll     ui.ScrollState
+	places        []Place
+	drives        []Place
 
 	showHelp   bool
 	helpFilter int
@@ -1103,7 +1113,7 @@ func settingsEditingEqual(a, b Settings) bool {
 		a.SidePrevHold == b.SidePrevHold &&
 		a.SideNextHold == b.SideNextHold &&
 		a.ThumbPrefetch == b.ThumbPrefetch &&
-		a.ThumbPrefetchMin == b.ThumbPrefetchMin &&
+		a.ThumbPrefetchMax == b.ThumbPrefetchMax &&
 		a.ShowPlaces == b.ShowPlaces &&
 		a.ViewerAutoFullRes == b.ViewerAutoFullRes
 }
@@ -1169,7 +1179,7 @@ func (a *App) fillSettingsDraft(s Settings) {
 	a.draftGridGap = float64(s.GridGap)
 	a.draftSidebarW = float64(s.SidebarWidth)
 	a.draftCacheLimit = float64(s.CacheLimitMB)
-	a.draftPrefetchMin = float64(s.ThumbPrefetchMin)
+	a.draftPrefetchMax = float64(s.ThumbPrefetchMax)
 	a.draftPreload = float64(s.ViewerPreload)
 }
 
@@ -1182,7 +1192,7 @@ func (a *App) commitSettingsDraft() Settings {
 	a.draft.GridGap = int(math.Round(a.draftGridGap))
 	a.draft.SidebarWidth = int(math.Round(a.draftSidebarW))
 	a.draft.CacheLimitMB = int(math.Round(a.draftCacheLimit))
-	a.draft.ThumbPrefetchMin = int(math.Round(a.draftPrefetchMin))
+	a.draft.ThumbPrefetchMax = int(math.Round(a.draftPrefetchMax))
 	a.draft.ViewerPreload = int(math.Round(a.draftPreload))
 	return a.draft
 }
@@ -1230,7 +1240,7 @@ func (a *App) applySettings() {
 	// A raised threshold or a switched-off feature must stop the fill that is
 	// already running, not only the next one: reloadActive would leave the
 	// current listing's queued work in place until it drained.
-	if !s.ThumbPrefetch || s.ThumbPrefetchMin > 0 {
+	if !s.ThumbPrefetch || s.ThumbPrefetchMax > 0 {
 		a.cancelThumbPrefetch()
 		a.dropTasksOfKind(taskKindFill)
 	}
@@ -2459,9 +2469,9 @@ func (a *App) pumpThumbPrefetch(t *Tab) {
 		// A whole-folder fill over SMB would saturate the share and the
 		// cache budget alike; network folders fill as they scroll.
 		isRemotePath(t.Path) ||
-		// A small folder is already covered by the visible cards, so filling it
-		// would add a task row and disk churn for nothing.
-		len(t.All) < a.settings.ThumbPrefetchMin {
+		// A folder past the limit would fill hundreds of pictures the user may
+		// never reach; it fills as it scrolls instead.
+		a.settings.ThumbPrefetchMax > 0 && len(t.All) > a.settings.ThumbPrefetchMax {
 		a.cancelThumbPrefetch()
 		a.dropTasksOfKind(taskKindFill)
 		return

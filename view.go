@@ -260,7 +260,10 @@ func (a *App) sidebarView(c *ui.Context) {
 		// The workbench title bar starts to its right, so the tab row and its
 		// left hairline share one continuous boundary instead of two offsets.
 		a.brandHeader(c)
-		ui.Scroll(c).Grow(1).Padding(8, 6, 8, 8).Children(func() {
+		// The scroll tracks its place, which ScrollIntoView needs: a container
+		// that does not keep where it was would jump back on every rebuild.
+		ui.Scroll(c).Key("sidebar-scroll").TrackScroll(&a.sidebarScroll).
+			Grow(1).Padding(8, 6, 8, 8).Children(func() {
 			components.Sidebar(c).Children(func() {
 				components.SidebarSection(c, "收藏", func() {
 					// The favorites folder collects files; the rows below it
@@ -471,13 +474,119 @@ func (a *App) sidebarFolders(c *ui.Context) {
 	if rootName == "" {
 		rootName = displayName(p)
 	}
+	// The folder and the ones beside it in one list, in the order the file
+	// system gives them: pinning the current folder to the top made the section
+	// read as a tree with a root, when it is a row of places to switch between.
+	// The current folder keeps its disclosure arrow and its sub folders; the
+	// others are leaves, because their own children would turn the section into
+	// a directory listing.
 	tree := ui.TreeBase(c)
 	tree.Root.FillWidth().MinWidth(0).Gap(1).Children(func() {
-		a.folderTreeRow(c, tree, p, rootName, true, false)
-		if a.treeLoaded[p] && len(a.treeKids[p]) == 0 {
-			a.folderTreeNote(c, "没有子文件夹", false, 39)
+		entries, ok, complete := a.folderRowEntries(p, rootName)
+		if !ok {
+			// No parent to list from, as at a drive root: the folder stands
+			// alone.
+			_ = a.folderTreeRow(c, tree, p, rootName, true, false)
+			if a.treeLoaded[p] && len(a.treeKids[p]) == 0 {
+				a.folderTreeNote(c, "没有子文件夹", false, 39)
+			}
+			return
+		}
+		for _, e := range entries {
+			if strings.EqualFold(cleanDisplayPath(e.entry.Path), p) {
+				current := a.folderTreeRow(c, tree, p, rootName, true, false)
+				// Centre the current folder once per change, and only once its
+				// siblings are known: it sits among them by name, so it can fall
+				// outside the section's height. Centring before they arrive would
+				// mark it done and never fire again. Every frame would keep the
+				// user from scrolling the section away.
+				if complete && !strings.EqualFold(a.centeredFolderTree, p) {
+					a.centeredFolderTree = p
+					current.ScrollIntoView(ui.ScrollIntoViewOptions{Block: ui.ScrollCenter})
+				}
+				if a.treeLoaded[p] && len(a.treeKids[p]) == 0 {
+					a.folderTreeNote(c, "没有子文件夹", false, 39)
+				}
+				continue
+			}
+			a.folderLeafRow(c, e.entry)
 		}
 	})
+}
+
+// folderRowEntry is one row of the 文件夹 section: the current folder, or a
+// folder beside it.
+type folderRowEntry struct {
+	entry TreeEntry
+}
+
+// folderRowEntries lists the current folder and its siblings together, sorted
+// by name as the file system lists them. ok is false when there is no parent
+// to list from, as at a drive root.
+func (a *App) folderRowEntries(path, name string) ([]folderRowEntry, bool, bool) {
+	p := cleanDisplayPath(path)
+	res := (FS{}).Parent(p)
+	if !res.Found {
+		return nil, false, false
+	}
+	parent := cleanDisplayPath(res.Path)
+	if strings.EqualFold(parent, p) {
+		return nil, false, false
+	}
+	a.ensureTree(parent)
+	kids := a.treeKids[parent]
+	if len(kids) == 0 {
+		// The parent is still being read, or it holds only this folder: show
+		// the folder alone rather than an empty section. complete says the
+		// siblings are known, so centring can wait for them.
+		return []folderRowEntry{{entry: TreeEntry{Path: p, Name: name}}},
+			true, a.treeLoaded[parent]
+	}
+	out := make([]folderRowEntry, 0, len(kids))
+	seen := false
+	for _, kid := range kids {
+		if strings.EqualFold(cleanDisplayPath(kid.Path), p) {
+			out = append(out, folderRowEntry{entry: kid})
+			seen = true
+			continue
+		}
+		out = append(out, folderRowEntry{entry: kid})
+	}
+	if !seen {
+		// The scan does not know this folder yet, so it cannot be placed among
+		// its siblings: list it first rather than lose it.
+		out = append([]folderRowEntry{{entry: TreeEntry{Path: p, Name: name}}}, out...)
+	}
+	return out, true, true
+}
+
+// folderLeafRow is a folder beside the current one. It has no disclosure arrow
+// and opens no group: clicking it moves there, which is the whole point of
+// listing it.
+func (a *App) folderLeafRow(c *ui.Context, sib TreeEntry) {
+	th := c.Theme()
+	// The same start padding the current folder's row uses at depth 0, then a
+	// gap the width of its disclosure arrow: without it the sibling's icon and
+	// name sit one arrow to the left of the current folder's.
+	row := ui.Row(c).FillWidth().MinWidth(0).Height(26).Gap(5).AlignItems(ui.Center).
+		Radius(6).PaddingStart(8).PaddingEnd(8).
+		Label(sib.Name).FocusRing(true).TextColor(th.Text)
+	if row.Hovered() {
+		row.Background(th.Text.Alpha(.035))
+	}
+	row.Children(func() {
+		// No arrow of its own: a sibling opens nothing. The box keeps its room
+		// so the icon lines up with the current folder's.
+		ui.Box(c).Size(14, 14).Shrink(0)
+		components.Icon(c, lucide.Folder()).Size(14, 14).Shrink(0).
+			TextColor(th.TextMuted.Alpha(.9))
+		components.Text(c, sib.Name).FontSize(11.5).SingleLine().Shrink(1).MinWidth(0).Ellipsis("…")
+	})
+	row.Tooltip(sib.Path)
+	if row.Clicked() {
+		path := sib.Path
+		a.later(func() { a.goTo(path, true) })
+	}
 }
 
 // folderTreeCount adds the immediate child count to the section heading. A
@@ -503,7 +612,7 @@ func (a *App) folderTreeCount(c *ui.Context, t *Tab) {
 // TreeItem derives its key from the visible label, which would collide when two
 // branches contain folders with the same name; TreeBase lets the path remain
 // the identity while the row gets a disclosure arrow, folder icon and selection.
-func (a *App) folderTreeRow(c *ui.Context, tree ui.TreeParts, path, name string, root, hasChildren bool) {
+func (a *App) folderTreeRow(c *ui.Context, tree ui.TreeParts, path, name string, root, hasChildren bool) ui.Element {
 	th := c.Theme()
 	p := cleanDisplayPath(path)
 	selected := false
@@ -584,10 +693,11 @@ func (a *App) folderTreeRow(c *ui.Context, tree ui.TreeParts, path, name string,
 				return
 			}
 			for _, kid := range kids {
-				a.folderTreeRow(c, tree, kid.Path, kid.Name, false, kid.HasChildren)
+				_ = a.folderTreeRow(c, tree, kid.Path, kid.Name, false, kid.HasChildren)
 			}
 		})
 	}
+	return row
 }
 
 // folderTreeNote is the quiet loading/empty row inside a tree, aligned under

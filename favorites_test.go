@@ -233,29 +233,60 @@ func TestParseSettingsAcceptsBothFavoriteShapes(t *testing.T) {
 }
 
 func TestThumbPrefetchThresholdDefaultsTo200(t *testing.T) {
-	if got := defaultSettings().ThumbPrefetchMin; got != 200 {
+	if got := defaultSettings().ThumbPrefetchMax; got != 200 {
 		t.Fatalf("default threshold = %d", got)
 	}
 	s, ok := parseSettings([]byte(`{"thumbPrefetch":true}`))
-	if !ok || s.ThumbPrefetchMin != 200 {
-		t.Fatalf("threshold after old document = %d", s.ThumbPrefetchMin)
+	if !ok || s.ThumbPrefetchMax != 200 {
+		t.Fatalf("threshold after old document = %d", s.ThumbPrefetchMax)
 	}
-	s, _ = parseSettings([]byte(`{"thumbPrefetchMin":0}`))
-	if s.ThumbPrefetchMin != 0 {
-		t.Fatalf("explicit 0 = %d", s.ThumbPrefetchMin)
+	s, _ = parseSettings([]byte(`{"thumbPrefetchMax":0}`))
+	if s.ThumbPrefetchMax != 0 {
+		t.Fatalf("explicit 0 = %d", s.ThumbPrefetchMax)
 	}
-	s, _ = parseSettings([]byte(`{"thumbPrefetchMin":-5}`))
-	if s.ThumbPrefetchMin != 0 {
-		t.Fatalf("negative clamp = %d", s.ThumbPrefetchMin)
+	s, _ = parseSettings([]byte(`{"thumbPrefetchMax":-5}`))
+	if s.ThumbPrefetchMax != 0 {
+		t.Fatalf("negative clamp = %d", s.ThumbPrefetchMax)
+	}
+	// A document written before the key was renamed still loads its value.
+	s, _ = parseSettings([]byte(`{"thumbPrefetchMin":50}`))
+	if s.ThumbPrefetchMax != 50 {
+		t.Fatalf("legacy key = %d", s.ThumbPrefetchMax)
 	}
 }
 
-func TestPumpThumbPrefetchSkipsSmallFolders(t *testing.T) {
-	a := favoritesApp()
-	a.settings.ThumbPrefetchMin = 5
-	a.pumpThumbPrefetch(a.tab())
+// TestPumpThumbPrefetchSkipsBigFolders covers the ceiling: a folder past the
+// limit fills only as it scrolls, so the whole-folder fill must not start.
+func TestPumpThumbPrefetchSkipsBigFolders(t *testing.T) {
+	tab := &Tab{Path: `C:\Pictures`, Name: "Pictures", Loaded: true}
+	for i := 0; i < 10; i++ {
+		tab.All = append(tab.All, &Item{
+			ID: string(rune('a' + i)), Name: "f.jpg", Kind: "image",
+			Path: `C:\Pictures\f` + string(rune('a'+i)) + `.jpg`,
+		})
+	}
+	a := newPrefetchTestApp(t, tab)
+	a.settings.ThumbPrefetchMax = 5
+	a.pumpThumbPrefetch(tab)
 	if a.prefetchTab != nil || a.prefetchNext != 0 {
-		t.Fatalf("small folder started a fill: tab=%v next=%d", a.prefetchTab, a.prefetchNext)
+		t.Fatalf("a folder past the limit started a fill: tab=%v next=%d", a.prefetchTab, a.prefetchNext)
+	}
+}
+
+// TestPumpThumbPrefetchRunsUnderTheCeiling is the other side: a folder within
+// the limit fills.
+func TestPumpThumbPrefetchRunsUnderTheCeiling(t *testing.T) {
+	tab := &Tab{Path: `C:\Pictures`, Name: "Pictures", Loaded: true}
+	tab.All = []*Item{{ID: "a", Name: "f.jpg", Kind: "image", Path: `C:\Pictures\f.jpg`}}
+	a := newPrefetchTestApp(t, tab)
+	a.settings.ThumbPrefetchMax = 5
+	// The fill writes to the cache, so it needs a cache folder.
+	prev := thumbDir
+	thumbDir = t.TempDir()
+	t.Cleanup(func() { thumbDir = prev })
+	a.pumpThumbPrefetch(tab)
+	if a.prefetchTab == nil {
+		t.Fatal("a folder within the limit did not start a fill")
 	}
 }
 

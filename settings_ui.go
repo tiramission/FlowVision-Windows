@@ -372,17 +372,22 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 							Stacked:     true,
 							Build: func(c *ui.Context) {
 								th := c.Theme()
-								ui.Column(c).Width(340).Gap(8).Children(func() {
-									components.Switch(c, &a.draft.ThumbPrefetch, "后台预加载整个文件夹", components.SwitchOptions{HideLabel: true, Compact: true})
-									ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-										components.NumberInput(c, &a.draftPrefetchMin, 0, 10000, 50).
-											Label("少于多少张时启用").Width(150).
-											Disabled(!a.draft.ThumbPrefetch)
-										components.Text(c, "张").FontSize(10.5).TextColor(th.TextMuted)
-										ui.Spacer(c)
-										components.Text(c, a.prefetchMinHint()).FontSize(10.5).
-											TextColor(th.TextMuted).SingleLine().Ellipsis("…")
-									})
+								// One row: the switch, then the threshold it
+								// governs as a sentence with the field as its
+								// number. The item's own title already names the
+								// feature, so neither the switch nor the field
+								// repeats it.
+								ui.Row(c).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {
+									components.Switch(c, &a.draft.ThumbPrefetch, "后台预加载整个文件夹",
+										components.SwitchOptions{HideLabel: true, Compact: true})
+									components.Text(c, "超过").FontSize(11).TextColor(th.TextMuted)
+									components.NumberInput(c, &a.draftPrefetchMax, 0, 10000, 50).
+										Label("超过多少张不再补载").Width(104).
+										Disabled(!a.draft.ThumbPrefetch)
+									components.Text(c, "张不补载").FontSize(11).TextColor(th.TextMuted)
+									ui.Spacer(c)
+									components.Text(c, a.prefetchMaxHint()).FontSize(10.5).
+										TextColor(th.TextMuted.Alpha(.85)).SingleLine()
 								})
 							},
 						},
@@ -566,14 +571,14 @@ func (a *App) settingsCategoryIcon(id string, icon *ui.SVG) func(*ui.Context, fl
 	}
 }
 
-// prefetchMinHint explains the threshold in terms of what the user will see.
-func (a *App) prefetchMinHint() string {
-	n := int(math.Round(a.draftPrefetchMin))
+// prefetchMaxHint says what the ceiling means for the folder being viewed.
+func (a *App) prefetchMaxHint() string {
+	n := int(math.Round(a.draftPrefetchMax))
 	switch {
 	case !a.draft.ThumbPrefetch:
 		return "已关闭"
 	case n <= 0:
-		return "任何文件夹都补载"
+		return "不限张数"
 	}
-	return fmt.Sprintf("%d 张以上才补载", n)
+	return fmt.Sprintf("最多 %d 张", n)
 }

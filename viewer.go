@@ -437,6 +437,11 @@ func (a *App) viewerHeader(c *ui.Context, it *Item, th *ui.Theme, floating bool)
 func (a *App) viewerShortcuts(c *ui.Context, it *Item) {
 	c.OnWindowShortcut(0, ui.KeyLeft, func() { a.viewerStep(-1) })
 	c.OnWindowShortcut(0, ui.KeyRight, func() { a.viewerStep(1) })
+	// Ctrl+arrows carry on into the neighbouring folder, the same move the
+	// step buttons make at the ends. Shift+arrows seek in a video, so the
+	// folder step takes the modifier nothing else uses.
+	c.OnWindowShortcut(ui.Ctrl, ui.KeyLeft, func() { a.viewerFolderStep(-1) })
+	c.OnWindowShortcut(ui.Ctrl, ui.KeyRight, func() { a.viewerFolderStep(1) })
 	// Windows mouse side buttons arrive as back/forward keys. The settings page
 	// records each direction's click and long-press shortcut, including vendor
 	// drivers that send a different named key.
@@ -491,6 +496,7 @@ func (a *App) viewerFooter(c *ui.Context, it *Item, th *ui.Theme, floating bool)
 }
 
 func (a *App) viewerImageControls(c *ui.Context, th *ui.Theme) {
+	a.viewerQualityBadge(c, th)
 	components.Text(c, fmt.Sprintf("%d%%", a.viewerPercent(c))).FontSize(10.5).
 		TextColor(th.TextMuted).Width(52)
 	components.IconButton(c, lucide.ZoomOut(), "缩小 (−)", components.IconButtonPlain).
@@ -593,21 +599,154 @@ func (a *App) viewerVideoControls(c *ui.Context, it *Item, th *ui.Theme) {
 
 func (a *App) viewerNavControls(c *ui.Context, it *Item, th *ui.Theme) {
 	_ = it
+	_ = th
 	pos, total := 0, 0
 	if t := a.tab(); t != nil {
 		pos, total = viewerMediaPosition(t.Items, a.viewer.Item)
 	}
-	prev := components.IconButton(c, lucide.ChevronLeft(), "上一张 (←)", components.IconButtonPlain).
-		Disabled(pos <= 1)
+	atStart := pos <= 1
+	atEnd := total == 0 || pos >= total
+
+	// At the ends the step becomes a folder step: the viewer carries on into
+	// the neighbouring folder rather than stopping, which is how a folder of
+	// photos is read as one run. The label says so, so the button never
+	// silently means something else.
+	prevLabel, prevIcon := "上一张 (←)", lucide.ChevronLeft()
+	prevDisabled := atStart
+	if atStart {
+		if !a.viewerFolderStepPossible(-1) {
+			prevDisabled = true
+		} else {
+			prevLabel, prevIcon = "上一文件夹的最后一张 (Ctrl+←)", lucide.ChevronsLeft()
+			prevDisabled = false
+		}
+	}
+	nextLabel, nextIcon := "下一张 (→)", lucide.ChevronRight()
+	nextDisabled := atEnd
+	if atEnd {
+		if !a.viewerFolderStepPossible(1) {
+			nextDisabled = true
+		} else {
+			nextLabel, nextIcon = "下一文件夹的第一张 (Ctrl+→)", lucide.ChevronsRight()
+			nextDisabled = false
+		}
+	}
+
+	prev := components.IconButton(c, prevIcon, prevLabel, components.IconButtonPlain).
+		Disabled(prevDisabled)
 	if prev.Clicked() {
-		a.viewerStep(-1)
+		if atStart {
+			a.viewerFolderStep(-1)
+		} else {
+			a.viewerStep(-1)
+		}
 	}
-	next := components.IconButton(c, lucide.ChevronRight(), "下一张 (→)", components.IconButtonPlain).
-		Disabled(total == 0 || pos >= total)
+	next := components.IconButton(c, nextIcon, nextLabel, components.IconButtonPlain).
+		Disabled(nextDisabled)
 	if next.Clicked() {
-		a.viewerStep(1)
+		if atEnd {
+			a.viewerFolderStep(1)
+		} else {
+			a.viewerStep(1)
+		}
 	}
-	_ = th
+}
+
+// viewerFolderStepPossible reports whether there is a neighbouring folder to
+// carry on into. It reads only the parent's listing, which is cheap and
+// already cached by the file system.
+func (a *App) viewerFolderStepPossible(dir int) bool {
+	t := a.tab()
+	if t == nil || t.Path == "" || isRemotePath(t.Path) || isFavoritesPath(t.Path) {
+		return false
+	}
+	res := (FS{}).Sibling(t.Path, dir, a.settings.ShowHidden)
+	return res.Found && res.Path != "" && !strings.EqualFold(res.Path, t.Path)
+}
+
+// viewerFolderStep moves the viewer into the neighbouring folder: the last
+// picture going back, the first going forward. The tab follows, so the grid
+// and the viewer stay on the same folder.
+func (a *App) viewerFolderStep(dir int) {
+	t := a.tab()
+	if t == nil || t.Path == "" {
+		return
+	}
+	res := (FS{}).Sibling(t.Path, dir, a.settings.ShowHidden)
+	if !res.Found || res.Path == "" || strings.EqualFold(res.Path, t.Path) {
+		return
+	}
+	// List the neighbour without the asynchronous tab load: the viewer needs
+	// its pictures now, and the tab is switched in the same step.
+	listing := (FS{}).Browse(BrowseRequest{
+		Path:       res.Path,
+		Recursive:  a.settings.Recursive,
+		Sort:       t.Sort,
+		Desc:       t.Desc,
+		ShowHidden: a.settings.ShowHidden,
+		ShowOther:  a.settings.ShowOther,
+		Limit:      6000,
+	})
+	if listing.Error != "" || len(listing.Items) == 0 {
+		return
+	}
+	var media []*Item
+	for _, item := range listing.Items {
+		if isMediaKind(item.Kind) {
+			media = append(media, item)
+		}
+	}
+	if len(media) == 0 {
+		return
+	}
+	target := media[0]
+	if dir < 0 {
+		target = media[len(media)-1]
+	}
+
+	// Switch the tab first, so the grid behind the viewer already shows the
+	// folder the picture belongs to.
+	t.History = append(t.History, t.Path)
+	if len(t.History) > 40 {
+		t.History = t.History[len(t.History)-40:]
+	}
+	t.Path = res.Path
+	t.Name = displayName(res.Path)
+	t.Selected = map[string]bool{}
+	t.Anchor = ""
+	t.MultiSelect = false
+	t.pendingSelect = ""
+	t.Scroll.Y = 0
+	t.Gen++
+	t.Loading = false
+	t.Err = ""
+	t.Result = listing
+	t.All = listing.Items
+	t.Items = listing.Items
+	a.centeredFolderTree = ""
+
+	idx := -1
+	for i, item := range listing.Items {
+		if item.ID == target.ID {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return
+	}
+	a.cancelViewerHold()
+	a.viewer.Open = true
+	a.viewer.Item = target
+	a.viewer.Index = idx
+	a.viewer.Zoom = 1
+	a.viewer.Angle = 0
+	a.viewer.PanX = 0
+	a.viewer.PanY = 0
+	a.releaseViewerOwnedBitmap()
+	a.loadViewerMedia(target)
+	a.persist()
+	a.refresh()
 }
 
 func (a *App) cancelViewerHold() {
@@ -1071,4 +1210,42 @@ func stringsUpper(s string) string {
 	}
 	s = strings.TrimPrefix(s, ".")
 	return strings.ToUpper(s)
+}
+
+// viewerQualityLabel names what the viewer is showing right now: the grid's
+// thumbnail while the real picture decodes, the 2560 preview, or the original.
+// Without it a soft picture looked the same whether it was a slow decode or a
+// small source, and there was no way to tell whether pressing 1 would help.
+func (a *App) viewerQualityLabel() (text, tip string) {
+	if a.viewer.Item == nil || a.viewer.Item.Kind != "image" {
+		return "", ""
+	}
+	switch {
+	case a.viewer.FullResReady:
+		return "原图", "正在显示原始分辨率"
+	case a.viewer.Bitmap == nil:
+		return "缩略图", "正在显示网格缩略图，大图解码中"
+	case a.viewer.FullResLoading:
+		return "大图", "正在显示 2560 预览，原图载入中"
+	default:
+		return "大图", "正在显示 2560 预览；按 1 载入原图"
+	}
+}
+
+// viewerQualityBadge draws the quality label in the footer, quiet enough not to
+// pull the eye from the picture but present on every frame.
+func (a *App) viewerQualityBadge(c *ui.Context, th *ui.Theme) {
+	text, tip := a.viewerQualityLabel()
+	if text == "" {
+		return
+	}
+	// The original is the state the user wants, so it stays quiet; the two
+	// interim states are the ones worth noticing.
+	color := th.TextMuted.Alpha(.75)
+	if !a.viewer.FullResReady {
+		color = th.Text.Alpha(.85)
+	}
+	components.Text(c, text).FontSize(10).FontWeight(600).TextColor(color).
+		Padding(2, 6).Radius(4).Background(th.Text.Alpha(.05)).Shrink(0).
+		Tooltip(tip)
 }

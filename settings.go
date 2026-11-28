@@ -46,10 +46,11 @@ type Settings struct {
 	// ShowPlaces hides the sidebar's well-known folders section for users who
 	// only navigate through favorites and drives.
 	ShowPlaces bool `json:"showPlaces"`
-	// ThumbPrefetchMin is the folder size at which the background fill starts.
-	// Below it the visible cards already cover the folder, so filling would
-	// only add a task row and disk churn.
-	ThumbPrefetchMin  int         `json:"thumbPrefetchMin"`
+	// ThumbPrefetchMax is the largest folder the background fill still runs
+	// on. Above it the fill would decode hundreds of pictures the user may
+	// never reach, so a big folder fills only as it scrolls. Zero lifts the
+	// limit.
+	ThumbPrefetchMax  int         `json:"thumbPrefetchMax"`
 	Tabs              []TabState  `json:"tabs"`
 	ActiveTab         int         `json:"activeTab"`
 	CacheLimitMB      int         `json:"cacheLimitMB"`
@@ -82,7 +83,7 @@ func defaultSettings() Settings {
 		LoopVideo:           false,
 		CacheLimitMB:        1500,
 		ThumbPrefetch:       true,
-		ThumbPrefetchMin:    200,
+		ThumbPrefetchMax:    200,
 		ShowPlaces:          true,
 		ViewerPreload:       2,
 		ViewerAutoFullRes:   true,
@@ -149,8 +150,18 @@ func parseSettings(data []byte) (Settings, bool) {
 		if _, ok := fields["showPlaces"]; !ok {
 			s.ShowPlaces = def.ShowPlaces
 		}
-		if _, ok := fields["thumbPrefetchMin"]; !ok {
-			s.ThumbPrefetchMin = def.ThumbPrefetchMin
+		// The threshold became a ceiling and its key was renamed. A document
+		// written before that carries the old key, whose value still means what
+		// the new one does, so it is read by hand.
+		if _, ok := fields["thumbPrefetchMax"]; !ok {
+			if legacy, has := fields["thumbPrefetchMin"]; has {
+				var v int
+				if json.Unmarshal(legacy, &v) == nil {
+					s.ThumbPrefetchMax = v
+				}
+			} else {
+				s.ThumbPrefetchMax = def.ThumbPrefetchMax
+			}
 		}
 	}
 	return mergeSettings(def, s), true
@@ -191,11 +202,11 @@ func mergeSettings(def, s Settings) Settings {
 	if s.ViewerPreload > 8 {
 		s.ViewerPreload = 8
 	}
-	if s.ThumbPrefetchMin < 0 {
-		s.ThumbPrefetchMin = 0
+	if s.ThumbPrefetchMax < 0 {
+		s.ThumbPrefetchMax = 0
 	}
-	if s.ThumbPrefetchMin > 10000 {
-		s.ThumbPrefetchMin = 10000
+	if s.ThumbPrefetchMax > 10000 {
+		s.ThumbPrefetchMax = 10000
 	}
 	switch s.ViewerHUD {
 	case "off", "auto", "always":

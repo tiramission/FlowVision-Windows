@@ -66,7 +66,7 @@ type debugState struct {
 	SelectedCount            int      `json:"selectedCount"`
 	Favorites                []string `json:"favorites"`
 	ShowPlaces               bool     `json:"showPlaces"`
-	ThumbPrefetchMin         int      `json:"thumbPrefetchMin"`
+	ThumbPrefetchMax         int      `json:"thumbPrefetchMax"`
 	Notice                   string   `json:"notice,omitempty"`
 	RemoteShares             []string `json:"remoteShares"`
 	TasksOpen                bool     `json:"tasksOpen"`
@@ -178,7 +178,7 @@ func debugSnapshot() debugState {
 		st.Favorites = append(st.Favorites, f.Kind+"|"+f.Path)
 	}
 	st.ShowPlaces = app.settings.ShowPlaces
-	st.ThumbPrefetchMin = app.settings.ThumbPrefetchMin
+	st.ThumbPrefetchMax = app.settings.ThumbPrefetchMax
 	st.TasksRunning = app.runningTaskCount()
 	st.TasksVisible = len(app.visibleTasks(time.Now()))
 	if visible := app.visibleTasks(time.Now()); len(visible) > 0 {
