@@ -234,13 +234,18 @@ func (a *App) gridView(c *ui.Context, tab *Tab) {
 			a.later(func() { a.openPathArgument(first) })
 		}
 
-		box.Draw(func(p *ui.Painter, r ui.Rect) {
-			hover := -1
-			if x, y, over := box.PointerPosition(); over {
-				if idx, ok := layout.hit(x, y); ok {
-					hover = idx
-				}
+		// The pointer is read while the view builds, not in the Draw callback:
+		// read there it only repaints the last frame's elements, so the hover
+		// mark and the name pill appeared only when something else asked for a
+		// frame, as scrolling did. Built here, the pointer coming over a tile
+		// rebuilds the view and the tile lights up at once.
+		hover := -1
+		if x, y, over := box.PointerPosition(); over {
+			if idx, ok := layout.hit(x, y); ok {
+				hover = idx
 			}
+		}
+		box.Draw(func(p *ui.Painter, r ui.Rect) {
 			a.drawGrid(p, r, layout, th, hover)
 			if box.FileDragOver() {
 				p.Fill(r, th.Selection, 10)
@@ -492,14 +497,33 @@ func (a *App) drawGrid(p *ui.Painter, r ui.Rect, layout gridLayout, th *ui.Theme
 		} else if i == hover {
 			// With captions hidden the wall stays clean, but a hovered tile
 			// still needs to say which file it is before it is opened.
+			const padX, size, weight = float32(10), float32(11), 500
+			// The whole name shows: the pill may grow past the tile, centred on
+			// it, because a hovered tile is the one thing the eye is on and a
+			// half name is no name. It still stays inside the gallery, and only
+			// a name too long even for that is shortened.
+			maxW := max(0, r.W-16)
+			textW, _ := p.MeasureText(0, ui.Span{Text: it.Name, Size: size, Weight: weight})
 			label := it.Name
-			textW, _ := p.MeasureText(0, ui.Span{Text: label, Size: 11, Weight: 500})
-			pillW := min(imgR.W-16, textW+20)
-			pill := ui.Rect{X: imgR.X + 8, Y: imgR.Y + imgR.H - 34, W: max(0, pillW), H: 25}
+			if textW+padX*2 > maxW {
+				label = ellipsizeText(p, it.Name, size, weight, maxW-padX*2)
+				textW, _ = p.MeasureText(0, ui.Span{Text: label, Size: size, Weight: weight})
+			}
+			pillW := min(textW+padX*2, maxW)
+			// Centred on the tile, then clamped inside the gallery so a tile at
+			// the edge does not push its name off screen.
+			x := imgR.X + (imgR.W-pillW)/2
+			if x < r.X+8 {
+				x = r.X + 8
+			}
+			if right := r.X + r.W - 8; x+pillW > right {
+				x = right - pillW
+			}
+			pill := ui.Rect{X: x, Y: imgR.Y + imgR.H - 34, W: max(0, pillW), H: 25}
 			p.Fill(pill, ui.RGBA(10, 10, 11, 176), 8)
-			p.Clip(ui.Rect{X: pill.X + 10, Y: pill.Y + 5, W: max(0, pill.W-20), H: 16}, 0, func() {
-				drawInterfaceText(p, pill.X+10, pill.Y+5, label, 11, 500, ui.RGBA(255, 255, 255, 240))
-			})
+			// The label is centred on the pill's ink, not its top edge: a
+			// hand-tuned offset left it low once the font was pinned.
+			drawCenteredText(p, pill, pill.X+padX, label, size, weight, ui.RGBA(255, 255, 255, 240))
 		}
 
 		if imageTile {

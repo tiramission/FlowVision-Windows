@@ -116,17 +116,6 @@ func (a *App) stopViewerLoadTimers() {
 	}
 }
 
-func truncateViewerNotice(s string, limit int) string {
-	r := []rune(s)
-	if len(r) <= limit {
-		return s
-	}
-	if limit <= 1 {
-		return string(r[:limit])
-	}
-	return string(r[:limit-1]) + "…"
-}
-
 func (a *App) viewerPreloadBytesValue() int64 {
 	a.viewerPreloadMu.Lock()
 	defer a.viewerPreloadMu.Unlock()
@@ -171,20 +160,19 @@ func (a *App) drawViewerHUD(p *ui.Painter, r ui.Rect, th *ui.Theme, percent int)
 }
 
 func (a *App) drawViewerStatusPill(p *ui.Painter, r ui.Rect, th *ui.Theme, text string, kind viewerNoticeKind, alpha float32) {
-	text = truncateViewerNotice(text, 52)
 	size := float32(11)
-	span := ui.Span{Text: text, Size: size, Weight: 500}
-	w, _ := p.MeasureText(0, span)
-	if w+26 > r.W*0.62 && r.W > 0 {
-		text = truncateViewerNotice(text, 38)
-		span.Text = text
-		w, _ = p.MeasureText(0, span)
-	}
 	pad := float32(13)
-	pillW := w + pad*2
-	if pillW > r.W-32 {
-		pillW = r.W - 32
+	// The pill takes at most this share of the viewer, so a long message is
+	// shortened to fit rather than measured at its full length and clipped.
+	maxW := r.W - 32
+	if r.W > 0 {
+		if limit := r.W * 0.62; limit < maxW {
+			maxW = limit
+		}
 	}
+	text = ellipsizeText(p, text, size, 500, maxW-pad*2)
+	w, _ := p.MeasureText(0, ui.Span{Text: text, Size: size, Weight: 500})
+	pillW := min(w+pad*2, max(0, maxW))
 	h := float32(28)
 	y := r.Y + r.H - 20 - h
 	if a.viewer.Immersive && a.viewer.ChromeVisible {
@@ -204,7 +192,7 @@ func (a *App) drawViewerStatusPill(p *ui.Painter, r ui.Rect, th *ui.Theme, text 
 	}
 	p.Fill(pill, bg, 10)
 	p.Stroke(pill, th.Border.Alpha(.72*alpha), 10, 1)
-	drawInterfaceText(p, x+pad, y+7, text, size, 500, fg)
+	drawCenteredText(p, pill, x+pad, text, size, 500, fg)
 }
 
 func (a *App) drawViewerDebugHUD(p *ui.Painter, r ui.Rect, th *ui.Theme) {
