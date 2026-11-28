@@ -404,7 +404,6 @@ type App struct {
 	taskTimer        *time.Timer
 	taskRefreshTimer *time.Timer
 	taskTimerPainted time.Time
-	lastTaskHUD      time.Time
 
 	treeOpen     map[string]*bool
 	treeRootOpen map[string]*bool
@@ -1710,8 +1709,6 @@ func (a *App) loadViewerMedia(it *Item) {
 	a.viewerGen++
 	a.viewer.Gen = a.viewerGen
 	gen := a.viewer.Gen
-	// The previous image's warm-up ends with the previous image, quietly.
-	a.dropTasksOfKind(taskKindWarmup)
 	a.startViewerChromeTicker(gen)
 	a.clearViewerHover()
 	a.stopViewerLoadTimers()
@@ -1950,7 +1947,6 @@ func (a *App) closeViewer() {
 	a.stopViewerSideMouseHook()
 	a.stopViewerLoadTimers()
 	a.clearViewerHover()
-	a.dropTasksOfKind(taskKindWarmup)
 	a.clearViewerFullRes()
 	a.clearViewerPendingActualSize()
 	a.releaseViewerOwnedBitmap()
@@ -2523,10 +2519,11 @@ func (a *App) pumpThumbPrefetch(t *Tab) {
 	a.syncFillTask(t)
 }
 
-const (
-	taskKindFill   = "fill"
-	taskKindWarmup = "warmup"
-)
+// taskKindFill is the only background task: filling a folder's thumbnail
+// cache. The viewer's original-resolution decode is not a task because it can
+// only happen while the viewer owns the window, where the status bar and the
+// task panel are not drawn.
+const taskKindFill = "fill"
 
 // syncFillTask mirrors the folder fill into the task list: it starts a row on
 // the first frame that has work, reports how much is still outstanding, and
@@ -2536,7 +2533,10 @@ func (a *App) syncFillTask(t *Tab) {
 		return
 	}
 	total := len(t.All)
-	done := total - a.prefetchActive
+	// The cursor counts pictures handed to the workers; the ones still in
+	// flight are not finished. Subtracting the in-flight count from the total
+	// instead, as this once did, reported almost 100% from the first frame.
+	done := a.prefetchNext - a.prefetchActive
 	if done < 0 {
 		done = 0
 	}

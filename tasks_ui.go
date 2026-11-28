@@ -8,42 +8,118 @@ import (
 	"github.com/oneo-me/onevra/source/components"
 )
 
-// taskChip is the status bar entry that appears while background work is
-// listed. It counts running work; a failure keeps it visible until it is read.
+// fillChip is the resident status bar entry for the folder's thumbnail fill.
+// Unlike a task row it never leaves: the grid cannot answer "is this folder
+// still being cached, and how much is left", and that answer is worth a
+// permanent place, while a task that comes and goes mostly flickers. Every
+// label starts with 补载 so the chip means the same thing in every state.
+type fillChip struct {
+	Label      string
+	Tone       fillChipTone
+	Tip        string
+	Actionable bool
+}
+
+// fillChipTone is the weight of the readout: quiet for the states that only
+// describe the folder, plain for running work, danger for a failure.
+type fillChipTone int
+
+const (
+	fillToneQuiet fillChipTone = iota
+	fillToneBusy
+	fillToneDanger
+)
+
+// color maps a tone onto the theme, so the state machine above needs no theme
+// and can be checked without building a view.
+func (t fillChipTone) color(th *ui.Theme) ui.Color {
+	switch t {
+	case fillToneBusy:
+		return th.Text
+	case fillToneDanger:
+		return th.Danger
+	}
+	return th.TextMuted
+}
+
+// taskChip draws the fill chip. Only a running fill or a failure opens the task
+// panel: in a quiet state there is nothing to cancel and nothing to read.
 func (a *App) taskChip(c *ui.Context, th *ui.Theme) {
-	visible := a.visibleTasks(time.Now())
-	if len(visible) == 0 {
-		a.tasksOpen = false
+	chip := a.fillChip()
+	if !chip.Actionable {
+		box := ui.Box(c).Padding(3, 9).Radius(999).AlignItems(ui.Center).
+			AlignSelf(ui.Center).Background(th.Text.Alpha(.04)).
+			Border(1, th.Border.Alpha(.7))
+		box.Children(func() {
+			components.Text(c, chip.Label).FontSize(11).TextColor(chip.Tone.color(th))
+		})
+		box.Tooltip(chip.Tip)
 		return
 	}
-	running, failed := 0, 0
-	for _, t := range visible {
-		switch t.State {
-		case taskRunning:
-			running++
-		case taskFailed:
-			failed++
-		}
-	}
-	label := "后台"
-	color := th.Text
-	switch {
-	case running > 0:
-		label = fmt.Sprintf("后台 %d", running)
-	case failed > 0:
-		label = "后台 · 失败"
-		color = th.Danger
-	}
-	chip := ui.ButtonBase(c).Label(label).Focusable().Role(ui.RoleButton).
+	btn := ui.ButtonBase(c).Label(chip.Label).Focusable().Role(ui.RoleButton).
 		Padding(3, 9).Radius(999).AlignItems(ui.Center).AlignSelf(ui.Center).
 		Background(th.Text.Alpha(.05)).Border(1, th.Border)
-	chip.Children(func() {
-		components.Text(c, label).FontSize(11).TextColor(color)
+	btn.Children(func() {
+		components.Text(c, chip.Label).FontSize(11).TextColor(chip.Tone.color(th))
 	})
-	if chip.Clicked() {
+	btn.Tooltip(chip.Tip)
+	if btn.Clicked() {
 		a.tasksOpen = !a.tasksOpen
 		a.refresh()
 	}
+}
+
+// fillChip describes the fill right now. A running fill reports progress, and
+// every other state says why the folder is not being filled, because "nothing
+// is happening" has four different reasons and the user is owed the right one.
+func (a *App) fillChip() fillChip {
+	// A failure outranks everything: it is the only state that waits to be read.
+	for _, t := range a.tasks {
+		if t.Kind != taskKindFill || t.State != taskFailed {
+			continue
+		}
+		tip := "整目录缩略图补载失败"
+		if t.Err != "" {
+			tip += "：" + t.Err
+		}
+		return fillChip{Label: "补载 失败", Tone: fillToneDanger, Tip: tip, Actionable: true}
+	}
+	for _, t := range a.tasks {
+		if t.Kind != taskKindFill || t.State != taskRunning {
+			continue
+		}
+		if t.Total > 0 {
+			return fillChip{
+				Label: fmt.Sprintf("补载 %d%%", t.Done*100/t.Total),
+				Tone:  fillToneBusy,
+				Tip: fmt.Sprintf("正在把本文件夹剩余的缩略图写进缓存：%s / %s 张，点开可查看并取消",
+					formatCount(t.Done), formatCount(t.Total)),
+				Actionable: true,
+			}
+		}
+		return fillChip{Label: "补载中", Tone: fillToneBusy, Tip: "正在把本文件夹剩余的缩略图写进缓存", Actionable: true}
+	}
+	tab := a.tab()
+	if tab == nil || len(tab.All) == 0 {
+		return fillChip{Label: "补载 —", Tone: fillToneQuiet, Tip: "当前文件夹没有可补载的内容"}
+	}
+	switch {
+	case !a.settings.ThumbPrefetch:
+		return fillChip{Label: "补载 关闭", Tone: fillToneQuiet, Tip: "整目录补载已关闭（设置 → 缓存与更新）"}
+	case isRemotePath(tab.Path):
+		return fillChip{Label: "补载 按需", Tone: fillToneQuiet, Tip: "网络文件夹不整目录补载，滚动到哪就生成到哪"}
+	case a.settings.ThumbPrefetchMax > 0 && len(tab.All) > a.settings.ThumbPrefetchMax:
+		return fillChip{
+			Label: "补载 按需", Tone: fillToneQuiet,
+			Tip: fmt.Sprintf("这里的 %d 张超过设置的上限 %d 张，不整目录补载，滚动到哪就生成到哪",
+				len(tab.All), a.settings.ThumbPrefetchMax),
+		}
+	case a.fillStoppedTab == tab && a.fillStoppedGen == tab.Gen:
+		return fillChip{Label: "补载 已停止", Tone: fillToneQuiet, Tip: "本文件夹的补载已停止；重新打开文件夹可继续"}
+	case a.prefetchNext >= len(tab.All) && a.prefetchActive == 0:
+		return fillChip{Label: "补载 就绪", Tone: fillToneQuiet, Tip: "本文件夹的缩略图都已写进缓存"}
+	}
+	return fillChip{Label: "补载 等待", Tone: fillToneQuiet, Tip: "可见卡片加载完成后开始补载本文件夹"}
 }
 
 // tasksOverlay draws the task list in the window-level overlay, anchored to the

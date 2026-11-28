@@ -431,10 +431,10 @@ func (a *App) maybeAutoViewerFullRes() bool {
 	if busy {
 		return false
 	}
-	key := viewerFullResKey(a.viewer.Item)
-	task := a.startTask(taskKindWarmup, "载入原图", a.viewer.Item.Name, 0, func() { a.cancelViewerWarmup(key) })
-	if !a.startViewerFullRes(true, task.ID) {
-		a.dropTask(task.ID)
+	// The decode reports itself through the viewer's quality badge and its own
+	// notice, so it is not a task: a row for it could only ever be read while
+	// the viewer is open, and the status bar and task panel are not drawn then.
+	if !a.startViewerFullRes(true, "") {
 		return false
 	}
 	return true

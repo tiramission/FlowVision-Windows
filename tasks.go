@@ -18,8 +18,6 @@ const (
 	taskVisibleDelay = time.Second
 	// taskDoneLinger is how long a finished row stays readable.
 	taskDoneLinger = 4 * time.Second
-	// taskHUDInterval is how often the viewer HUD repeats a task's progress.
-	taskHUDInterval = 2 * time.Second
 )
 
 type taskState int
@@ -96,7 +94,6 @@ func (a *App) setTaskProgress(id string, done, total int) {
 		return
 	}
 	t.Done, t.Total = done, total
-	a.taskHUD(t)
 	a.refreshTasks()
 }
 
@@ -257,12 +254,6 @@ func (a *App) scheduleTaskWake() {
 			if a.pruneTasks() {
 				a.refresh()
 			}
-			// Work that has now been visible for a second gets its HUD line.
-			for _, t := range a.visibleTasks(time.Now()) {
-				if t.State == taskRunning {
-					a.taskHUD(t)
-				}
-			}
 			a.scheduleTaskWake()
 		})
 	})
@@ -291,22 +282,7 @@ func (a *App) refreshTasks() {
 	a.refresh()
 }
 
-// taskHUD keeps one line in the viewer's single-slot HUD while a task runs. It
-// repeats at most every taskHUDInterval, so the line stays readable without
-// fighting zoom and full-resolution notices, and it fades out on its own once
-// the task ends.
-func (a *App) taskHUD(t *backgroundTask) {
-	if t == nil || t.State != taskRunning || !a.viewer.Open {
-		return
-	}
-	if !a.lastTaskHUD.IsZero() && time.Since(a.lastTaskHUD) < taskHUDInterval {
-		return
-	}
-	a.lastTaskHUD = time.Now()
-	a.notifyViewer("task", taskProgressText(t), viewerNoticeInfo, taskHUDInterval)
-}
-
-// taskProgressText is the one-line summary shared by the HUD and the panel.
+// taskProgressText is the one-line summary the debug state and the panel use.
 func taskProgressText(t *backgroundTask) string {
 	if t == nil {
 		return ""

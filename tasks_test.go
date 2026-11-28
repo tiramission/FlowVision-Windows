@@ -44,7 +44,7 @@ func TestTaskVisibilityWindow(t *testing.T) {
 	}
 
 	// A failure stays until it is read.
-	failed := a.startTask(taskKindWarmup, "载入原图", "a.jpg", 0, nil)
+	failed := a.startTask(taskKindFill, "补载缩略图", "a.jpg", 0, nil)
 	failed.Started = now.Add(-time.Minute)
 	a.failTask(failed.ID, "磁盘错误")
 	if failed.DismissAt != (time.Time{}) {
@@ -123,7 +123,11 @@ func TestCancelFillStopsForTheListing(t *testing.T) {
 	}
 }
 
-func TestWarmupTaskFinishesWithTheOriginal(t *testing.T) {
+// TestOriginalDecodeIsNotATask covers the decision that the viewer's decode does
+// not appear in the task list: it can only run while the viewer owns the
+// window, where the status bar and the task panel are not drawn, so a row for
+// it could never be read.
+func TestOriginalDecodeIsNotATask(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "big.png")
 	writePNG(t, path, 2700, 1400)
@@ -133,22 +137,12 @@ func TestWarmupTaskFinishesWithTheOriginal(t *testing.T) {
 	if !a.maybeAutoViewerFullRes() {
 		t.Fatal("the original did not start")
 	}
-	task := a.taskByKind(taskKindWarmup)
-	if task == nil || task.State != taskRunning {
-		t.Fatalf("warm-up task = %+v, want running", task)
+	if len(a.tasks) != 0 {
+		t.Fatalf("the decode registered %d tasks, want none", len(a.tasks))
 	}
 	waitFullResReady(t, a, 10*time.Second)
-	if task.State != taskDone {
-		t.Fatalf("task state = %v after the original arrived, want done", task.State)
-	}
-	if task.DismissAt.IsZero() {
-		t.Fatal("finished warm-up never fades out")
-	}
-
-	// Switching images clears the row instead of leaving a stale "done".
-	a.dropTasksOfKind(taskKindWarmup)
 	if len(a.tasks) != 0 {
-		t.Fatalf("%d tasks left after leaving the image", len(a.tasks))
+		t.Fatalf("the finished decode left %d tasks behind", len(a.tasks))
 	}
 }
 
@@ -164,7 +158,7 @@ func TestCancelWarmupKeepsThePreview(t *testing.T) {
 	a.viewer.FullResLoading = true
 	viewerFullResWanted.Store(key)
 
-	task := a.startTask(taskKindWarmup, "载入原图", it.Name, 0, func() { a.cancelViewerWarmup(key) })
+	task := a.startTask(taskKindFill, "补载缩略图", it.Name, 0, func() { a.cancelViewerWarmup(key) })
 	a.stopTask(task.ID)
 
 	if viewerFullResIsWanted(key) {
@@ -197,7 +191,8 @@ func TestTaskChipAndPanel(t *testing.T) {
 
 	tt = ui.NewTester(a.view, 1280, 800)
 	tt.Frame()
-	if !tt.HasText("后台 1") {
+	// The chip names the work and its progress; a bare row count said nothing.
+	if !tt.HasText("补载 40%") {
 		t.Fatalf("task chip missing: %q", tt.Texts())
 	}
 
@@ -215,5 +210,49 @@ func TestTaskChipAndPanel(t *testing.T) {
 	tt.Frame()
 	if a.tasksOpen {
 		t.Fatal("escape did not close the task panel")
+	}
+}
+
+// TestTaskChipGoesQuietWhenWorkStops is the point of the change: a finished or
+// stopped row is a receipt for the panel, not something the status bar keeps
+// showing. It used to sit there as a bare "后台" with no number.
+func TestTaskChipGoesQuietWhenWorkStops(t *testing.T) {
+	a := newViewTestApp()
+	tab := a.tab()
+	tab.All, tab.Items = nil, nil
+	a.viewer = Viewer{}
+
+	task := a.startTask(taskKindFill, "补载缩略图", "照片", 100, func() {})
+	task.Started = task.Started.Add(-2 * time.Second)
+	a.setTaskProgress(task.ID, 40, 100)
+
+	tt := ui.NewTester(a.view, 1280, 800)
+	tt.Frame()
+	if !tt.HasText("补载 40%") {
+		t.Fatalf("running task is not in the bar: %q", tt.Texts())
+	}
+
+	// Finishing leaves the row in the panel's linger window; the bar keeps a
+	// chip, but a quiet one that describes the folder instead of the task.
+	a.finishTask(task.ID)
+	tt.Frame()
+	if tt.HasText("补载 40%") {
+		t.Fatalf("the bar kept a finished task's progress: %q", tt.Texts())
+	}
+	if len(a.visibleTasks(time.Now())) != 1 {
+		t.Fatal("the finished row is gone from the panel as well")
+	}
+
+	// A stopped task behaves the same way.
+	task2 := a.startTask(taskKindFill, "补载缩略图", "照片", 100, func() {})
+	task2.Started = task2.Started.Add(-2 * time.Second)
+	tt.Frame()
+	if !tt.HasText("补载 0%") && !tt.HasText("补载") {
+		t.Fatalf("the second task is not in the bar: %q", tt.Texts())
+	}
+	a.stopTask(task2.ID)
+	tt.Frame()
+	if tt.HasText("补载 0%") {
+		t.Fatalf("the bar kept a stopped task's progress: %q", tt.Texts())
 	}
 }
