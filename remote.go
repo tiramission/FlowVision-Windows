@@ -393,6 +393,11 @@ func openRemoteStream(ctx context.Context, p string) (io.ReadCloser, error) {
 	return b.open(ctx, rel)
 }
 
+// remoteOpenFn is the seam tests replace to read a share without a server,
+// the same shape as remoteListFn. Thumbnail decoding goes through it, so the
+// prefix path and the full-download path can both be exercised.
+var remoteOpenFn = openRemoteStream
+
 // remoteListFn and remoteBackendFn are the seams tests replace, so browsing
 // and the media server can be exercised without a server.
 var (
@@ -428,7 +433,7 @@ func openPathStream(path string) (io.ReadCloser, error) {
 		return os.Open(path)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	stream, err := openRemoteStream(ctx, path)
+	stream, err := remoteOpenFn(ctx, path)
 	if err != nil {
 		cancel()
 		return nil, err
@@ -448,16 +453,82 @@ func (c *cancellableStream) Close() error {
 	return err
 }
 
+const (
+	// remoteHeadBytes bounds the prefix a remote picture is read from.
+	// Dimensions and the EXIF segment both live in the first 128 KiB — the
+	// spec caps an APP1 segment at 64 KiB — so half a megabyte per picture was
+	// four times the traffic for the same answer.
+	remoteHeadBytes = 256 << 10
+	// remoteHeadCacheMax is how many prefixes stay in memory. Two remote
+	// decodes run at a time and a card's preview is followed by its final
+	// within a second, so a handful covers every reader that asks twice.
+	remoteHeadCacheMax = 8
+)
+
+// The same picture is read for its dimensions, again for its EXIF preview and
+// a third time when the final decode starts. The cache turns those three
+// requests into one; it holds bytes, not answers, because all three want
+// different pieces of the same prefix.
+var remoteHeadCache = struct {
+	mu    sync.Mutex
+	order []string
+	items map[string][]byte
+}{items: map[string][]byte{}}
+
 // remoteHead reads the start of a remote file: enough for image dimensions and
 // the EXIF segment, without pulling a whole photo over the link.
 func remoteHead(path string) []byte {
-	const headBytes = 512 << 10
+	remoteHeadCache.mu.Lock()
+	if head, ok := remoteHeadCache.items[path]; ok {
+		remoteHeadCache.mu.Unlock()
+		return head
+	}
+	remoteHeadCache.mu.Unlock()
+
+	head := remoteHeadRead(path)
+	if len(head) == 0 {
+		// Nothing to remember: a failed request should not be cached as an
+		// empty prefix, or a momentary hiccup would blank every later question
+		// about this picture.
+		return nil
+	}
+	remoteHeadCache.mu.Lock()
+	if _, ok := remoteHeadCache.items[path]; !ok {
+		remoteHeadCache.items[path] = head
+		remoteHeadCache.order = append(remoteHeadCache.order, path)
+		for len(remoteHeadCache.order) > remoteHeadCacheMax {
+			oldest := remoteHeadCache.order[0]
+			remoteHeadCache.order = remoteHeadCache.order[1:]
+			delete(remoteHeadCache.items, oldest)
+		}
+	}
+	remoteHeadCache.mu.Unlock()
+	return head
+}
+
+// forgetRemoteHead drops a cached prefix when a picture changed on the share.
+func forgetRemoteHead(path string) {
+	remoteHeadCache.mu.Lock()
+	if _, ok := remoteHeadCache.items[path]; ok {
+		delete(remoteHeadCache.items, path)
+		kept := remoteHeadCache.order[:0]
+		for _, p := range remoteHeadCache.order {
+			if p != path {
+				kept = append(kept, p)
+			}
+		}
+		remoteHeadCache.order = kept
+	}
+	remoteHeadCache.mu.Unlock()
+}
+
+func remoteHeadRead(path string) []byte {
 	f, err := openPathStream(path)
 	if err != nil {
 		return nil
 	}
 	defer f.Close()
-	buf := make([]byte, headBytes)
+	buf := make([]byte, remoteHeadBytes)
 	n, _ := io.ReadFull(f, buf)
 	return buf[:n]
 }

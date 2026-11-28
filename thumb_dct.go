@@ -454,14 +454,14 @@ func (d *dctDecoder) decodeScan(scan []dctComponent) (image.Image, error) {
 	return planes[0], nil
 }
 
-func dctThumb(it *Item, size int) ([]byte, error) {
+func dctThumb(it *Item, size int) (thumbRender, error) {
 	data, err := osReadFile(it.Path)
 	if err != nil {
-		return nil, err
+		return thumbRender{}, err
 	}
 	img, err := parseDCTJPEG(data)
 	if err != nil {
-		return nil, err
+		return thumbRender{}, err
 	}
 	d := imageDims(it.Path, it.Mtime)
 	if d.W <= 0 || d.H <= 0 {
@@ -470,9 +470,9 @@ func dctThumb(it *Item, size int) ([]byte, error) {
 	dst := thumbnailImage(img, d, size)
 	var buf bytes.Buffer
 	if err := jpeg.Encode(&buf, dst, &jpeg.Options{Quality: 84}); err != nil {
-		return nil, err
+		return thumbRender{}, err
 	}
-	return buf.Bytes(), nil
+	return thumbRender{Data: buf.Bytes(), Img: dst}, nil
 }
 
 // osReadFile is kept as a variable-free helper so the DCT path can be

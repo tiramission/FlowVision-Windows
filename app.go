@@ -353,9 +353,12 @@ type App struct {
 	selectMenuTabID      int
 	pending              []func()
 
-	thumbs              map[string]*thumbEntry
-	thumbLoad           map[string]bool
-	thumbQueue          *thumbQueue
+	thumbs     map[string]*thumbEntry
+	thumbLoad  map[string]bool
+	thumbQueue *thumbQueue
+	// thumbFastQueue carries cards that are already cached on disk, so a
+	// scroll-back never queues behind a full-resolution render.
+	thumbFastQueue      *thumbQueue
 	thumbFrame          uint64
 	thumbOnce           sync.Once
 	thumbBytes          int64
@@ -435,6 +438,11 @@ const (
 	// distance in DIP) and ahead of nothing else.
 	thumbPrefetchWindow = 48
 	thumbPrefetchBase   = 1e9
+
+	// thumbCacheLaneWorkers is how many cards can be read back from disk at
+	// once. The work is a stat, a 30 KB read and a JPEG decode, so a small
+	// number covers a screen; more would only contend for the disk.
+	thumbCacheLaneWorkers = 3
 )
 
 func newApp() *App {
@@ -2416,7 +2424,7 @@ func (a *App) submitThumbTask(taskKey, base string, it *Item, size int, priority
 	}
 	a.thumbLoad[taskKey] = true
 	a.startThumbWorkers()
-	a.thumbQueue.submit(&thumbTask{
+	task := &thumbTask{
 		key:      taskKey,
 		base:     base,
 		item:     it,
@@ -2425,7 +2433,18 @@ func (a *App) submitThumbTask(taskKey, base string, it *Item, size int, priority
 		frame:    frame,
 		stage:    stage,
 		preload:  preload,
-	})
+	}
+	// A card whose file is already on disk only has to be read and decoded.
+	// Sending it to the decode pool put it behind a full 24 MP render, which is
+	// why scrolling back through a warm folder still stuttered.
+	if !preload && stage == thumbStageFinal && a.win != nil && thumbCacheExists(it, size) {
+		if a.thumbFastQueue == nil {
+			a.thumbFastQueue = newThumbQueue()
+		}
+		a.thumbFastQueue.submit(task)
+		return true
+	}
+	a.thumbQueue.submit(task)
 	return true
 }
 
@@ -2444,7 +2463,40 @@ func (a *App) startThumbWorkers() {
 		for i := 0; i < n; i++ {
 			go a.thumbWorker()
 		}
+		// The cache lane is separate on purpose: its work is a read and a JPEG
+		// decode of a 30 KB file, and sharing the pool with the decoders is
+		// exactly what made it wait.
+		if a.thumbFastQueue == nil {
+			a.thumbFastQueue = newThumbQueue()
+		}
+		for i := 0; i < thumbCacheLaneWorkers; i++ {
+			go a.thumbCacheWorker()
+		}
 	})
+}
+
+// thumbCacheWorker serves cards that are already cached on disk.
+func (a *App) thumbCacheWorker() {
+	for {
+		task := a.thumbFastQueue.next()
+		if task == nil {
+			return
+		}
+		a.serveCachedCard(task)
+	}
+}
+
+// serveCachedCard answers one card from the cache lane. A miss is handed to the
+// decode pool rather than rendered here: the lane exists to be quick, not to
+// become a second decoder. It reports whether the card was answered here.
+func (a *App) serveCachedCard(task *thumbTask) bool {
+	if data, ok := readThumbCache(task.item, task.size); ok {
+		a.postThumbResult(task, data, nil, a.thumbFastQueue)
+		return true
+	}
+	a.thumbFastQueue.done(task.key)
+	a.thumbQueue.submit(task)
+	return false
 }
 
 // endThumbFrame drops queued loads that the latest grid frame did not mark
@@ -2455,7 +2507,11 @@ func (a *App) endThumbFrame(frame uint64) {
 	if a.thumbQueue == nil {
 		return
 	}
-	for _, key := range a.thumbQueue.retain(frame) {
+	dropped := a.thumbQueue.retain(frame)
+	if a.thumbFastQueue != nil {
+		dropped = append(dropped, a.thumbFastQueue.retain(frame)...)
+	}
+	for _, key := range dropped {
 		delete(a.thumbLoad, key)
 	}
 }
@@ -2616,14 +2672,39 @@ func (a *App) runThumbTask(task *thumbTask) {
 		return
 	}
 	var data []byte
-	var err error
+	var src image.Image
 	if task.stage == thumbStagePreview {
-		data, err = embeddedThumbPreview(task.item, task.size)
+		data, _ = embeddedThumbPreview(task.item, task.size)
 	} else {
-		data, err = getThumb(context.Background(), task.item, task.size)
+		// The pixels come back whenever the backend had them anyway, which is
+		// every card that is rendered rather than read from the cache.
+		rendered, err := renderThumbForCard(context.Background(), task.item, task.size)
+		data, src = rendered.Data, rendered.Img
+		if err != nil {
+			data = nil
+		}
+		a.postThumbResult(task, data, src, a.thumbQueue)
+		if err == nil && !rendered.Cached && len(rendered.Data) > 0 {
+			// After the bitmap has been handed over: the picture reaches the
+			// screen before the worker spends time on its own cache file.
+			writeThumbCache(thumbCachePath(task.item, task.size), rendered.Data)
+		}
+		return
 	}
+	a.postThumbResult(task, data, src, a.thumbQueue)
+}
+
+// postThumbResult turns encoded card bytes into the in-memory bitmap and hands
+// them to the window thread. q is the lane the task came from, so its running
+// marker is cleared on the right queue.
+func (a *App) postThumbResult(task *thumbTask, data []byte, src image.Image, q *thumbQueue) {
 	var bmp *ui.Bitmap
-	if err == nil {
+	var err error
+	if task.stage == thumbStageFinal && src != nil {
+		// The bytes were just rendered from these pixels, so decoding them
+		// back would be a second, pointless trip through the JPEG codec.
+		bmp = ui.NewBitmap(src)
+	} else {
 		bmp, err = ui.DecodeBitmap(data)
 	}
 	if (err != nil || bmp == nil) && task.stage == thumbStageFinal {
@@ -2635,9 +2716,12 @@ func (a *App) runThumbTask(task *thumbTask) {
 	if err == nil && task.stage == thumbStageFinal && task.item.Kind == "image" {
 		d = imageDims(task.item.Path, task.item.Mtime)
 	}
+	if q == nil {
+		q = a.thumbQueue
+	}
 	a.update(func() {
 		delete(a.thumbLoad, task.key)
-		a.thumbQueue.done(task.key)
+		q.done(task.key)
 		if err != nil || bmp == nil {
 			return
 		}

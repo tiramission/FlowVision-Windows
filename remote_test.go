@@ -545,12 +545,12 @@ func TestRemoteThumbnailEndToEnd(t *testing.T) {
 
 	it := items.Intern(virtual)
 	it.Kind, it.Ext = "image", ".png"
-	data, err := renderThumbGo(it, 240)
+	rendered, err := renderThumbGo(it, 240)
 	if err != nil {
 		t.Fatalf("renderThumbGo: %v", err)
 	}
-	if len(data) < 500 {
-		t.Fatalf("thumbnail too small: %d bytes", len(data))
+	if len(rendered.Data) < 500 {
+		t.Fatalf("thumbnail too small: %d bytes", len(rendered.Data))
 	}
 }
 

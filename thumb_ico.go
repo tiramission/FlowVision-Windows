@@ -13,17 +13,17 @@ import (
 // standard library has no ICO decoder, and Explorer can reject icons that
 // carry PNG payloads on some Windows builds, so this small path keeps ICO
 // previews deterministic. Classic DIB-only icons still go through Shell.
-func icoThumb(it *Item, size int) ([]byte, error) {
+func icoThumb(it *Item, size int) (thumbRender, error) {
 	f, err := openItemFile(it)
 	if err != nil {
-		return nil, err
+		return thumbRender{}, err
 	}
 	defer f.Close()
 	// The whole ICO is read at once: a remote stream cannot seek, and an icon
 	// is small enough that the random access is not worth a second request.
 	raw, err := io.ReadAll(io.LimitReader(f, 4<<20))
 	if err != nil {
-		return nil, err
+		return thumbRender{}, err
 	}
 	at := func(off int64, n int) ([]byte, error) {
 		if off < 0 || off+int64(n) > int64(len(raw)) {
@@ -34,14 +34,14 @@ func icoThumb(it *Item, size int) ([]byte, error) {
 
 	dir, err := at(0, 6)
 	if err != nil {
-		return nil, err
+		return thumbRender{}, err
 	}
 	if binary.LittleEndian.Uint16(dir[0:2]) != 0 || binary.LittleEndian.Uint16(dir[2:4]) != 1 {
-		return nil, fmt.Errorf("not an ICO file")
+		return thumbRender{}, fmt.Errorf("not an ICO file")
 	}
 	count := int(binary.LittleEndian.Uint16(dir[4:6]))
 	if count <= 0 || count > 64 {
-		return nil, fmt.Errorf("bad ICO entry count %d", count)
+		return thumbRender{}, fmt.Errorf("bad ICO entry count %d", count)
 	}
 
 	type entry struct {
@@ -52,7 +52,7 @@ func icoThumb(it *Item, size int) ([]byte, error) {
 	var best entry
 	entries, err := at(6, count*16)
 	if err != nil {
-		return nil, err
+		return thumbRender{}, err
 	}
 	for i := 0; i < count; i++ {
 		e := entries[i*16:]
@@ -71,24 +71,24 @@ func icoThumb(it *Item, size int) ([]byte, error) {
 		best = entry{w: w, h: h, off: offset, len: length}
 	}
 	if best.w == 0 {
-		return nil, fmt.Errorf("no usable ICO frame")
+		return thumbRender{}, fmt.Errorf("no usable ICO frame")
 	}
 
 	payload, err := at(best.off, int(best.len))
 	if err != nil {
-		return nil, err
+		return thumbRender{}, err
 	}
 	if len(payload) < 8 || !bytes.Equal(payload[:8], []byte("\x89PNG\r\n\x1a\n")) {
-		return nil, fmt.Errorf("ICO frame is not PNG")
+		return thumbRender{}, fmt.Errorf("ICO frame is not PNG")
 	}
 	src, err := png.Decode(bytes.NewReader(payload))
 	if err != nil {
-		return nil, err
+		return thumbRender{}, err
 	}
 	dst := thumbnailImage(src, dimInfo{W: src.Bounds().Dx(), H: src.Bounds().Dy(), Orient: 1}, size)
 	var buf bytes.Buffer
 	if err := jpeg.Encode(&buf, dst, &jpeg.Options{Quality: 84}); err != nil {
-		return nil, err
+		return thumbRender{}, err
 	}
-	return buf.Bytes(), nil
+	return thumbRender{Data: buf.Bytes(), Img: dst}, nil
 }

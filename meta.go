@@ -38,6 +38,13 @@ func probeImageDims(path string) dimInfo {
 		defer file.Close()
 		f = file
 	}
+	return dimsFromReader(f, path)
+}
+
+// dimsFromReader is the shared half of the probe: dimensions plus the EXIF
+// answers that a thumbnail needs. It works on a file or on the prefix of a
+// remote one, so both read a picture once.
+func dimsFromReader(f io.ReadSeeker, path string) dimInfo {
 	cfg, _, err := image.DecodeConfig(f)
 	if err != nil || cfg.Width <= 0 || cfg.Height <= 0 {
 		return dimInfo{}
@@ -54,6 +61,16 @@ func probeImageDims(path string) dimInfo {
 		}
 	}
 	return d
+}
+
+// probeDimsFromHead answers the same question from a prefix that is already in
+// hand. A remote picture is read once, so its dimensions and its EXIF
+// thumbnail come out of the same request.
+func probeDimsFromHead(head []byte, path string) dimInfo {
+	if len(head) == 0 {
+		return dimInfo{}
+	}
+	return dimsFromReader(bytes.NewReader(head), path)
 }
 
 func isJPEG(path string) bool {

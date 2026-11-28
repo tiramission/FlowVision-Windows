@@ -148,37 +148,71 @@ const thumbCacheVersion = "v2"
 // getThumb returns the JPEG bytes of a thumbnail for it, generating and
 // caching them on first use.
 func getThumb(ctx context.Context, it *Item, size int) ([]byte, error) {
+	thumb, err := loadThumb(ctx, it, size, true)
+	if err != nil {
+		return nil, err
+	}
+	return thumb.Data, nil
+}
+
+// renderThumbForCard is getThumb for a card that is about to be drawn: the
+// pixels come back whenever the card had to be rendered, so the bitmap does
+// not decode the file that was just written. The cache file is the caller's
+// job, so it lands after the picture is on screen.
+func renderThumbForCard(ctx context.Context, it *Item, size int) (thumbRender, error) {
+	return loadThumb(ctx, it, size, false)
+}
+
+// thumbCachePath is the file a card belongs in, at the bucket its size lands
+// in.
+func thumbCachePath(it *Item, size int) string {
+	return thumbPath(it, thumbBudget(size))
+}
+
+// loadThumb reads the card from disk or renders it. writeCache is off for the
+// callers that want to post the bitmap first, so the file lands after the
+// picture is on screen rather than in front of it.
+func loadThumb(ctx context.Context, it *Item, size int, writeCache bool) (thumbRender, error) {
 	if thumbDir == "" {
 		// initThumbs could not resolve a cache directory. Decoding here would
 		// write the cache file next to the executable instead.
-		return nil, fmt.Errorf("thumbnail cache directory is unavailable")
+		return thumbRender{}, fmt.Errorf("thumbnail cache directory is unavailable")
 	}
 	size = thumbBudget(size)
 	p := thumbPath(it, size)
 	if data, ok := readFreshCache(p, it.Mtime); ok {
-		return data, nil
+		return thumbRender{Data: data, Cached: true}, nil
 	}
 	unlock := lockThumb(p)
 	defer unlock()
 	if data, ok := readFreshCache(p, it.Mtime); ok {
-		return data, nil
+		return thumbRender{Data: data, Cached: true}, nil
 	}
 	select {
 	case thumbSlots <- struct{}{}:
 		defer func() { <-thumbSlots }()
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return thumbRender{}, ctx.Err()
 	}
 	if data, ok := readFreshCache(p, it.Mtime); ok {
-		return data, nil
+		return thumbRender{Data: data, Cached: true}, nil
 	}
 	if ctx.Err() != nil {
-		return nil, ctx.Err()
+		return thumbRender{}, ctx.Err()
 	}
-	data, err := renderThumb(it, size)
+	thumb, err := renderThumb(it, size)
 	if err != nil {
-		return nil, err
+		return thumbRender{}, err
 	}
+	if writeCache {
+		writeThumbCache(p, thumb.Data)
+	}
+	return thumb, nil
+}
+
+// writeThumbCache stores one card. The temporary file plus rename keeps a
+// reader from ever seeing half a picture.
+func writeThumbCache(p string, data []byte) {
 	tmp := fmt.Sprintf("%s.tmp-%d", p, time.Now().UnixNano())
 	if err := os.WriteFile(tmp, data, 0o644); err == nil {
 		if err := os.Rename(tmp, p); err != nil {
@@ -190,7 +224,6 @@ func getThumb(ctx context.Context, it *Item, size int) ([]byte, error) {
 	if atomic.AddInt64(&thumbWrites, 1)%150 == 0 {
 		go trimThumbCacheIfDue()
 	}
-	return data, nil
 }
 
 // trimThumbCacheIfDue rate-limits the cache walk. A folder fill writes
@@ -251,6 +284,26 @@ func brokenThumb(it *Item, size int) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// readThumbCache returns the cached card for it, if there is one. The cache
+// lane uses it to answer a scroll-back without touching the decode pool.
+func readThumbCache(it *Item, size int) ([]byte, bool) {
+	if thumbDir == "" {
+		return nil, false
+	}
+	return readFreshCache(thumbPath(it, thumbBudget(size)), it.Mtime)
+}
+
+// thumbCacheExists answers the same question with one stat. It runs once per
+// card, when the card is first queued, and only decides which lane the load
+// starts in.
+func thumbCacheExists(it *Item, size int) bool {
+	if thumbDir == "" {
+		return false
+	}
+	st, err := os.Stat(thumbPath(it, thumbBudget(size)))
+	return err == nil && st.Size() > 0 && st.ModTime().Unix() >= it.Mtime
+}
+
 func readFreshCache(p string, srcMtime int64) ([]byte, bool) {
 	st, err := os.Stat(p)
 	if err != nil || st.Size() == 0 {
@@ -266,12 +319,30 @@ func readFreshCache(p string, srcMtime int64) ([]byte, bool) {
 	return data, true
 }
 
-func renderThumb(it *Item, size int) ([]byte, error) {
+// thumbRender is one rendered card: the JPEG that goes into the cache and,
+// when the renderer was holding them anyway, the pixels it was made from. A
+// card that has to appear now builds its bitmap from those pixels instead of
+// decoding the file it has just written, which took a second trip through the
+// JPEG codec off every first paint.
+type thumbRender struct {
+	Data []byte
+	Img  image.Image
+	// Cached marks bytes that came from disk, so the caller knows there is
+	// nothing left to write.
+	Cached bool
+}
+
+// bytesThumb adapts a renderer that only produces bytes.
+func bytesThumb(data []byte, err error) (thumbRender, error) {
+	return thumbRender{Data: data}, err
+}
+
+func renderThumb(it *Item, size int) (thumbRender, error) {
 	if it.Kind == "video" {
 		if data, err := videoFrame(it, size); err == nil {
-			return data, nil
+			return thumbRender{Data: data, Cached: true}, nil
 		}
-		return placeholderThumb(it, size)
+		return bytesThumb(placeholderThumb(it, size))
 	}
 	return renderStill(it, size)
 }
@@ -280,57 +351,78 @@ func renderThumb(it *Item, size int) ([]byte, error) {
 // auto is intentionally conservative: WIC first for normal formats, Shell
 // first only for formats WIC commonly lacks (HEIC/AVIF/JXL/RAW), and the
 // original Go decoder last.
-func renderStill(it *Item, size int) ([]byte, error) {
+func renderStill(it *Item, size int) (thumbRender, error) {
 	if isRemotePath(it.Path) {
-		// WIC and the Shell provider need a local path; a share is decoded
-		// from its stream instead.
-		if data, err := renderThumbGo(it, size); err == nil {
-			return data, nil
-		}
-		return placeholderThumb(it, size)
+		// WIC and the Shell provider need a local path, so a share is decoded
+		// from its stream — but only after the prefix has had its chance to
+		// answer on its own.
+		return renderThumbRemote(it, size)
 	}
 	switch thumbBackendMode() {
 	case "go":
 		return renderThumbGo(it, size)
 	case "wic":
-		if data, err := wicThumb(it, size); err == nil {
-			return data, nil
+		if r, err := wicThumb(it, size); err == nil {
+			return r, nil
 		}
 		return renderThumbGo(it, size)
 	case "shell":
-		if data, err := shellThumb(it, size); err == nil {
-			return data, nil
+		if r, err := shellThumb(it, size); err == nil {
+			return r, nil
 		}
 		return renderThumbGo(it, size)
 	case "embedded":
-		if data, err := embeddedThumb(it, size, 0.75); err == nil {
-			return data, nil
+		if r, err := embeddedThumb(it, size, 0.75); err == nil {
+			return r, nil
 		}
 		return renderThumbGo(it, size)
 	case "dct":
-		if data, err := dctThumb(it, size); err == nil {
-			return data, nil
+		if r, err := dctThumb(it, size); err == nil {
+			return r, nil
 		}
 		return renderThumbGo(it, size)
 	}
 
 	if strings.EqualFold(it.Ext, ".ico") {
-		if data, err := icoThumb(it, size); err == nil {
-			return data, nil
+		if r, err := icoThumb(it, size); err == nil {
+			return r, nil
 		}
 	}
 	if shellPreferred(it.Ext) {
-		if data, err := shellThumb(it, size); err == nil {
-			return data, nil
+		if r, err := shellThumb(it, size); err == nil {
+			return r, nil
 		}
 	}
-	if data, err := wicThumb(it, size); err == nil {
-		return data, nil
+	if r, err := wicThumb(it, size); err == nil {
+		return r, nil
 	}
-	if data, err := shellThumb(it, size); err == nil {
-		return data, nil
+	if r, err := shellThumb(it, size); err == nil {
+		return r, nil
 	}
 	return renderThumbGo(it, size)
+}
+
+// renderThumbRemote decodes a picture over a share. The prefix is read once
+// and answers everything it can: dimensions, the EXIF thumbnail as the final
+// card when it is large enough, and the dimensions the full decode would
+// otherwise ask for again.
+func renderThumbRemote(it *Item, size int) (thumbRender, error) {
+	head := remoteHead(it.Path)
+	if len(head) > 0 {
+		d := probeDimsFromHead(head, it.Path)
+		if d.W > 0 {
+			// Remember the answer: renderThumbGo asks imageDims for exactly
+			// this, and the second head request would be pure waste.
+			dimCache.Store(dimKey{it.Path, it.Mtime}, d)
+		}
+		if data, err := remoteEmbeddedFinal(it, head, d, size); err == nil {
+			return thumbRender{Data: data, Cached: true}, nil
+		}
+	}
+	if r, err := renderThumbGo(it, size); err == nil {
+		return r, nil
+	}
+	return bytesThumb(placeholderThumb(it, size))
 }
 
 func shellPreferred(ext string) bool {
@@ -351,29 +443,29 @@ func thumbBackendMode() string {
 }
 
 // renderThumbGo is the original pure-Go path and the final fallback.
-func renderThumbGo(it *Item, size int) ([]byte, error) {
+func renderThumbGo(it *Item, size int) (thumbRender, error) {
 	d := imageDims(it.Path, it.Mtime)
 	if d.W <= 0 || d.H <= 0 {
-		return nil, fmt.Errorf("unsupported image format: %s", it.Ext)
+		return thumbRender{}, fmt.Errorf("unsupported image format: %s", it.Ext)
 	}
 	if d.W*d.H > 150_000_000 {
-		return nil, fmt.Errorf("image too large to thumbnail")
+		return thumbRender{}, fmt.Errorf("image too large to thumbnail")
 	}
 	f, err := openItemFile(it)
 	if err != nil {
-		return nil, err
+		return thumbRender{}, err
 	}
 	defer f.Close()
 	src, _, err := image.Decode(f)
 	if err != nil {
-		return nil, err
+		return thumbRender{}, err
 	}
 	dst := thumbnailImage(src, d, size)
 	var buf bytes.Buffer
 	if err := jpeg.Encode(&buf, dst, &jpeg.Options{Quality: 84}); err != nil {
-		return nil, err
+		return thumbRender{}, err
 	}
-	return buf.Bytes(), nil
+	return thumbRender{Data: buf.Bytes(), Img: dst}, nil
 }
 
 func clampF(v, lo, hi float64) float64 {

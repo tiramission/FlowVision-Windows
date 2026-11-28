@@ -69,7 +69,7 @@ type bitmapInfo struct {
 // shellThumb asks Explorer's thumbnail provider for an image. It is used for
 // formats WIC cannot decode (HEIC/RAW without a WIC codec) and as a fallback
 // when the WIC decoder rejects a file. Shell thumbnails are already upright.
-func shellThumb(it *Item, size int) ([]byte, error) {
+func shellThumb(it *Item, size int) (thumbRender, error) {
 	var out []byte
 	err := withWIC(func() error {
 		filename, err := windows.UTF16PtrFromString(it.Path)
@@ -174,7 +174,7 @@ func shellThumb(it *Item, size int) ([]byte, error) {
 		return nil
 	})
 	if err != nil || len(out) == 0 {
-		return nil, err
+		return thumbRender{}, err
 	}
-	return out, nil
+	return thumbRender{Data: out}, nil
 }

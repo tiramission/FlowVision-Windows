@@ -98,11 +98,12 @@ func measureThumbPass(t *testing.T, name string, items []*Item, workers int) ben
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			data, err := renderThumb(it, 220)
+			rendered, err := renderThumb(it, 220)
 			if err != nil {
 				t.Logf("render %s: %v", it.Name, err)
 				return
 			}
+			data := rendered.Data
 			bmp, err := ui.DecodeBitmap(data)
 			if err == nil && bmp != nil {
 				bmp.ReleasePixels()
@@ -142,11 +143,11 @@ func TestWICOne(t *testing.T) {
 	dir := corpusDir(t)
 	files := corpusFiles(t, dir, "24")
 	items := itemsForFiles(files)
-	data, err := wicThumb(items[0], 220)
+	rendered, err := wicThumb(items[0], 220)
 	if err != nil {
 		t.Fatalf("wic: %v", err)
 	}
-	t.Logf("WIC %s: %d bytes", items[0].Name, len(data))
+	t.Logf("WIC %s: %d bytes", items[0].Name, len(rendered.Data))
 }
 
 func TestThumbBaselineProbe(t *testing.T) {
@@ -172,12 +173,12 @@ func TestFormatRender(t *testing.T) {
 			continue
 		}
 		it := &Item{ID: filepath.Base(p), Name: filepath.Base(p), Path: p, Kind: "image", Ext: filepath.Ext(p), Size: st.Size(), Mtime: st.ModTime().Unix()}
-		data, err := renderThumb(it, 220)
+		rendered, err := renderThumb(it, 220)
 		if err != nil {
 			t.Logf("%-18s ERROR %v", it.Name, err)
 			continue
 		}
-		t.Logf("%-18s %d bytes", it.Name, len(data))
+		t.Logf("%-18s %d bytes", it.Name, len(rendered.Data))
 	}
 }
 
@@ -199,11 +200,11 @@ func TestCorpusOrientation(t *testing.T) {
 			t.Fatalf("parse %s: %v", p, err)
 		}
 		it := &Item{ID: filepath.Base(p), Name: filepath.Base(p), Path: p, Kind: "image", Ext: ".jpg", Size: st.Size(), Mtime: st.ModTime().Unix()}
-		data, err := renderThumb(it, 220)
+		rendered, err := renderThumb(it, 220)
 		if err != nil {
 			t.Fatalf("%s: %v", it.Name, err)
 		}
-		cfg, err := jpeg.DecodeConfig(bytes.NewReader(data))
+		cfg, err := jpeg.DecodeConfig(bytes.NewReader(rendered.Data))
 		if err != nil {
 			t.Fatalf("%s: decode config: %v", it.Name, err)
 		}
@@ -235,11 +236,11 @@ func TestDCTOne(t *testing.T) {
 	files := corpusFiles(t, dir, "24")
 	items := itemsForFiles(files)
 	start := time.Now()
-	data, err := dctThumb(items[0], 220)
+	rendered, err := dctThumb(items[0], 220)
 	if err != nil {
 		t.Fatalf("dct: %v", err)
 	}
-	t.Logf("DCT %s: %d bytes in %s", items[0].Name, len(data), time.Since(start))
+	t.Logf("DCT %s: %d bytes in %s", items[0].Name, len(rendered.Data), time.Since(start))
 }
 
 func TestRealSamples(t *testing.T) {
@@ -252,12 +253,12 @@ func TestRealSamples(t *testing.T) {
 		}
 		it := &Item{ID: filepath.Base(p), Name: filepath.Base(p), Path: p, Kind: "image", Ext: filepath.Ext(p), Size: st.Size(), Mtime: st.ModTime().Unix()}
 		start := time.Now()
-		data, err := renderThumb(it, 220)
+		rendered, err := renderThumb(it, 220)
 		if err != nil {
 			t.Logf("%-22s ERROR %v (%s)", it.Name, err, time.Since(start))
 			continue
 		}
-		t.Logf("%-22s %6d bytes %s", it.Name, len(data), time.Since(start))
+		t.Logf("%-22s %6d bytes %s", it.Name, len(rendered.Data), time.Since(start))
 	}
 }
 
@@ -298,7 +299,8 @@ func renderThumbWithBackend(it *Item, size int, backend string) ([]byte, error) 
 	old := os.Getenv("FLOWVISION_THUMB_BACKEND")
 	_ = os.Setenv("FLOWVISION_THUMB_BACKEND", backend)
 	defer os.Setenv("FLOWVISION_THUMB_BACKEND", old)
-	return renderThumb(it, size)
+	rendered, err := renderThumb(it, size)
+	return rendered.Data, err
 }
 
 func imageDiff(a, b image.Image) (psnr, mse, mae float64) {

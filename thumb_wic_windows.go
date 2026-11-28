@@ -8,7 +8,9 @@ import (
 	"image"
 	"image/jpeg"
 	"math"
+	"os"
 	"runtime"
+	"sync/atomic"
 	"syscall"
 	"unsafe"
 
@@ -34,6 +36,18 @@ type wicGUID struct {
 var (
 	wicCLSIDFactory = wicGUID{0xcacaf262, 0x9370, 0x4615, [8]byte{0xa1, 0x3b, 0x9f, 0x55, 0x39, 0xda, 0x4c, 0x0a}}
 	wicIIDFactory   = wicGUID{0xec5ec8a9, 0xc395, 0x4314, [8]byte{0x9c, 0x77, 0x54, 0xd7, 0xa9, 0x35, 0xff, 0x70}}
+	// IWICBitmapSourceTransform lets a decoder deliver fewer pixels than the
+	// frame holds. JPEG answers with 1/2, 1/4 or 1/8 by keeping fewer IDCT
+	// coefficients, which is where most of a full decode's cost goes.
+	//
+	// The vtable order is CopyPixels, GetClosestSize, GetClosestPixelFormat,
+	// DoesSupportTransform — CopyPixels is first here, not last, which is easy
+	// to get wrong because the interface reads like a source.
+	wicIIDSourceTransform = wicGUID{0x3b16811b, 0x6a43, 0x4ec9, [8]byte{0xb7, 0x13, 0x3d, 0x5a, 0x0c, 0x13, 0xb9, 0x40}}
+
+	// wicScaledDecodes counts the frames a decoder answered at a reduced size.
+	// It is what tells a benchmark or a test that the fast path ran at all.
+	wicScaledDecodes atomic.Int64
 
 	wicFmt24bppBGR   = wicGUID{0x6fddc324, 0x4e03, 0x4bfe, [8]byte{0xb1, 0x85, 0x3d, 0x77, 0x76, 0x8d, 0xc9, 0x0c}}
 	wicFmt32bppBGR   = wicGUID{0x6fddc324, 0x4e03, 0x4bfe, [8]byte{0xb1, 0x85, 0x3d, 0x77, 0x76, 0x8d, 0xc9, 0x0e}}
@@ -274,8 +288,8 @@ func wicTargetSize(srcW, srcH, orient, size int) (rawW, rawH, finalW, finalH int
 
 // wicThumb decodes with WIC, preferring the embedded thumbnail. It returns
 // ok=false for any failure so renderThumb can keep the pure-Go path.
-func wicThumb(it *Item, size int) ([]byte, error) {
-	var out []byte
+func wicThumb(it *Item, size int) (thumbRender, error) {
+	var out thumbRender
 	err := withWIC(func() error {
 		factory, err := wicCreateFactory()
 		if err != nil {
@@ -336,6 +350,9 @@ func wicThumb(it *Item, size int) ([]byte, error) {
 		if rawW <= 0 || rawH <= 0 {
 			return fmt.Errorf("bad target size")
 		}
+		// img holds the pixels when the decoder produced them at a reduced
+		// size; otherwise the scaler path fills it further down.
+		var img image.Image
 
 		// An embedded thumbnail below roughly three quarters of the requested
 		// card is visibly soft at final size; decode the frame instead. At or
@@ -351,17 +368,29 @@ func wicThumb(it *Item, size int) ([]byte, error) {
 			}
 		}
 		if !useEmbedded {
-			scaled, ok := wicScale(factory, fr, rawW, rawH)
-			if !ok {
-				return fmt.Errorf("WIC scaler unavailable")
+			// Ask the decoder for a smaller frame first: for a 24 MP JPEG this
+			// is the difference between decoding every block and decoding one
+			// in sixty-four. Twice the card is asked for, because the decoder
+			// answers with the closest size it supports and that may be barely
+			// above the card; two cards' worth keeps the resize honest.
+			if reduced, ok := wicScaledDecode(fr, rawW*2, rawH*2); ok {
+				img = reduced
+			} else {
+				scaled, ok := wicScale(factory, fr, rawW, rawH)
+				if !ok {
+					return fmt.Errorf("WIC scaler unavailable")
+				}
+				src = scaled
+				defer src.release()
 			}
-			src = scaled
-			defer src.release()
 		}
 
-		img, err := wicImage(src)
-		if err != nil {
-			return err
+		if img == nil {
+			var err error
+			img, err = wicImage(src)
+			if err != nil {
+				return err
+			}
 		}
 		d := dimInfo{W: finalW, H: finalH, Orient: orient}
 		dst := thumbnailImage(img, d, size)
@@ -369,16 +398,85 @@ func wicThumb(it *Item, size int) ([]byte, error) {
 		if err := jpeg.Encode(&buf, dst, &jpeg.Options{Quality: 84}); err != nil {
 			return err
 		}
-		out = buf.Bytes()
+		out = thumbRender{Data: buf.Bytes(), Img: dst}
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return thumbRender{}, err
 	}
-	if len(out) == 0 {
-		return nil, fmt.Errorf("WIC produced no JPEG")
+	if len(out.Data) == 0 {
+		return thumbRender{}, fmt.Errorf("WIC produced no JPEG")
 	}
 	return out, nil
+}
+
+// wicScaledDecode asks the decoder itself for a reduced frame. A JPEG decoder
+// answers with a DCT-scaled size — half, a quarter or an eighth — which costs a
+// fraction of a full decode. The result is still larger than the card, so the
+// normal resize finishes the job.
+func wicScaledDecode(src comPtr, wantW, wantH int) (image.Image, bool) {
+	if os.Getenv("FLOWVISION_WIC_SCALED") == "off" {
+		// Troubleshooting switch: forces the full decode plus scaler path.
+		return nil, false
+	}
+	var transform uintptr
+	hr := src.call(0,
+		uintptr(unsafe.Pointer(&wicIIDSourceTransform)),
+		uintptr(unsafe.Pointer(&transform)))
+	if !hresultOK(hr) || transform == 0 {
+		return nil, false
+	}
+	tr := comPtr(transform)
+	defer tr.release()
+
+	srcW, srcH, err := wicSize(src)
+	if err != nil {
+		return nil, false
+	}
+	w, h := uint32(wantW), uint32(wantH)
+	if int(w) > srcW {
+		w = uint32(srcW)
+	}
+	if int(h) > srcH {
+		h = uint32(srcH)
+	}
+	// What the decoder can actually deliver for that request.
+	if hr := tr.call(4, uintptr(unsafe.Pointer(&w)), uintptr(unsafe.Pointer(&h))); !hresultOK(hr) || w == 0 || h == 0 {
+		return nil, false
+	}
+	if int(w) >= srcW && int(h) >= srcH {
+		// No reduction on offer, so the scaler path is just as good.
+		return nil, false
+	}
+	stride := int(w) * 3
+	buf := make([]byte, stride*int(h))
+	format := wicFmt24bppBGR
+	hr = tr.call(3,
+		0, // whole frame
+		uintptr(w), uintptr(h),
+		uintptr(unsafe.Pointer(&format)),
+		0, // WICBitmapTransformRotate0: orientation is applied after scaling
+		uintptr(stride), uintptr(len(buf)),
+		uintptr(unsafe.Pointer(&buf[0])))
+	if !hresultOK(hr) {
+		return nil, false
+	}
+	runtime.KeepAlive(buf)
+
+	wicScaledDecodes.Add(1)
+	dst := image.NewRGBA(image.Rect(0, 0, int(w), int(h)))
+	for y := 0; y < int(h); y++ {
+		row := y * stride
+		for x := 0; x < int(w); x++ {
+			i := row + x*3
+			j := y*dst.Stride + x*4
+			dst.Pix[j+0] = buf[i+2]
+			dst.Pix[j+1] = buf[i+1]
+			dst.Pix[j+2] = buf[i+0]
+			dst.Pix[j+3] = 0xff
+		}
+	}
+	return dst, true
 }
 
 func wicScale(factory comPtr, src comPtr, w, h int) (comPtr, bool) {

@@ -99,13 +99,14 @@ func viewerPreviewFallbackHeight(w, h int) int {
 func loadViewerPreviewFallback(it *Item, d dimInfo, cachePath string) (*viewerPreviewResult, error) {
 	start := time.Now()
 	size := viewerPreviewFallbackHeight(d.W, d.H)
-	data, err := shellThumb(it, size)
+	rendered, err := shellThumb(it, size)
 	if err != nil {
-		data, err = renderStill(it, size)
+		rendered, err = renderStill(it, size)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("图片像素 %d×%d 超过预览上限（8000 万），系统无法生成缩略图", d.W, d.H)
 	}
+	data := rendered.Data
 	img, err := jpeg.Decode(bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("超大图预览解码失败（%d×%d）", d.W, d.H)
