@@ -197,7 +197,7 @@ func TestViewerPreloadSettingsMentionPreviewSize(t *testing.T) {
 	a := newViewTestApp()
 	var sawPreload, sawAuto bool
 	for _, cat := range a.settingsCategories() {
-		if cat.ID != "control" {
+		if cat.ID != "viewer" {
 			continue
 		}
 		for _, group := range cat.Groups {

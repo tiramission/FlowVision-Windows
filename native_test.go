@@ -249,7 +249,7 @@ func TestNativeSettingsModal(t *testing.T) {
 	if !tt.HasText("设置") {
 		t.Fatalf("settings modal missing: %q", tt.Texts())
 	}
-	if err := tt.Click("缓存"); err != nil {
+	if err := tt.Click("缓存与更新"); err != nil {
 		t.Fatalf("cache category: %v", err)
 	}
 	tt.Frame()
@@ -536,7 +536,7 @@ func TestNativeSettingsNarrowNavigation(t *testing.T) {
 	}
 	tt.ClickAt(trigger.Bounds.X+trigger.Bounds.W/2, trigger.Bounds.Y+trigger.Bounds.H/2)
 	tt.Frame()
-	if err := tt.Click("缓存"); err != nil {
+	if err := tt.Click("缓存与更新"); err != nil {
 		t.Fatalf("narrow cache category: %v", err)
 	}
 	tt.Frame()

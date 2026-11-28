@@ -122,7 +122,7 @@ func TestSettingsInlineBindingCapture(t *testing.T) {
 	a.draft = a.settings
 	a.showSettings = true
 	a.settingsModalOpen = true
-	a.settingsUI.Category = "control"
+	a.settingsUI.Category = "viewer"
 	a.beginBindingCapture("prevClick")
 	tt := ui.NewTester(a.view, 1200, 900)
 	tt.Frame()
@@ -143,7 +143,7 @@ func TestSettingsInlineBindingCaptureRejectsViewerKey(t *testing.T) {
 	a.settings = defaultSettings()
 	a.draft = a.settings
 	a.showSettings = true
-	a.settingsUI.Category = "control"
+	a.settingsUI.Category = "viewer"
 	a.applyBindingCapture("prevClick", SideBinding{Key: ui.KeyRight})
 	if a.draft.SidePrev != defaultSidePrev() {
 		t.Fatalf("reserved key changed binding to %+v", a.draft.SidePrev)

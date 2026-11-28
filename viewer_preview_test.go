@@ -546,7 +546,7 @@ func TestViewerHUDSettingIsInSettings(t *testing.T) {
 	a := newViewTestApp()
 	cats := a.settingsCategories()
 	for _, cat := range cats {
-		if cat.ID != "control" {
+		if cat.ID != "viewer" {
 			continue
 		}
 		for _, group := range cat.Groups {

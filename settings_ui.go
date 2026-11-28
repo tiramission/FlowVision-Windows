@@ -26,7 +26,10 @@ func (a *App) settingsModal(c *ui.Context) {
 		h = min(winH, 360)
 	}
 	ui.Modal(c, &a.settingsModalOpen, func() {
-		ui.Column(c).Width(w).Height(h).Key("settings-panel").Children(func() {
+		// The panel clips its own corners: the settings sidebar paints a
+		// translucent background across its full height, and without a clip of
+		// its own it squared off the dialog's top-left corner.
+		ui.Column(c).Width(w).Height(h).Key("settings-panel").Radius(14).Clip().Children(func() {
 			components.Settings(c, &a.settingsUI, a.settingsCategories(), components.SettingsOptions{
 				Title:             "设置",
 				SearchLabel:       "搜索设置",
@@ -116,8 +119,8 @@ func (a *App) settingsHeaderActions(c *ui.Context) {
 func (a *App) settingsCategories() []components.SettingsCategory {
 	return []components.SettingsCategory{
 		{
-			ID: "appearance", Title: "外观", Section: "常规",
-			Description: "主题、缩略图与窗口布局",
+			ID: "appearance", Title: "外观",
+			Description: "主题、缩略图尺寸与侧边栏",
 			Leading:     a.settingsCategoryIcon("appearance", lucide.Palette()),
 			Groups: []components.SettingsGroup{
 				{
@@ -159,8 +162,13 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 								components.Switch(c, &a.draft.ShowCardNames, "显示卡片文件名", components.SwitchOptions{HideLabel: true, Compact: true})
 							},
 						},
+					},
+				},
+				{
+					ID: "sidebar-group", Title: "侧边栏",
+					Items: []components.SettingsItem{
 						{
-							ID: "sidebar", Title: "侧边栏",
+							ID: "sidebar", Title: "显示侧边栏",
 							Description: "显示左侧收藏、位置和目录树；滑块调整展开宽度",
 							Keywords:    []string{"sidebar", "width", "侧边栏", "宽度"},
 							Leading:     settingsIcon(lucide.PanelLeft()),
@@ -174,18 +182,6 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 								})
 							},
 						},
-					},
-				},
-			},
-		},
-		{
-			ID: "browsing", Title: "浏览", Section: "常规",
-			Description: "文件过滤、递归扫描和视频播放",
-			Leading:     a.settingsCategoryIcon("browsing", lucide.FolderOpen()),
-			Groups: []components.SettingsGroup{
-				{
-					ID: "filter", Title: "文件显示",
-					Items: []components.SettingsItem{
 						{
 							ID: "places", Title: "显示「位置」栏",
 							Description: "侧边栏里的用户目录、桌面、图片等固定入口；只用收藏和驱动器导航时可以关掉",
@@ -195,6 +191,18 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 								components.Switch(c, &a.draft.ShowPlaces, "显示「位置」栏", components.SwitchOptions{HideLabel: true, Compact: true})
 							},
 						},
+					},
+				},
+			},
+		},
+		{
+			ID: "browsing", Title: "浏览",
+			Description: "网格里列出什么、按什么顺序",
+			Leading:     a.settingsCategoryIcon("browsing", lucide.FolderOpen()),
+			Groups: []components.SettingsGroup{
+				{
+					ID: "filter", Title: "显示内容",
+					Items: []components.SettingsItem{
 						{
 							ID: "hidden", Title: "显示隐藏文件",
 							Description: "包含以点开头或带隐藏属性的文件",
@@ -225,30 +233,7 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 					},
 				},
 				{
-					ID: "video", Title: "视频",
-					Items: []components.SettingsItem{
-						{
-							ID: "autoplay", Title: "打开视频时自动播放",
-							Description: "关闭后，查看器会停在视频第一帧",
-							Keywords:    []string{"video", "play", "视频", "播放"},
-							Leading:     settingsIcon(lucide.Play()),
-							Build: func(c *ui.Context) {
-								components.Switch(c, &a.draft.PlayVideo, "打开视频时自动播放", components.SwitchOptions{HideLabel: true, Compact: true})
-							},
-						},
-						{
-							ID: "loop", Title: "循环播放视频",
-							Description: "播放到结尾后从头继续",
-							Keywords:    []string{"video", "loop", "视频", "循环"},
-							Leading:     settingsIcon(lucide.Repeat()),
-							Build: func(c *ui.Context) {
-								components.Switch(c, &a.draft.LoopVideo, "循环播放视频", components.SwitchOptions{HideLabel: true, Compact: true})
-							},
-						},
-					},
-				},
-				{
-					ID: "sorting", Title: "默认排序",
+					ID: "sorting", Title: "排序",
 					Items: []components.SettingsItem{
 						{
 							ID: "sort", Title: "排序方式",
@@ -271,25 +256,12 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 			},
 		},
 		{
-			ID: "control", Title: "控制", Section: "常规",
-			Description: "鼠标侧键、查看器信息与快捷键参考",
-			Leading:     a.settingsCategoryIcon("control", lucide.MousePointerClick()),
+			ID: "viewer", Title: "查看器",
+			Description: "打开图片和视频时的显示、载入与操作",
+			Leading:     a.settingsCategoryIcon("viewer", lucide.Expand()),
 			Groups: []components.SettingsGroup{
 				{
-					ID: "side-buttons", Title: "鼠标侧键",
-					Items: []components.SettingsItem{
-						{
-							ID: "side-map", Title: "查看器侧键",
-							Description: "侧键在查看器里切换上一张 / 下一张；单击和长按可分别配置快捷键",
-							Keywords:    []string{"mouse", "side", "button", "back", "forward", "侧键", "鼠标", "快捷键", "单击", "长按"},
-							Leading:     settingsIcon(lucide.MousePointer2()),
-							Stacked:     true,
-							Build:       a.sideButtonSetting,
-						},
-					},
-				},
-				{
-					ID: "viewer-info", Title: "查看器",
+					ID: "viewer-info", Title: "显示与载入",
 					Items: []components.SettingsItem{
 						{
 							ID: "viewer-auto-immersive", Title: "打开时自动沉浸",
@@ -347,27 +319,47 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 					},
 				},
 				{
-					ID: "shortcut-help", Title: "帮助",
+					ID: "video", Title: "视频播放",
 					Items: []components.SettingsItem{
 						{
-							ID: "shortcuts", Title: "快捷键参考",
-							Description: "按场景查看浏览、网格、图片和视频查看器的全部快捷键",
-							Keywords:    []string{"shortcut", "help", "keyboard", "快捷键", "帮助"},
-							Leading:     settingsIcon(lucide.Keyboard()),
+							ID: "autoplay", Title: "打开视频时自动播放",
+							Description: "关闭后，查看器会停在视频第一帧",
+							Keywords:    []string{"video", "play", "视频", "播放"},
+							Leading:     settingsIcon(lucide.Play()),
 							Build: func(c *ui.Context) {
-								if components.Button(c, "打开快捷键参考", components.ButtonSecondary).Clicked() {
-									a.requestSettingsCloseAfter(a.openHelp)
-								}
+								components.Switch(c, &a.draft.PlayVideo, "打开视频时自动播放", components.SwitchOptions{HideLabel: true, Compact: true})
 							},
+						},
+						{
+							ID: "loop", Title: "循环播放视频",
+							Description: "播放到结尾后从头继续",
+							Keywords:    []string{"video", "loop", "视频", "循环"},
+							Leading:     settingsIcon(lucide.Repeat()),
+							Build: func(c *ui.Context) {
+								components.Switch(c, &a.draft.LoopVideo, "循环播放视频", components.SwitchOptions{HideLabel: true, Compact: true})
+							},
+						},
+					},
+				},
+				{
+					ID: "side-buttons", Title: "鼠标侧键",
+					Items: []components.SettingsItem{
+						{
+							ID: "side-map", Title: "查看器侧键",
+							Description: "侧键在查看器里切换上一张 / 下一张；单击和长按可分别配置快捷键",
+							Keywords:    []string{"mouse", "side", "button", "back", "forward", "侧键", "鼠标", "快捷键", "单击", "长按"},
+							Leading:     settingsIcon(lucide.MousePointer2()),
+							Stacked:     true,
+							Build:       a.sideButtonSetting,
 						},
 					},
 				},
 			},
 		},
 		{
-			ID: "storage", Title: "缓存", Section: "维护",
-			Description: "缩略图磁盘缓存与占用",
-			Leading:     a.settingsCategoryIcon("storage", lucide.Database()),
+			ID: "system", Title: "缓存与更新",
+			Description: "磁盘占用、版本与帮助",
+			Leading:     a.settingsCategoryIcon("system", lucide.Database()),
 			Groups: []components.SettingsGroup{
 				{
 					ID: "cache", Title: "缩略图缓存",
@@ -443,15 +435,8 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 						},
 					},
 				},
-			},
-		},
-		{
-			ID: "updates", Title: "更新", Section: "维护",
-			Description: "版本与签名更新",
-			Leading:     a.settingsCategoryIcon("updates", lucide.RefreshCw()),
-			Groups: []components.SettingsGroup{
 				{
-					ID: "version", Title: "FlowVision",
+					ID: "version", Title: "版本与帮助",
 					Items: []components.SettingsItem{
 						{
 							ID: "version", Title: "当前版本",
@@ -461,6 +446,17 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 							Build: func(c *ui.Context) {
 								if components.Button(c, "检查更新", components.ButtonSecondary).Clicked() {
 									a.checkForUpdates()
+								}
+							},
+						},
+						{
+							ID: "shortcuts", Title: "快捷键参考",
+							Description: "按场景查看浏览、网格、图片和视频查看器的全部快捷键",
+							Keywords:    []string{"shortcut", "help", "keyboard", "快捷键", "帮助"},
+							Leading:     settingsIcon(lucide.Keyboard()),
+							Build: func(c *ui.Context) {
+								if components.Button(c, "打开快捷键参考", components.ButtonSecondary).Clicked() {
+									a.requestSettingsCloseAfter(a.openHelp)
 								}
 							},
 						},

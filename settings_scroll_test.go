@@ -13,7 +13,7 @@ import (
 func TestSettingsScrollsToViewerHUD(t *testing.T) {
 	a := newViewTestApp()
 	a.openSettings()
-	a.settingsUI.Category = "control"
+	a.settingsUI.Category = "viewer"
 	tt := ui.NewTester(a.view, 1320, 745)
 	tt.Frame()
 	before := append([]byte(nil), tt.Image().Pix...)
@@ -25,7 +25,10 @@ func TestSettingsScrollsToViewerHUD(t *testing.T) {
 	if bytes.Equal(before, after.Pix) {
 		t.Fatal("settings page did not scroll")
 	}
-	if rect, ok := tt.Find("查看器状态提示"); !ok || rect.Y > 620 {
+	// The point is that scrolling brought the setting into the window, not
+	// where the row lands: the categories above it change the offset.
+	const winH = 745
+	if rect, ok := tt.Find("查看器状态提示"); !ok || rect.Y < 0 || rect.Y > winH-40 {
 		t.Fatalf("viewer HUD setting not visible after scrolling: %#v ok=%v", rect, ok)
 	}
 	if out := os.Getenv("FLOWVISION_CAPTURE"); out != "" {
@@ -44,7 +47,7 @@ func TestSettingsScrollsToViewerHUD(t *testing.T) {
 func TestSettingsShowsViewerPreloadScope(t *testing.T) {
 	a := newViewTestApp()
 	a.openSettings()
-	a.settingsUI.Category = "control"
+	a.settingsUI.Category = "viewer"
 	tt := ui.NewTester(a.view, 1320, 900)
 	tt.Frame()
 

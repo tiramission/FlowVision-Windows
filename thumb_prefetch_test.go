@@ -245,7 +245,7 @@ func TestClearCacheDoesNotRefillTheFolder(t *testing.T) {
 func TestThumbPrefetchSettingIsInSettings(t *testing.T) {
 	a := newViewTestApp()
 	for _, cat := range a.settingsCategories() {
-		if cat.ID != "storage" {
+		if cat.ID != "system" {
 			continue
 		}
 		for _, group := range cat.Groups {
