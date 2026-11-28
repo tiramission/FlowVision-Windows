@@ -250,8 +250,9 @@ func (a *App) adjustViewerZoomForBitmapSwap(oldW, oldH, newW, newH int) {
 	if oldFit <= 0 || newFit <= 0 {
 		return
 	}
+	deviceScale := a.viewerDeviceScale()
 	if a.viewer.OneToOne {
-		a.viewer.Zoom = clampViewerZoom(viewerActualZoom(newFit), newFit)
+		a.viewer.Zoom = clampViewerZoom(viewerActualZoom(newFit, deviceScale), newFit, deviceScale)
 		return
 	}
 	// Zoom is relative to the current bitmap's fit. Preserving
@@ -263,7 +264,7 @@ func (a *App) adjustViewerZoomForBitmapSwap(oldW, oldH, newW, newH int) {
 	if displayWidth <= 0 || newWidthAtFit <= 0 {
 		return
 	}
-	a.viewer.Zoom = clampViewerZoom(displayWidth/newWidthAtFit, newFit)
+	a.viewer.Zoom = clampViewerZoom(displayWidth/newWidthAtFit, newFit, deviceScale)
 }
 
 // viewerNeedsFullResForActualSize reports whether 1:1 would enlarge a 2560
@@ -349,7 +350,8 @@ func (a *App) applyViewerPendingActualSize() {
 		a.clearViewerPendingActualSize()
 		return
 	}
-	actual := clampViewerZoom(viewerActualZoom(fit), fit)
+	deviceScale := a.viewerDeviceScale()
+	actual := clampViewerZoom(viewerActualZoom(fit, deviceScale), fit, deviceScale)
 	if at {
 		if px < 0 || py < 0 {
 			px, py = w/2, h/2
@@ -397,7 +399,7 @@ func (a *App) maybeRequestViewerFullRes() {
 	}
 	bw, bh := a.viewer.Bitmap.Size()
 	w, h := a.viewerCanvasSize(nil)
-	if viewerBitmapPercentValue(bw, bh, a.viewer.Angle, a.viewer.Zoom, w, h) >= 125 {
+	if viewerBitmapPercentValue(bw, bh, a.viewer.Angle, a.viewer.Zoom, w, h, a.viewerDeviceScale()) >= 125 {
 		a.requestViewerFullRes()
 	}
 }

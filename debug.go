@@ -24,23 +24,27 @@ import (
 )
 
 type debugState struct {
-	Version                  string   `json:"version"`
-	Active                   int      `json:"active"`
-	Path                     string   `json:"path"`
-	Name                     string   `json:"name"`
-	Loading                  bool     `json:"loading"`
-	Err                      string   `json:"error,omitempty"`
-	Total                    int      `json:"total"`
-	Filtered                 int      `json:"filtered"`
-	Query                    string   `json:"query"`
-	ScrollY                  float32  `json:"scrollY"`
-	Selected                 []string `json:"selected"`
-	Tabs                     []string `json:"tabs"`
-	ViewerOpen               bool     `json:"viewerOpen"`
-	ViewerIndex              int      `json:"viewerIndex"`
-	ViewerName               string   `json:"viewerName,omitempty"`
-	ViewerBytes              int64    `json:"viewerBytes,omitempty"`
-	ViewerZoom               float32  `json:"viewerZoom"`
+	Version     string   `json:"version"`
+	Active      int      `json:"active"`
+	Path        string   `json:"path"`
+	Name        string   `json:"name"`
+	Loading     bool     `json:"loading"`
+	Err         string   `json:"error,omitempty"`
+	Total       int      `json:"total"`
+	Filtered    int      `json:"filtered"`
+	Query       string   `json:"query"`
+	ScrollY     float32  `json:"scrollY"`
+	Selected    []string `json:"selected"`
+	Tabs        []string `json:"tabs"`
+	ViewerOpen  bool     `json:"viewerOpen"`
+	ViewerIndex int      `json:"viewerIndex"`
+	ViewerName  string   `json:"viewerName,omitempty"`
+	ViewerBytes int64    `json:"viewerBytes,omitempty"`
+	ViewerZoom  float32  `json:"viewerZoom"`
+	// ViewerDeviceScale is how many device pixels the renderer draws per DIP.
+	// A 100% readout has to be judged against it: on a 150% display one picture
+	// pixel belongs on 1.5 device pixels, and a bug here looks like "100% is soft".
+	ViewerDeviceScale        float32  `json:"viewerDeviceScale"`
 	ViewerPanX               float32  `json:"viewerPanX"`
 	ViewerPanY               float32  `json:"viewerPanY"`
 	ViewerAngle              float32  `json:"viewerAngle"`
@@ -247,6 +251,7 @@ func debugSnapshot() debugState {
 			st.ViewerBytes = app.viewer.Item.Size
 		}
 		st.ViewerZoom = app.viewer.Zoom
+		st.ViewerDeviceScale = app.viewerDeviceScale()
 		st.ViewerPanX = app.viewer.PanX
 		st.ViewerPanY = app.viewer.PanY
 		st.ViewerAngle = app.viewer.Angle

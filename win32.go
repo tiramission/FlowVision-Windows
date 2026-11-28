@@ -138,6 +138,21 @@ func cursorAtWindowVerticalEdge(hwnd uintptr, bandDIP float64) (top, bottom, ok 
 
 // windowVerticalEdgeHit is the DPI-free part of the edge test. A band taller
 // than half the window would make every position an edge, so it is capped.
+// windowDeviceScale is how many device pixels the renderer draws for one DIP.
+// mygo lays the interface out in DIPs and renders at the display's scale, so
+// "100%" in the viewer has to divide by it: one picture pixel belongs on one
+// device pixel, which is what actual size means everywhere else.
+func windowDeviceScale(hwnd uintptr) float32 {
+	if hwnd == 0 {
+		return 1
+	}
+	dpi, _, _ := procGetDpiForWindow.Call(hwnd)
+	if dpi < 48 || dpi > 480 {
+		return 1
+	}
+	return float32(dpi) / 96
+}
+
 // memoryStatusEx mirrors MEMORYSTATUSEX. Only the total is read; the rest is
 // there so the structure has the size the API expects.
 type memoryStatusEx struct {

@@ -2227,7 +2227,8 @@ func (a *App) viewerActualSize() {
 	if fit <= 0 {
 		return
 	}
-	a.viewer.Zoom = clampViewerZoom(viewerActualZoom(fit), fit)
+	scale := a.viewerDeviceScale()
+	a.viewer.Zoom = clampViewerZoom(viewerActualZoom(fit, scale), fit, scale)
 	a.viewer.PanX = 0
 	a.viewer.PanY = 0
 	a.viewer.OneToOne = true
@@ -2261,12 +2262,13 @@ func (a *App) viewerActualSizeAt(x, y, w, h float32) {
 	if fit <= 0 {
 		return
 	}
-	actual := clampViewerZoom(viewerActualZoom(fit), fit)
+	scale := a.viewerDeviceScale()
+	actual := clampViewerZoom(viewerActualZoom(fit, scale), fit, scale)
 	if a.viewer.Zoom >= actual {
 		return
 	}
 	a.viewer.Zoom, a.viewer.PanX, a.viewer.PanY = viewerZoomAtPoint(
-		a.viewer.Zoom, a.viewer.PanX, a.viewer.PanY, actual/a.viewer.Zoom, x, y, w, h, fit)
+		a.viewer.Zoom, a.viewer.PanX, a.viewer.PanY, actual/a.viewer.Zoom, x, y, w, h, fit, scale)
 	a.refresh()
 }
 
@@ -2321,7 +2323,7 @@ func (a *App) viewerZoom(delta float32) {
 	}
 	a.clearViewerPendingActualSize()
 	before := a.viewer.Zoom
-	a.viewer.Zoom = clampViewerZoom(a.viewer.Zoom*delta, a.viewerFitForDisplay())
+	a.viewer.Zoom = clampViewerZoom(a.viewer.Zoom*delta, a.viewerFitForDisplay(), a.viewerDeviceScale())
 	if a.viewer.Zoom != before {
 		a.viewer.OneToOne = false
 	}
@@ -2358,7 +2360,7 @@ func (a *App) viewerZoomAt(delta, x, y, w, h float32) {
 		fit = viewerFitScale(bw, bh, a.viewer.Angle, w, h)
 	}
 	a.viewer.Zoom, a.viewer.PanX, a.viewer.PanY = viewerZoomAtPoint(
-		a.viewer.Zoom, a.viewer.PanX, a.viewer.PanY, delta, x, y, w, h, fit)
+		a.viewer.Zoom, a.viewer.PanX, a.viewer.PanY, delta, x, y, w, h, fit, a.viewerDeviceScale())
 	if a.viewer.Zoom != before {
 		a.viewer.OneToOne = false
 	}

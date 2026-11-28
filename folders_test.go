@@ -125,15 +125,15 @@ func TestViewerCanvasMetricsImmersiveKeepsInfoClosed(t *testing.T) {
 
 func TestViewerPercentIsActualScale(t *testing.T) {
 	// 100 px image in a 300 px viewport at fit is a real 300% scale.
-	if got := viewerPercentValue(100, 100, 100, 100, 0, 1, 300, 300); got != 300 {
+	if got := viewerPercentValue(100, 100, 100, 100, 0, 1, 300, 300, 1); got != 300 {
 		t.Fatalf("fit percent = %d, want 300", got)
 	}
-	if got := viewerPercentValue(100, 100, 100, 100, 0, 1.25, 300, 300); got != 375 {
+	if got := viewerPercentValue(100, 100, 100, 100, 0, 1.25, 300, 300, 1); got != 375 {
 		t.Fatalf("zoomed percent = %d, want 375", got)
 	}
 	// Rotating 200x100 by 90 degrees swaps the fit bounds: a 200x400
 	// viewport fits at 200%, not at the old unrotated 100%.
-	if got := viewerPercentValue(200, 100, 200, 100, 90, 1, 200, 400); got != 200 {
+	if got := viewerPercentValue(200, 100, 200, 100, 90, 1, 200, 400, 1); got != 200 {
 		t.Fatalf("rotated percent = %d, want 200", got)
 	}
 	// The 1 key must land on a real 100%, not a 100% relative to fit.
@@ -142,7 +142,7 @@ func TestViewerPercentIsActualScale(t *testing.T) {
 		{1000, 800, 500, 400}, // fit < 1: actual size magnifies to 1:1
 	} {
 		fit := viewerFitScale(tc.bw, tc.bh, 0, float32(tc.vw), float32(tc.vh))
-		got := viewerPercentValue(tc.bw, tc.bh, tc.bw, tc.bh, 0, viewerActualZoom(fit), float32(tc.vw), float32(tc.vh))
+		got := viewerPercentValue(tc.bw, tc.bh, tc.bw, tc.bh, 0, viewerActualZoom(fit, 1), float32(tc.vw), float32(tc.vh), 1)
 		if got != 100 {
 			t.Fatalf("actual size %dx%d in %dx%d = %d, want 100", tc.bw, tc.bh, tc.vw, tc.vh, got)
 		}
@@ -152,13 +152,13 @@ func TestViewerPercentIsActualScale(t *testing.T) {
 func TestViewerPercentUsesOriginalDimensions(t *testing.T) {
 	// A 2560 preview of a 10000px original fits the same area, but the
 	// percentage must describe the original pixels, not the preview pixels.
-	if got := viewerPercentValue(2560, 2048, 10000, 8000, 0, 1, 1280, 800); got != 10 {
+	if got := viewerPercentValue(2560, 2048, 10000, 8000, 0, 1, 1280, 800, 1); got != 10 {
 		t.Fatalf("preview fit percent = %d, want 10", got)
 	}
-	if got := viewerPercentValue(10000, 8000, 10000, 8000, 0, 1, 1280, 800); got != 10 {
+	if got := viewerPercentValue(10000, 8000, 10000, 8000, 0, 1, 1280, 800, 1); got != 10 {
 		t.Fatalf("original fit percent = %d, want 10", got)
 	}
-	if got := viewerPercentValue(10000, 8000, 10000, 8000, 0, 10, 1280, 800); got != 100 {
+	if got := viewerPercentValue(10000, 8000, 10000, 8000, 0, 10, 1280, 800, 1); got != 100 {
 		t.Fatalf("original 1:1 percent = %d, want 100", got)
 	}
 }

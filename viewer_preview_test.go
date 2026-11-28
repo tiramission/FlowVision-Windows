@@ -315,11 +315,11 @@ func TestViewerPendingActualAnchorKeepsContentUnderPointer(t *testing.T) {
 	a.viewerPendingActualOldH = 50
 	w, h := a.viewerCanvasSize(nil)
 	newFit := viewerFitScale(100, 100, 0, w, h)
-	actual := clampViewerZoom(viewerActualZoom(newFit), newFit)
+	actual := clampViewerZoom(viewerActualZoom(newFit, 1), newFit, 1)
 	// This is the transform a long press would apply once the original is
 	// already loaded: the image is shown at the same display size as the
 	// preview, with Zoom=1 for this 100x100 bitmap.
-	wantZoom, wantX, wantY := viewerZoomAtPoint(1, 0, 0, actual, 800, 500, w, h, newFit)
+	wantZoom, wantX, wantY := viewerZoomAtPoint(1, 0, 0, actual, 800, 500, w, h, newFit, 1)
 	a.applyViewerPendingActualSize()
 	if absFloat(a.viewer.Zoom-wantZoom) > 0.001 ||
 		absFloat(a.viewer.PanX-wantX) > 0.5 ||

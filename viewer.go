@@ -72,27 +72,39 @@ func viewerFitScale(bw, bh int, angle, availW, availH float32) float32 {
 	return float32(math.Min(float64(availW)/float64(boundsW), float64(availH)/float64(boundsH)))
 }
 
+// viewerDeviceScale is how many device pixels the renderer draws per DIP. A
+// percentage is a statement about pixels on the glass, so every scale below is
+// multiplied by it: on a 150% display one DIP is 1.5 device pixels, and calling
+// that 100% would show the picture 1.5x larger and softer than it really is.
+func (a *App) viewerDeviceScale() float32 {
+	if a.win == nil {
+		return 1
+	}
+	return windowDeviceScale(a.win.NativeHandle())
+}
+
 // viewerBitmapPercentValue reports the scale of the bitmap currently on
-// screen, relative to that bitmap's own pixels. It is used to decide when the
-// 2560 preview itself has been enlarged enough to need the original.
-func viewerBitmapPercentValue(bw, bh int, angle, zoom, availW, availH float32) int {
+// screen, relative to that bitmap's own pixels, in device pixels. It is used to
+// decide when the 2560 preview itself has been enlarged enough to need the
+// original.
+func viewerBitmapPercentValue(bw, bh int, angle, zoom, availW, availH, deviceScale float32) int {
 	fitted := viewerFitScale(bw, bh, angle, availW, availH)
 	if fitted <= 0 {
 		return int(math.Round(float64(zoom * 100)))
 	}
-	return int(math.Round(float64(fitted*zoom) * 100))
+	return int(math.Round(float64(fitted*zoom*deviceScale) * 100))
 }
 
 // viewerPercentValue reports the display scale against the original image,
 // not against whichever preview bitmap happens to be loaded. A 2560 preview
 // and the full-resolution bitmap therefore show the same percentage when they
 // occupy the same area on screen.
-func viewerPercentValue(bw, bh, refW, refH int, angle, zoom, availW, availH float32) int {
+func viewerPercentValue(bw, bh, refW, refH int, angle, zoom, availW, availH, deviceScale float32) int {
 	fitted := viewerFitScale(bw, bh, angle, availW, availH)
 	if fitted <= 0 {
 		return int(math.Round(float64(zoom * 100)))
 	}
-	scale := fitted * zoom
+	scale := fitted * zoom * deviceScale
 	switch {
 	case refW > 0 && bw > 0:
 		scale *= float32(bw) / float32(refW)
@@ -103,12 +115,17 @@ func viewerPercentValue(bw, bh, refW, refH int, angle, zoom, availW, availH floa
 }
 
 // viewerActualZoom converts a fit scale into the relative zoom that displays
-// the image at 100%, i.e. one bitmap pixel per logical display pixel.
-func viewerActualZoom(fit float32) float32 {
+// the image at 100%: one bitmap pixel per device pixel, which is what every
+// other image viewer means by actual size. Without the device scale a 150%
+// display showed the picture at 150% and called it 1:1.
+func viewerActualZoom(fit, deviceScale float32) float32 {
 	if fit <= 0 || math.IsNaN(float64(fit)) || math.IsInf(float64(fit), 0) {
 		return 1
 	}
-	return 1 / fit
+	if deviceScale <= 0 || math.IsNaN(float64(deviceScale)) || math.IsInf(float64(deviceScale), 0) {
+		deviceScale = 1
+	}
+	return 1 / (fit * deviceScale)
 }
 
 // viewerZoomMaxRelative is the ceiling for the relative zoom on ordinary
@@ -121,19 +138,19 @@ const viewerZoomMaxRelative = 12
 // 1:1: a fixed ceiling of 12 made actual size unreachable for exactly the
 // images that need it. Large images therefore get 100% plus a little headroom,
 // while ordinary images keep the old limit.
-func viewerZoomMax(fit float32) float32 {
+func viewerZoomMax(fit, deviceScale float32) float32 {
 	limit := float32(viewerZoomMaxRelative)
-	if actual := viewerActualZoom(fit); actual > limit {
+	if actual := viewerActualZoom(fit, deviceScale); actual > limit {
 		limit = actual * 1.5
 	}
 	return limit
 }
 
-func clampViewerZoom(z, fit float32) float32 {
+func clampViewerZoom(z, fit, deviceScale float32) float32 {
 	if math.IsNaN(float64(z)) || math.IsInf(float64(z), 0) {
 		return 1
 	}
-	return max(0.15, min(viewerZoomMax(fit), z))
+	return max(0.15, min(viewerZoomMax(fit, deviceScale), z))
 }
 
 // viewerAnchorPan keeps a canvas point fixed while the image scale changes.
@@ -149,11 +166,11 @@ func viewerAnchorPan(px, py, w, h, panX, panY, ratio float32) (float32, float32)
 // viewerZoomAtPoint scales the image while keeping the bitmap point under the
 // pointer at the same canvas position. Pan is relative to the canvas center,
 // so both the pointer and the current pan are measured from that center.
-func viewerZoomAtPoint(zoom, panX, panY, delta, x, y, w, h, fit float32) (newZoom, newPanX, newPanY float32) {
+func viewerZoomAtPoint(zoom, panX, panY, delta, x, y, w, h, fit, deviceScale float32) (newZoom, newPanX, newPanY float32) {
 	if zoom <= 0 || w <= 0 || h <= 0 || delta <= 0 {
 		return zoom, panX, panY
 	}
-	newZoom = clampViewerZoom(zoom*delta, fit)
+	newZoom = clampViewerZoom(zoom*delta, fit, deviceScale)
 	if newZoom == zoom {
 		return zoom, panX, panY
 	}
@@ -278,7 +295,7 @@ func (a *App) viewerPercent(c *ui.Context) int {
 	if w <= 0 || h <= 0 {
 		return 100
 	}
-	return viewerPercentValue(bw, bh, refW, refH, a.viewer.Angle, a.viewer.Zoom, w, h)
+	return viewerPercentValue(bw, bh, refW, refH, a.viewer.Angle, a.viewer.Zoom, w, h, a.viewerDeviceScale())
 }
 
 // viewerReferenceSize is the fixed pixel size of the original image. The
@@ -1023,7 +1040,7 @@ func (a *App) viewerCanvas(c *ui.Context, it *Item, th *ui.Theme) {
 				if a.viewer.Bitmap != nil {
 					bw, bh := a.viewer.Bitmap.Size()
 					refW, refH := a.viewerReferenceSize()
-					pct = viewerPercentValue(bw, bh, refW, refH, a.viewer.Angle, a.viewer.Zoom, r.W, r.H)
+					pct = viewerPercentValue(bw, bh, refW, refH, a.viewer.Angle, a.viewer.Zoom, r.W, r.H, a.viewerDeviceScale())
 				}
 				a.drawViewerHUD(p, r, th, pct)
 			}

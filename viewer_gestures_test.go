@@ -78,8 +78,8 @@ func TestViewerLongPressLeftZoomsAtPointer(t *testing.T) {
 	a.viewer.Zoom = 0.1
 	a.viewer.PanX, a.viewer.PanY = 0, 0
 	bw, bh := a.viewer.Bitmap.Size()
-	actual := viewerActualZoom(viewerFitScale(bw, bh, a.viewer.Angle, w, h))
-	wantZoom, wantPanX, wantPanY := viewerZoomAtPoint(a.viewer.Zoom, 0, 0, actual/a.viewer.Zoom, x, y, w, h, viewerFitScale(bw, bh, a.viewer.Angle, w, h))
+	actual := viewerActualZoom(viewerFitScale(bw, bh, a.viewer.Angle, w, h), 1)
+	wantZoom, wantPanX, wantPanY := viewerZoomAtPoint(a.viewer.Zoom, 0, 0, actual/a.viewer.Zoom, x, y, w, h, viewerFitScale(bw, bh, a.viewer.Angle, w, h), 1)
 	a.beginViewerHold(0, x, y, tt.Now().Add(-viewerHoldDelay))
 	tt.Frame()
 	if a.viewer.HoldActive {

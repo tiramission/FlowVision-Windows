@@ -17,8 +17,8 @@ func TestViewerZoomAtPointKeepsPointerAnchor(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			nz, nx, ny := viewerZoomAtPoint(tc.zoom, tc.panX, tc.panY, tc.delta, tc.x, tc.y, tc.w, tc.h, 0)
-			wantZoom := clampViewerZoom(tc.zoom*tc.delta, 0)
+			nz, nx, ny := viewerZoomAtPoint(tc.zoom, tc.panX, tc.panY, tc.delta, tc.x, tc.y, tc.w, tc.h, 0, 1)
+			wantZoom := clampViewerZoom(tc.zoom*tc.delta, 0, 1)
 			if nz != wantZoom {
 				t.Fatalf("zoom = %v, want %v", nz, wantZoom)
 			}
@@ -35,14 +35,14 @@ func TestViewerZoomAtPointKeepsPointerAnchor(t *testing.T) {
 }
 
 func TestViewerZoomAtPointCenterWithoutPan(t *testing.T) {
-	nz, nx, ny := viewerZoomAtPoint(1.2, 0, 0, 1.25, 500, 400, 1000, 800, 0)
+	nz, nx, ny := viewerZoomAtPoint(1.2, 0, 0, 1.25, 500, 400, 1000, 800, 0, 1)
 	if nz != 1.5 || nx != 0 || ny != 0 {
 		t.Fatalf("center zoom = %v pan %v,%v; want 1.5 and 0,0", nz, nx, ny)
 	}
 }
 
 func TestViewerZoomAtPointClampsWithoutBreakingAnchor(t *testing.T) {
-	nz, nx, ny := viewerZoomAtPoint(10, 10, 5, 1.5, 300, 200, 1000, 800, 0)
+	nz, nx, ny := viewerZoomAtPoint(10, 10, 5, 1.5, 300, 200, 1000, 800, 0, 1)
 	if nz != 12 {
 		t.Fatalf("clamped zoom = %v, want 12", nz)
 	}
@@ -56,10 +56,10 @@ func TestViewerZoomAtPointClampsWithoutBreakingAnchor(t *testing.T) {
 }
 
 func TestViewerZoomAtPointRejectsInvalidGeometry(t *testing.T) {
-	if nz, nx, ny := viewerZoomAtPoint(1, 4, 5, 2, 100, 100, 0, 800, 0); nz != 1 || nx != 4 || ny != 5 {
+	if nz, nx, ny := viewerZoomAtPoint(1, 4, 5, 2, 100, 100, 0, 800, 0, 1); nz != 1 || nx != 4 || ny != 5 {
 		t.Fatalf("invalid width changed state: %v %v %v", nz, nx, ny)
 	}
-	if nz, nx, ny := viewerZoomAtPoint(1, 4, 5, 0, 100, 100, 1000, 800, 0); nz != 1 || nx != 4 || ny != 5 {
+	if nz, nx, ny := viewerZoomAtPoint(1, 4, 5, 0, 100, 100, 1000, 800, 0, 1); nz != 1 || nx != 4 || ny != 5 {
 		t.Fatalf("zero delta changed state: %v %v %v", nz, nx, ny)
 	}
 }
@@ -72,24 +72,24 @@ func TestHugeImageCanReachActualSize(t *testing.T) {
 	if fit <= 0 {
 		t.Fatal("fit scale is zero")
 	}
-	actual := viewerActualZoom(fit)
+	actual := viewerActualZoom(fit, 1)
 	if actual <= viewerZoomMaxRelative {
 		t.Fatalf("test image is not large enough: actual zoom %v", actual)
 	}
-	if got := clampViewerZoom(actual, fit); got != actual {
+	if got := clampViewerZoom(actual, fit, 1); got != actual {
 		t.Fatalf("actual size clamped to %v, want %v", got, actual)
 	}
-	if pct := viewerPercentValue(20000, 15000, 20000, 15000, 0, actual, 1200, 800); pct != 100 {
+	if pct := viewerPercentValue(20000, 15000, 20000, 15000, 0, actual, 1200, 800, 1); pct != 100 {
 		t.Fatalf("1:1 shows %d%%, want 100%%", pct)
 	}
 	// Large images keep a little headroom past 1:1 instead of stopping dead.
-	if got, want := clampViewerZoom(actual*10, fit), actual*1.5; math.Abs(float64(got-want)) > 0.01 {
+	if got, want := clampViewerZoom(actual*10, fit, 1), actual*1.5; math.Abs(float64(got-want)) > 0.01 {
 		t.Fatalf("huge-image ceiling = %v, want %v", got, want)
 	}
 
 	// Ordinary images keep the old limit, so this did not change their feel.
 	ordinaryFit := viewerFitScale(3000, 2000, 0, 1200, 800)
-	if got := clampViewerZoom(100, ordinaryFit); got != viewerZoomMaxRelative {
+	if got := clampViewerZoom(100, ordinaryFit, 1); got != viewerZoomMaxRelative {
 		t.Fatalf("ordinary ceiling = %v, want %v", got, viewerZoomMaxRelative)
 	}
 
@@ -98,8 +98,8 @@ func TestHugeImageCanReachActualSize(t *testing.T) {
 		bw, bh, angle float32
 	}{{15000, 20000, 0}, {20000, 15000, 90}, {20000, 15000, 30}} {
 		f := viewerFitScale(int(tc.bw), int(tc.bh), tc.angle, 1200, 800)
-		a := viewerActualZoom(f)
-		if got := clampViewerZoom(a, f); got != a {
+		a := viewerActualZoom(f, 1)
+		if got := clampViewerZoom(a, f, 1); got != a {
 			t.Fatalf("%.0fx%.0f at %.0f°: actual clamped to %v, want %v", tc.bw, tc.bh, tc.angle, got, a)
 		}
 	}
