@@ -3,6 +3,7 @@ package main
 import (
 	"image"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -152,5 +153,53 @@ func TestZoomReadoutStaysWithTheOthers(t *testing.T) {
 	tt.Frame()
 	if !tt.HasText(last.Text) {
 		t.Fatalf("the percentage vanished with the controls: %q", tt.Texts())
+	}
+}
+
+// TestViewerStatusFadesAndComesBack covers the two halves of the rule: the
+// readouts leave the screen after a quiet moment, and any change among them
+// brings them straight back.
+func TestViewerStatusFadesAndComesBack(t *testing.T) {
+	a := viewerStripApp(t, 2, 2)
+	defer a.closeViewer()
+	a.viewer.Immersive = true
+	a.viewer.ChromeVisible = false
+	a.viewer.Zoom = 1
+
+	tt := ui.NewTester(a.view, 1280, 800)
+	tt.Frame()
+	if !tt.HasText("大图") {
+		t.Fatalf("the readouts did not appear: %q", tt.Texts())
+	}
+
+	// Quiet for longer than the linger: the picture gets the screen back.
+	a.viewerStatusUntil = time.Now().Add(-time.Second)
+	tt.Frame()
+	if tt.HasText("大图") || tt.HasText("预取 2/2") {
+		t.Fatalf("the readouts stayed after the linger: %q", tt.Texts())
+	}
+
+	// A change among them is enough to bring them back.
+	a.viewer.Zoom = 2
+	tt.Frame()
+	if !tt.HasText("大图") {
+		t.Fatalf("a change did not reveal the readouts: %q", tt.Texts())
+	}
+
+	// A finished preload does the same.
+	a.viewerStatusUntil = time.Now().Add(-time.Second)
+	tt.Frame()
+	if tt.HasText("预取 2/2") {
+		t.Fatal("the readouts did not fade a second time")
+	}
+	a.viewerPreloadMu.Lock()
+	for key, entry := range a.viewerPreload {
+		a.releaseViewerPreloadEntryLocked(entry)
+		delete(a.viewerPreload, key)
+	}
+	a.viewerPreloadMu.Unlock()
+	tt.Frame()
+	if !tt.HasText("预取 0/2") {
+		t.Fatalf("a preload change did not reveal the readouts: %q", tt.Texts())
 	}
 }

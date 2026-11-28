@@ -327,8 +327,8 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 						},
 						{
 							ID: "viewer-hud", Title: "查看器状态提示",
-							Description: "切图、加载、缩放、边界等瞬时状态；不堆叠，不挡画面中心",
-							Keywords:    []string{"hud", "toast", "status", "状态", "提示", "缩放"},
+							Description: "载入进度与出错提示；画质、预取、缩放已由底栏常驻，不再重复播报",
+							Keywords:    []string{"hud", "toast", "status", "状态", "提示", "载入", "错误"},
 							Leading:     settingsIcon(lucide.Sparkles()),
 							Build: func(c *ui.Context) {
 								a.viewerHUDSetting(c)

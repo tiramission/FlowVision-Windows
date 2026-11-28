@@ -321,6 +321,15 @@ type App struct {
 	viewerSlowTimer         *time.Timer
 	viewerFullTimer         *time.Timer
 	viewerNoticeTimer       *time.Timer
+	// The resident readouts (quality, preload, zoom) follow the controls out of
+	// sight, but come back whenever one of them changes: viewerStatusKey is the
+	// last snapshot, viewerStatusUntil how long it may stay on screen, and
+	// viewerStatusChrome whether the control bar was showing on the last frame,
+	// so hiding the bar reveals the readouts once more.
+	viewerStatusKey    string
+	viewerStatusUntil  time.Time
+	viewerStatusTimer  *time.Timer
+	viewerStatusChrome bool
 
 	hoverTimer *time.Timer
 	hoverKey   string
@@ -1757,8 +1766,10 @@ func (a *App) loadViewerMedia(it *Item) {
 	if a.viewer.Placeholder != nil {
 		a.viewerStats.PlaceholderHit = true
 	}
-	a.startViewerSlowNotice(gen, "正在载入大图…", viewerNoticeLoadDelay)
 	if it.Kind == "video" {
+		// A picture says 缩略图 in the footer while its preview decodes, so only
+		// a video needs a spoken notice for a slow first frame.
+		a.startViewerSlowNotice(gen, "正在载入大图…", viewerNoticeLoadDelay)
 		// Read the container before Media Foundation opens the file. Some
 		// decoders keep an exclusive handle while playing, which would make a
 		// later probe fail even though the file itself is valid.
@@ -1964,6 +1975,13 @@ func (a *App) closeViewer() {
 	wasOpen := a.viewer.Open
 	a.stopViewerSideMouseHook()
 	a.stopViewerLoadTimers()
+	if a.viewerStatusTimer != nil {
+		a.viewerStatusTimer.Stop()
+		a.viewerStatusTimer = nil
+	}
+	a.viewerStatusKey = ""
+	a.viewerStatusUntil = time.Time{}
+	a.viewerStatusChrome = false
 	a.clearViewerHover()
 	a.clearViewerFullRes()
 	a.clearViewerPendingActualSize()
@@ -2213,7 +2231,6 @@ func (a *App) viewerActualSize() {
 	a.viewer.PanX = 0
 	a.viewer.PanY = 0
 	a.viewer.OneToOne = true
-	a.notifyViewer("zoom", "100%", viewerNoticeInfo, 1200*time.Millisecond)
 	a.refresh()
 }
 
@@ -2309,7 +2326,6 @@ func (a *App) viewerZoom(delta float32) {
 		a.viewer.OneToOne = false
 	}
 	a.maybeRequestViewerFullRes()
-	a.notifyViewer("zoom", fmt.Sprintf("%d%%", a.viewerPercent(nil)), viewerNoticeInfo, 1200*time.Millisecond)
 	a.refresh()
 }
 
@@ -2347,7 +2363,6 @@ func (a *App) viewerZoomAt(delta, x, y, w, h float32) {
 		a.viewer.OneToOne = false
 	}
 	a.maybeRequestViewerFullRes()
-	a.notifyViewer("zoom", fmt.Sprintf("%d%%", a.viewerPercent(nil)), viewerNoticeInfo, 1200*time.Millisecond)
 	a.refresh()
 }
 

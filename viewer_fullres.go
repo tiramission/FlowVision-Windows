@@ -386,7 +386,6 @@ func (a *App) applyViewerPendingActualSize() {
 		a.viewer.OneToOne = true
 	}
 	a.clearViewerPendingActualSize()
-	a.notifyViewer("zoom", "100%", viewerNoticeInfo, 1200*time.Millisecond)
 }
 
 func (a *App) maybeRequestViewerFullRes() {

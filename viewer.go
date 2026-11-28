@@ -485,7 +485,11 @@ func (a *App) viewerShortcuts(c *ui.Context, it *Item) {
 // It reports whether anything was drawn, so the caller can skip an empty row.
 func (a *App) viewerFooter(c *ui.Context, it *Item, th *ui.Theme, floating, compact bool) bool {
 	if compact {
-		if len(a.viewerStatusItems(c)) == 0 {
+		stats := a.viewerStatusItems(c)
+		if len(stats) == 0 {
+			return false
+		}
+		if !a.revealViewerStatus(stats) {
 			return false
 		}
 		bar := ui.Row(c).Absolute().Left(0).Right(0).Bottom(0).
@@ -495,6 +499,7 @@ func (a *App) viewerFooter(c *ui.Context, it *Item, th *ui.Theme, floating, comp
 		})
 		return true
 	}
+	a.viewerStatusChrome = true
 	bar := ui.Row(c).Height(52).Padding(8, 12, 8, 12).Gap(4)
 	if floating {
 		bar.Absolute().Left(0).Right(0).Bottom(0).
@@ -1344,6 +1349,42 @@ type viewerStat struct {
 	// MinWidth keeps a readout from changing the layout as its number grows,
 	// which matters for the percentage: 9% and 100% must not shift the buttons.
 	MinWidth float32
+}
+
+// viewerStatusLinger is how long the readouts stay after their last change.
+// Longer than a glance, shorter than the control bar, which carries more.
+const viewerStatusLinger = 2 * time.Second
+
+// revealViewerStatus decides whether the readouts are on screen this frame.
+// They follow the controls out of sight, and come back the moment one of them
+// changes, or when the control bar itself goes away: a number that changes
+// while nobody can see it is the same as no number at all.
+func (a *App) revealViewerStatus(stats []viewerStat) bool {
+	key := viewerStatusSnapshot(stats)
+	now := time.Now()
+	changed := key != a.viewerStatusKey || a.viewerStatusChrome
+	if changed {
+		a.viewerStatusKey = key
+		a.viewerStatusUntil = now.Add(viewerStatusLinger)
+		if a.viewerStatusTimer != nil {
+			a.viewerStatusTimer.Stop()
+		}
+		a.viewerStatusTimer = time.AfterFunc(viewerStatusLinger, func() {
+			a.update(func() { a.refresh() })
+		})
+	}
+	a.viewerStatusChrome = false
+	return now.Before(a.viewerStatusUntil)
+}
+
+// viewerStatusSnapshot turns the readouts into the string whose change brings
+// them back on screen.
+func viewerStatusSnapshot(stats []viewerStat) string {
+	parts := make([]string, 0, len(stats))
+	for _, stat := range stats {
+		parts = append(parts, stat.Text)
+	}
+	return strings.Join(parts, "|")
 }
 
 // viewerStatusItems returns the readouts worth keeping on screen at all times.
