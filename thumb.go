@@ -16,7 +16,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -30,13 +29,11 @@ import (
 )
 
 var (
-	thumbDir     string
-	previewDir   string
-	thumbOnce    sync.Once
-	thumbSlots   chan struct{}
-	thumbWrites  int64
-	thumbWaiters int64
-	thumbLocks   sync.Map // cache path -> *sync.Mutex, one writer per thumbnail
+	thumbDir    string
+	previewDir  string
+	thumbSlots  chan struct{}
+	thumbWrites int64
+	thumbLocks  sync.Map // cache path -> *sync.Mutex, one writer per thumbnail
 
 	// remoteThumbSlots keeps a network share from being hit by the whole worker
 	// pool: six parallel 20 MB reads over SMB starve the link the UI needs.
@@ -742,17 +739,6 @@ func trimThumbCache() {
 			total -= f.size
 		}
 	}
-}
-
-func parseIntDefault(s string, def int) int {
-	if s == "" {
-		return def
-	}
-	n, err := strconv.Atoi(strings.TrimSpace(s))
-	if err != nil {
-		return def
-	}
-	return n
 }
 
 // countCacheFiles reports how many files a bucket holds. The debug endpoint

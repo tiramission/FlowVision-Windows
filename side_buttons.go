@@ -188,13 +188,3 @@ func sideKeyLabel(key ui.Key) string {
 	}
 	return fmt.Sprintf("按键 %d", key)
 }
-
-func sideBindingDirection(b SideBinding) int {
-	if b.Key == ui.KeyBack {
-		return -1
-	}
-	if b.Key == ui.KeyForward {
-		return 1
-	}
-	return 0
-}

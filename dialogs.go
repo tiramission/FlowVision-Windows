@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/oneo-me/onevra/source/components"
@@ -206,19 +205,4 @@ func (a *App) aboutModal(c *ui.Context) {
 			})
 		})
 	})
-}
-
-func (a *App) selectionSummary() string {
-	t := a.tab()
-	if t == nil {
-		return ""
-	}
-	names := []string{}
-	for _, it := range t.selectedItems() {
-		names = append(names, it.Name)
-		if len(names) == 3 {
-			break
-		}
-	}
-	return strings.Join(names, "、")
 }

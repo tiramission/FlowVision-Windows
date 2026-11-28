@@ -35,15 +35,6 @@ func contentType(name string) string {
 	return "application/octet-stream"
 }
 
-func browserImage(ext string) bool {
-	switch ext {
-	case ".jpg", ".jpeg", ".jpe", ".jfif", ".png", ".gif", ".webp", ".bmp",
-		".avif", ".ico", ".svg":
-		return true
-	}
-	return false
-}
-
 func serveItemContent(w http.ResponseWriter, r *http.Request, it *Item) {
 	if isRemotePath(it.Path) {
 		// The remote file has no local handle to ServeContent from; the
@@ -123,6 +114,3 @@ func previewBytes(it *Item) ([]byte, error) {
 	}
 	return buf.Bytes(), nil
 }
-
-// nowUnix is a small helper for templates.
-func nowUnix() int64 { return time.Now().Unix() }

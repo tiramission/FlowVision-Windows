@@ -50,13 +50,6 @@ func (a *App) requestViewerFullRes() {
 	a.startViewerFullRes(false, "")
 }
 
-// requestViewerFullResQuiet warms the original in the background without any
-// notice; a failure leaves the preview in place silently. taskID, when set,
-// names the background task that reports this decode.
-func (a *App) requestViewerFullResQuiet(taskID string) {
-	a.startViewerFullRes(true, taskID)
-}
-
 // startViewerFullRes decodes and keeps one full-resolution bitmap. It never
 // marks the viewer as 1:1 preemptively: actual-size callers either apply
 // immediately when the bitmap is already ready, or wait for the pending flag

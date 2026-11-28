@@ -93,7 +93,6 @@ var (
 	ole32                = syscall.NewLazyDLL("ole32.dll")
 	procCoCreateInstance = ole32.NewProc("CoCreateInstance")
 	procCoInitializeEx   = ole32.NewProc("CoInitializeEx")
-	procCoUninitialize   = ole32.NewProc("CoUninitialize")
 )
 
 func coCreateInstance(clsid, iid *wicGUID, out *uintptr) error {

@@ -422,7 +422,12 @@ func TestSidebarShowsFavoritesFolderEntry(t *testing.T) {
 	if !tt.HasText(favoritesName) {
 		t.Fatalf("favorites entry missing: %q", tt.Texts())
 	}
-	a.toggleFavoritePath(`C:\Pictures\a.jpg`)
+	// The count reflects what the folder would show, so the collected file
+	// has to exist: a favorite whose file is gone is not counted.
+	dir := t.TempDir()
+	real := filepath.Join(dir, "a.jpg")
+	writePNG(t, real, 8, 8)
+	a.toggleFavoritePath(real)
 	tt.Frame()
 	if !tt.HasText("收藏夹 (1)") {
 		t.Fatalf("count not shown: %q", tt.Texts())
@@ -882,5 +887,40 @@ func TestStarredPathsAreSeparateFromTheFavoritesFolder(t *testing.T) {
 	}
 	if !a.isFavorite(image) {
 		t.Fatal("unstarring the folder removed the media favorite")
+	}
+}
+
+// TestSidebarCountIgnoresMissingFiles covers the count the sidebar shows: it
+// used to be len(settings.Favorites), so a collected file that had been deleted
+// still counted while the folder hid it — the row said "(3)" over two tiles.
+func TestSidebarCountIgnoresMissingFiles(t *testing.T) {
+	a := newViewTestApp()
+	dir := t.TempDir()
+	keep := filepath.Join(dir, "keep.jpg")
+	writePNG(t, keep, 8, 8)
+	gone := filepath.Join(dir, "gone.jpg")
+
+	a.settings.Favorites = []Favorite{
+		{Path: keep, Kind: "image"},
+		{Path: gone, Kind: "image"},
+		{Path: filepath.Join(dir, "notes.txt"), Kind: "other"},
+	}
+	a.invalidateLiveFavorites()
+
+	if got := len(a.liveFavorites()); got != 1 {
+		t.Fatalf("live favorites = %d, want 1", got)
+	}
+
+	a.sidebar = true
+	tt := ui.NewTester(a.view, 1280, 800)
+	tt.Frame()
+	if !tt.HasText(favoritesName + " (1)") {
+		t.Fatalf("sidebar count is wrong: %q", tt.Texts())
+	}
+
+	// The settings keep the missing entry: a drive that is unplugged for an
+	// afternoon must not empty the collection.
+	if len(a.settings.Favorites) != 3 {
+		t.Fatalf("settings were pruned to %d entries", len(a.settings.Favorites))
 	}
 }

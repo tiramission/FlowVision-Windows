@@ -235,19 +235,10 @@ func (AppSvc) NewFolder(dir, name string) (string, error) {
 	return p, nil
 }
 
-// Quit ends the app.
-func (AppSvc) Quit() { mygo.App.Quit() }
-
 // FormatTime renders an mtime for the info panel.
 func (AppSvc) FormatTime(unix int64) string {
 	return time.Unix(unix, 0).Format("2006-01-02 15:04:05")
 }
-
-// Version returns the app version.
-func (AppSvc) Version() string { return appVersion() }
-
-// Log writes a line to the app's log, for diagnostics from the page.
-func (AppSvc) Log(msg string) { logf("page: %s", msg) }
 
 // errRemoteNoExplorer explains why a remote file cannot be handed to Windows:
 // nothing outside the app knows how to reach it.

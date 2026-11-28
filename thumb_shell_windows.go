@@ -28,11 +28,6 @@ var (
 	shellIIDImageFactory = wicGUID{0xbcc18b79, 0xba16, 0x442f, [8]byte{0x80, 0xc4, 0x8a, 0x59, 0xc3, 0x0c, 0x46, 0x3b}}
 )
 
-type sizeL struct {
-	CX int32
-	CY int32
-}
-
 type bitmap struct {
 	Type       int32
 	Width      int32

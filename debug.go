@@ -758,12 +758,6 @@ func debugCommand(name, arg string) {
 			}
 			app.openGridMenu(app.gridMenuX, app.gridMenuY, false)
 		}
-	case "openfav":
-		// openfav=<index> opens a saved favorite the way the sidebar does.
-		i, _ := strconv.Atoi(arg)
-		if i >= 0 && i < len(app.settings.Favorites) {
-			app.openFavorite(app.settings.Favorites[i])
-		}
 	case "newfolder":
 		app.newFolderDraft = arg
 		app.newFolderOpen = true

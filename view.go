@@ -271,7 +271,7 @@ func (a *App) sidebarView(c *ui.Context) {
 					// I go back to".
 					a.sidebarFavoritesRow(c)
 					starred := a.settings.StarredPaths
-					if len(starred) == 0 && len(a.settings.Favorites) == 0 {
+					if len(starred) == 0 && len(a.liveFavorites()) == 0 {
 						components.Text(c, "右键图片或视频加入收藏夹，点路径栏的星标收藏文件夹").
 							FontSize(10.5).TextColor(th.TextMuted).Padding(2, 6).SingleLine()
 					}
@@ -345,7 +345,10 @@ func (a *App) sidebarView(c *ui.Context) {
 // grid like any other.
 func (a *App) sidebarFavoritesRow(c *ui.Context) {
 	th := c.Theme()
-	count := len(a.settings.Favorites)
+	// Count what the folder would actually show, not what the settings hold:
+	// a collected file that has since been deleted is already hidden from the
+	// grid, and a count that disagrees with it reads as a bug.
+	count := len(a.liveFavorites())
 	active := false
 	if t := a.tab(); t != nil {
 		active = isFavoritesPath(t.Path) && !a.viewer.Open
@@ -386,6 +389,7 @@ func (a *App) clearFavorites() {
 	n := len(a.settings.Favorites)
 	a.settings.Favorites = nil
 	_ = saveSettings(a.settings)
+	a.invalidateLiveFavorites()
 	a.showStatusNotice(fmt.Sprintf("已清空收藏夹（%d 项）", n))
 	if t := a.tab(); t != nil && isFavoritesPath(t.Path) {
 		a.reloadActive()

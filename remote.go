@@ -506,22 +506,6 @@ func remoteHead(path string) []byte {
 	return head
 }
 
-// forgetRemoteHead drops a cached prefix when a picture changed on the share.
-func forgetRemoteHead(path string) {
-	remoteHeadCache.mu.Lock()
-	if _, ok := remoteHeadCache.items[path]; ok {
-		delete(remoteHeadCache.items, path)
-		kept := remoteHeadCache.order[:0]
-		for _, p := range remoteHeadCache.order {
-			if p != path {
-				kept = append(kept, p)
-			}
-		}
-		remoteHeadCache.order = kept
-	}
-	remoteHeadCache.mu.Unlock()
-}
-
 func remoteHeadRead(path string) []byte {
 	f, err := openPathStream(path)
 	if err != nil {

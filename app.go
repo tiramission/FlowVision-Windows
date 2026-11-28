@@ -186,7 +186,6 @@ type Viewer struct {
 	VideoReady    bool
 	Gen           int
 	Player        *ui.VideoPlayer
-	PlayerErr     string
 	SeekSeconds   float64
 	SeekUntil     time.Time
 	DraggingSeek  bool
@@ -214,11 +213,10 @@ type App struct {
 	active   int
 	nextID   int
 
-	sidebar         bool
-	sidebarWidth    int
-	activeTabHandle ui.Handle
-	maximized       bool
-	fullscreen      bool
+	sidebar      bool
+	sidebarWidth int
+	maximized    bool
+	fullscreen   bool
 
 	showSettings       bool
 	settingsModalOpen  bool
@@ -362,6 +360,11 @@ type App struct {
 	selectMenuTabID      int
 	pending              []func()
 
+	// liveFavoritesList is the cached answer to "which favorites still exist",
+	// rebuilt at most once a second because the sidebar asks on every frame.
+	liveFavoritesList []Favorite
+	liveFavoritesAt   time.Time
+
 	thumbs     map[string]*thumbEntry
 	thumbLoad  map[string]bool
 	thumbQueue *thumbQueue
@@ -427,8 +430,6 @@ type App struct {
 	treeLoading  map[string]bool
 	treeKids     map[string][]TreeEntry
 	treeGen      int
-
-	statusMu sync.Mutex
 }
 
 type thumbEntry struct {
@@ -947,6 +948,7 @@ func (a *App) toggleFavoritePath(path string) {
 	}
 	a.settings.Favorites = append(a.settings.Favorites, fav)
 	_ = saveSettings(a.settings)
+	a.invalidateLiveFavorites()
 	a.showStatusNotice("已加入收藏夹")
 	a.refreshFavoritesTab()
 	a.refresh()
@@ -993,6 +995,7 @@ func (a *App) toggleItemFavorites() {
 		added++
 	}
 	_ = saveSettings(a.settings)
+	a.invalidateLiveFavorites()
 	a.showStatusNotice(fmt.Sprintf("已加入收藏夹 %d 项", added))
 	a.refreshFavoritesTab()
 }
@@ -1009,6 +1012,7 @@ func (a *App) removeFavorite(path string) {
 	}
 	a.settings.Favorites = out
 	_ = saveSettings(a.settings)
+	a.invalidateLiveFavorites()
 	a.refreshFavoritesTab()
 	a.refresh()
 }
@@ -1029,25 +1033,6 @@ func (a *App) isFavorite(path string) bool {
 		}
 	}
 	return false
-}
-
-// openFavorite opens a collected file from the favorites folder, which is
-// always the folder being viewed: the viewer's neighbours are the other
-// favorites, so stepping through them works without leaving the virtual folder.
-func (a *App) openFavorite(f Favorite) {
-	t := a.tab()
-	if t != nil && isFavoritesPath(t.Path) {
-		for _, it := range t.Items {
-			if sameFavorite(f, it.Path) {
-				a.selectOnly(it.ID)
-				a.openViewer(it)
-				return
-			}
-		}
-	}
-	// Not in the favorites tab: open it there first, then the file.
-	a.goTo(favoritesPath, true)
-	a.pendingOpenPath = f.Path
 }
 
 func (a *App) toggleSidebar() {
@@ -1484,6 +1469,9 @@ func (a *App) doDelete() {
 		}
 	}
 	a.confirmDeleteOpen = false
+	// A deleted file may have been collected; the sidebar count must not keep
+	// counting it.
+	a.invalidateLiveFavorites()
 	a.invalidateTree(t.Path)
 	a.reloadActive()
 	if len(failed) > 0 {
@@ -2780,7 +2768,7 @@ func (a *App) postThumbResult(task *thumbTask, data []byte, src image.Image, q *
 		e := &thumbEntry{Bmp: bmp, At: a.thumbClock, Bytes: int64(w * h * 4), Preview: task.stage == thumbStagePreview}
 		old := a.thumbs[task.base]
 		if old != nil {
-			if old.Preview == false && e.Preview {
+			if !old.Preview && e.Preview {
 				// A full image already won; do not replace it with a
 				// late preview.
 				bmp.ReleasePixels()

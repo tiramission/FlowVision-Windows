@@ -179,14 +179,12 @@ func readExifFile(f io.ReadSeeker) exifData {
 			} else if segLen <= 1024*1024 {
 				// The buffer is a prefix, so a larger APP1 is read from the
 				// stream when it can seek and skipped otherwise.
-				if seeker, ok := f.(io.ReadSeeker); ok {
-					seg = make([]byte, segLen)
-					if _, err := seeker.Seek(int64(off+4), io.SeekStart); err != nil {
-						return exifData{}
-					}
-					if _, err := io.ReadFull(seeker, seg); err != nil {
-						return exifData{}
-					}
+				seg = make([]byte, segLen)
+				if _, err := f.Seek(int64(off+4), io.SeekStart); err != nil {
+					return exifData{}
+				}
+				if _, err := io.ReadFull(f, seg); err != nil {
+					return exifData{}
 				}
 			}
 			if bytes.HasPrefix(seg, []byte("Exif\x00\x00")) {

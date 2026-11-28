@@ -436,7 +436,7 @@ func (a *App) syncPortToProtocol() {
 	if a.remotePortProtocol == a.remoteDraft.Protocol && a.remotePortSecure == a.remoteDraft.Secure {
 		return
 	}
-	first := a.remotePortProtocol == "" && a.remotePortSecure == false
+	first := a.remotePortProtocol == "" && !a.remotePortSecure
 	a.remotePortProtocol = a.remoteDraft.Protocol
 	a.remotePortSecure = a.remoteDraft.Secure
 	if first {

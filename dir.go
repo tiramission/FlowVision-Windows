@@ -190,7 +190,6 @@ func fillDims(list []*Item, budget int) {
 	if budget <= 0 {
 		return
 	}
-	type job struct{ it *Item }
 	ch := make(chan *Item, len(list))
 	for _, it := range list {
 		if it.Kind != "image" || it.W > 0 || budget <= 0 {
@@ -741,41 +740,6 @@ func (FS) Places() []Place {
 		}
 	}
 	return out
-}
-
-// CountMedia counts images and videos directly inside a folder.
-func (FS) CountMedia(path string) int {
-	entries, err := os.ReadDir(filepath.Clean(path))
-	if err != nil {
-		return 0
-	}
-	n := 0
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		kind, _ := classify(e.Name())
-		if kind == "image" || kind == "video" {
-			n++
-		}
-	}
-	return n
-}
-
-// ExistsResult is the answer to FS.Exists.
-type ExistsResult struct {
-	OK   bool   `json:"ok"`
-	Path string `json:"path"`
-}
-
-// Exists reports whether path is a reachable folder.
-func (FS) Exists(path string) ExistsResult {
-	clean := filepath.Clean(path)
-	st, err := os.Stat(clean)
-	if err != nil || !st.IsDir() {
-		return ExistsResult{}
-	}
-	return ExistsResult{OK: true, Path: clean}
 }
 
 // ------------------------------------------------------------- remote store

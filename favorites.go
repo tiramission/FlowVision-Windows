@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 )
@@ -124,17 +123,9 @@ func favoriteFromItem(it *Item) Favorite {
 func favoritesBrowse(req BrowseRequest) DirResult {
 	started := time.Now()
 	res := DirResult{Path: favoritesPath, Name: favoritesName, IsDrive: true}
-	saved := getSettings().Favorites
+	saved := liveFavoritesFrom(getSettings().Favorites)
 	list := make([]*Item, 0, len(saved))
 	for _, f := range saved {
-		if !isMediaKind(f.Kind) {
-			continue
-		}
-		// A file that has since been deleted or renamed would only add a
-		// broken tile; drop it silently and let the next save prune it.
-		if !favoriteStillExists(f) {
-			continue
-		}
 		it := items.Intern(f.Path)
 		if it.Name == "" || it.Name == "." {
 			it.Name = favoriteLabel(f)
@@ -174,23 +165,44 @@ func favoriteStillExists(f Favorite) bool {
 	return err == nil
 }
 
-// pruneFavorites drops entries whose file is gone, so the virtual folder does
-// not keep showing tiles that can never load.
-func (a *App) pruneFavorites() {
-	out := a.settings.Favorites[:0]
-	changed := false
-	for _, f := range a.settings.Favorites {
+// liveFavoritesFrom drops entries that would only be a broken tile: something
+// that is not a picture or a video, or whose file is gone. Nothing is removed
+// from the settings, because "gone" includes a drive that is unplugged for the
+// afternoon, and a collection must survive that.
+func liveFavoritesFrom(saved []Favorite) []Favorite {
+	out := make([]Favorite, 0, len(saved))
+	for _, f := range saved {
 		if !isMediaKind(f.Kind) || !favoriteStillExists(f) {
-			changed = true
 			continue
 		}
 		out = append(out, f)
 	}
-	if !changed {
-		return
+	return out
+}
+
+// liveFavoritesTTL limits how often the sidebar re-checks the disk. The sidebar
+// asks on every frame, and an os.Stat per favorite per frame would be a syscall
+// storm; a second of staleness after a file is deleted outside the app does not
+// matter.
+const liveFavoritesTTL = time.Second
+
+// liveFavorites is the cached answer to "how many favorites would the folder
+// actually show". The sidebar used to count the saved list and therefore kept
+// counting files that had been deleted. It runs while the sidebar is built, so
+// it is main-thread only, like the rest of the view state.
+func (a *App) liveFavorites() []Favorite {
+	if !a.liveFavoritesAt.IsZero() && time.Since(a.liveFavoritesAt) < liveFavoritesTTL {
+		return a.liveFavoritesList
 	}
-	a.settings.Favorites = out
-	_ = saveSettings(a.settings)
+	a.liveFavoritesList = liveFavoritesFrom(a.settings.Favorites)
+	a.liveFavoritesAt = time.Now()
+	return a.liveFavoritesList
+}
+
+// invalidateLiveFavorites makes the next liveFavorites re-check the disk. The
+// places that change the collection call it so the sidebar updates at once.
+func (a *App) invalidateLiveFavorites() {
+	a.liveFavoritesAt = time.Time{}
 }
 
 // favoritesFromPaths upgrades the plain path list older builds wrote. Those
@@ -324,12 +336,6 @@ func withoutField(data []byte, name string) ([]byte, error) {
 }
 
 // sortFavorites keeps the stored order deterministic after a removal.
-func sortFavorites(list []Favorite) {
-	sort.SliceStable(list, func(i, j int) bool {
-		return strings.ToLower(list[i].Path) < strings.ToLower(list[j].Path)
-	})
-}
-
 // toggleViewerFavorite collects or drops whatever the viewer is showing.
 func (a *App) toggleViewerFavorite(it *Item) {
 	if it == nil || !isMediaKind(it.Kind) {
