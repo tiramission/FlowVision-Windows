@@ -14,31 +14,32 @@ const (
 )
 
 var (
-	user32                = syscall.NewLazyDLL("user32.dll")
-	procOpenClipboard     = user32.NewProc("OpenClipboard")
-	procEmptyClipboard    = user32.NewProc("EmptyClipboard")
-	procSetClipboardData  = user32.NewProc("SetClipboardData")
-	procCloseClipboard    = user32.NewProc("CloseClipboard")
-	procGetCursorPos      = user32.NewProc("GetCursorPos")
-	procGetWindowRect     = user32.NewProc("GetWindowRect")
-	procGetClientRect     = user32.NewProc("GetClientRect")
-	procScreenToClient    = user32.NewProc("ScreenToClient")
-	procGetCursorInfo     = user32.NewProc("GetCursorInfo")
-	procSetCursor         = user32.NewProc("SetCursor")
-	procLoadCursorW       = user32.NewProc("LoadCursorW")
-	procGetDpiForWindow   = user32.NewProc("GetDpiForWindow")
-	procGetAsyncKeyState  = user32.NewProc("GetAsyncKeyState")
-	procGetForegroundWnd  = user32.NewProc("GetForegroundWindow")
-	procSetWindowsHookEx  = user32.NewProc("SetWindowsHookExW")
-	procUnhookWindowsHook = user32.NewProc("UnhookWindowsHookEx")
-	procCallNextHookEx    = user32.NewProc("CallNextHookEx")
-	kernel32              = syscall.NewLazyDLL("kernel32.dll")
-	procGetModuleHandleW  = kernel32.NewProc("GetModuleHandleW")
-	procGlobalAlloc       = kernel32.NewProc("GlobalAlloc")
-	procGlobalLock        = kernel32.NewProc("GlobalLock")
-	procGlobalUnlock      = kernel32.NewProc("GlobalUnlock")
-	procGlobalFree        = kernel32.NewProc("GlobalFree")
-	procRtlMoveMemory     = kernel32.NewProc("RtlMoveMemory")
+	user32                 = syscall.NewLazyDLL("user32.dll")
+	procOpenClipboard      = user32.NewProc("OpenClipboard")
+	procEmptyClipboard     = user32.NewProc("EmptyClipboard")
+	procSetClipboardData   = user32.NewProc("SetClipboardData")
+	procCloseClipboard     = user32.NewProc("CloseClipboard")
+	procGetCursorPos       = user32.NewProc("GetCursorPos")
+	procGetWindowRect      = user32.NewProc("GetWindowRect")
+	procGetClientRect      = user32.NewProc("GetClientRect")
+	procScreenToClient     = user32.NewProc("ScreenToClient")
+	procGetCursorInfo      = user32.NewProc("GetCursorInfo")
+	procSetCursor          = user32.NewProc("SetCursor")
+	procLoadCursorW        = user32.NewProc("LoadCursorW")
+	procGetDpiForWindow    = user32.NewProc("GetDpiForWindow")
+	procGetAsyncKeyState   = user32.NewProc("GetAsyncKeyState")
+	procGetForegroundWnd   = user32.NewProc("GetForegroundWindow")
+	procSetWindowsHookEx   = user32.NewProc("SetWindowsHookExW")
+	procUnhookWindowsHook  = user32.NewProc("UnhookWindowsHookEx")
+	procCallNextHookEx     = user32.NewProc("CallNextHookEx")
+	kernel32               = syscall.NewLazyDLL("kernel32.dll")
+	procGetModuleHandleW   = kernel32.NewProc("GetModuleHandleW")
+	procGlobalMemoryStatus = kernel32.NewProc("GlobalMemoryStatusEx")
+	procGlobalAlloc        = kernel32.NewProc("GlobalAlloc")
+	procGlobalLock         = kernel32.NewProc("GlobalLock")
+	procGlobalUnlock       = kernel32.NewProc("GlobalUnlock")
+	procGlobalFree         = kernel32.NewProc("GlobalFree")
+	procRtlMoveMemory      = kernel32.NewProc("RtlMoveMemory")
 )
 
 func procErr(err error) error {
@@ -137,6 +138,32 @@ func cursorAtWindowVerticalEdge(hwnd uintptr, bandDIP float64) (top, bottom, ok 
 
 // windowVerticalEdgeHit is the DPI-free part of the edge test. A band taller
 // than half the window would make every position an edge, so it is capped.
+// memoryStatusEx mirrors MEMORYSTATUSEX. Only the total is read; the rest is
+// there so the structure has the size the API expects.
+type memoryStatusEx struct {
+	Length               uint32
+	MemoryLoad           uint32
+	TotalPhys            uint64
+	AvailPhys            uint64
+	TotalPageFile        uint64
+	AvailPageFile        uint64
+	TotalVirtual         uint64
+	AvailVirtual         uint64
+	AvailExtendedVirtual uint64
+}
+
+// totalMemoryBytes reports the machine's physical memory, or 0 when the query
+// fails. Callers treat 0 as "unknown" and pick the conservative answer.
+func totalMemoryBytes() uint64 {
+	var st memoryStatusEx
+	st.Length = uint32(unsafe.Sizeof(st))
+	ok, _, _ := procGlobalMemoryStatus.Call(uintptr(unsafe.Pointer(&st)))
+	if ok == 0 {
+		return 0
+	}
+	return st.TotalPhys
+}
+
 func windowVerticalEdgeHit(y, top, bottom, band int32) (hitTop, hitBottom bool) {
 	if bottom <= top || band <= 0 {
 		return false, false

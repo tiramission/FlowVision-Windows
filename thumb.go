@@ -38,9 +38,6 @@ var (
 	thumbWaiters int64
 	thumbLocks   sync.Map // cache path -> *sync.Mutex, one writer per thumbnail
 
-	// thumbPrefetchSlots keeps the folder fill from occupying every worker:
-	// two background decodes leave the rest free for cards that scroll in.
-	thumbPrefetchSlots = make(chan struct{}, 2)
 	// remoteThumbSlots keeps a network share from being hit by the whole worker
 	// pool: six parallel 20 MB reads over SMB starve the link the UI needs.
 	remoteThumbSlots = make(chan struct{}, 2)
@@ -57,14 +54,28 @@ func lockThumb(path string) func() {
 	return m.Unlock
 }
 
-func initThumbs() {
+// thumbWorkers decides how many pictures decode at once. It is measured, not
+// guessed: on a 20-thread machine throughput keeps climbing to ten and flattens
+// after that, because the physical cores are spent. Memory is the other limit,
+// and it is why a small machine keeps the old six: a picture WIC cannot scale
+// (PNG, an unknown format) is decoded whole, and a few dozen of those in flight
+// would not fit in four gigabytes.
+func thumbWorkers() int {
 	n := runtime.NumCPU()
-	if n > 6 {
-		n = 6
+	if n > 10 {
+		n = 10
 	}
 	if n < 2 {
 		n = 2
 	}
+	if totalMemoryBytes() < 8<<30 && n > 6 {
+		n = 6
+	}
+	return n
+}
+
+func initThumbs() {
+	n := thumbWorkers()
 	thumbSlots = make(chan struct{}, n)
 	cacheDir, err := mygo.App.Path(mygo.PathCache)
 	if err != nil {

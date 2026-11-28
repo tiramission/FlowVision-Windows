@@ -365,6 +365,10 @@ type App struct {
 	thumbClock          int64
 	thumbPendingRefresh bool
 
+	// lastGridScrollY and lastGridActivity decide how wide the background fill
+	// may be: scrolling narrows it so the cards being looked at keep a worker.
+	lastGridScrollY  float32
+	lastGridActivity time.Time
 	// Background fill of the active folder. It is bound to (tab, Gen), so a
 	// tab switch or a new listing drops whatever is still queued.
 	prefetchTab    *Tab
@@ -432,12 +436,18 @@ const (
 	// several times over, so scrolling back never decodes again.
 	thumbCacheBytesMax = 512 << 20
 
-	// thumbPrefetchWindow bounds how many background fills are outstanding so
-	// the queue only ever holds a couple of dozen of them; thumbPrefetchBase
-	// keeps them behind every visible card (whose priority is a viewport
-	// distance in DIP) and ahead of nothing else.
-	thumbPrefetchWindow = 48
-	thumbPrefetchBase   = 1e9
+	// A background fill is queued thumbFillIdle tasks deep; while the user is
+	// scrolling it drops to thumbFillBusy so the cards being looked at always
+	// have workers. The depth is also the width: a fill task never waits for a
+	// slot of its own, it simply waits in the queue behind visible cards.
+	thumbFillIdle = 4
+	thumbFillBusy = 2
+	// thumbFillBusyWindow is how long after the last scroll the fill stays
+	// narrow. It is longer than a flick, shorter than reading a screen.
+	thumbFillBusyWindow = 700 * time.Millisecond
+	// thumbPrefetchBase keeps fills behind every visible card (whose priority
+	// is a viewport distance in DIP) and ahead of nothing else.
+	thumbPrefetchBase = 1e9
 
 	// thumbCacheLaneWorkers is how many cards can be read back from disk at
 	// once. The work is a stat, a 30 KB read and a JPEG decode, so a small
@@ -2552,7 +2562,8 @@ func (a *App) pumpThumbPrefetch(t *Tab) {
 		a.prefetchGen = t.Gen
 	}
 	size := a.settings.ThumbSize
-	for a.prefetchActive < thumbPrefetchWindow && a.prefetchNext < len(t.All) {
+	width := a.fillWidth(time.Now())
+	for a.prefetchActive < width && a.prefetchNext < len(t.All) {
 		it := t.All[a.prefetchNext]
 		a.prefetchNext++
 		if it.Kind != "image" && it.Kind != "video" {
@@ -2580,6 +2591,27 @@ func (a *App) pumpThumbPrefetch(t *Tab) {
 // only happen while the viewer owns the window, where the status bar and the
 // task panel are not drawn.
 const taskKindFill = "fill"
+
+// fillWidth is how many background fills may be outstanding. Four decode at
+// once when the app is at rest; two while the user is scrolling, so the cards
+// under the pointer keep most of the workers.
+func (a *App) fillWidth(now time.Time) int {
+	if now.Sub(a.lastGridActivity) < thumbFillBusyWindow {
+		return thumbFillBusy
+	}
+	return thumbFillIdle
+}
+
+// noteGridActivity records that the grid moved, which is what narrows the fill.
+func (a *App) noteGridActivity(t *Tab) {
+	if t == nil {
+		return
+	}
+	if t.Scroll.Y != a.lastGridScrollY {
+		a.lastGridScrollY = t.Scroll.Y
+		a.lastGridActivity = time.Now()
+	}
+}
 
 // syncFillTask mirrors the folder fill into the task list: it starts a row on
 // the first frame that has work, reports how much is still outstanding, and
@@ -2657,10 +2689,11 @@ func (a *App) runThumbTask(task *thumbTask) {
 	}
 	if task.preload {
 		// Background fill: stop at the disk cache. No bitmap, no dims, no
-		// repaint; the card decodes from cache when it becomes visible.
-		thumbPrefetchSlots <- struct{}{}
+		// repaint; the card decodes from cache when it becomes visible. The
+		// fill's width is bounded by how many tasks the pump queues, not by a
+		// slot taken here, because a worker parked on a fill would leave a
+		// visible card waiting behind it.
 		_, _ = getThumb(context.Background(), task.item, task.size)
-		<-thumbPrefetchSlots
 		a.update(func() {
 			delete(a.thumbLoad, task.key)
 			a.thumbQueue.done(task.key)

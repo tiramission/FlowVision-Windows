@@ -192,6 +192,9 @@ func (a *App) gridView(c *ui.Context, tab *Tab) {
 	if width < 120 {
 		width = 120
 	}
+	// Reading the scroll offset here is what tells the background fill whether
+	// the user is moving; it has to run before the frame that uses it.
+	a.noteGridActivity(tab)
 	layout := buildWaterfall(tab.Items, width, a.settings.ThumbSize, a.settings.GridGap, a.settings.ShowCardNames)
 	viewTop := tab.Scroll.Y
 	viewBottom := viewTop + windowH

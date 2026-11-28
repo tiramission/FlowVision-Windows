@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // newPrefetchTestApp builds the smallest App the background fill needs. Priming
@@ -33,8 +34,8 @@ func drainPrefetch(a *App) int {
 		if task == nil {
 			return ran
 		}
-		if a.prefetchActive > thumbPrefetchWindow {
-			panic("prefetch window exceeded")
+		if a.prefetchActive > a.fillWidth(time.Now()) {
+			panic("prefetch width exceeded")
 		}
 		a.runThumbTask(task)
 		ran++
@@ -125,8 +126,8 @@ func TestPrefetchFillsWholeFolder(t *testing.T) {
 	if a.prefetchActive == 0 || a.prefetchNext == 0 {
 		t.Fatalf("pump queued nothing: next=%d active=%d", a.prefetchNext, a.prefetchActive)
 	}
-	if a.prefetchActive > thumbPrefetchWindow {
-		t.Fatalf("active fills = %d, want <= %d", a.prefetchActive, thumbPrefetchWindow)
+	if width := a.fillWidth(time.Now()); a.prefetchActive > width {
+		t.Fatalf("active fills = %d, want <= %d", a.prefetchActive, width)
 	}
 	// The first batch must already be the window's worth of media items.
 	if a.prefetchNext > len(tab.All) {
@@ -182,19 +183,20 @@ func TestPrefetchWindowBoundsPendingWork(t *testing.T) {
 	tab := &Tab{ID: 1, Loaded: true, Gen: 1, All: items, Items: items, Selected: map[string]bool{}}
 	a := newPrefetchTestApp(t, tab)
 
-	// Repeated builds must not stack fills beyond the window.
+	// Repeated builds must not stack fills beyond the current width.
+	width := a.fillWidth(time.Now())
 	for i := 0; i < 20; i++ {
 		a.pumpThumbPrefetch(tab)
 	}
-	if a.prefetchActive != thumbPrefetchWindow {
-		t.Fatalf("active fills = %d, want %d", a.prefetchActive, thumbPrefetchWindow)
+	if a.prefetchActive != width {
+		t.Fatalf("active fills = %d, want %d", a.prefetchActive, width)
 	}
 	pending, running := a.thumbQueue.stats()
-	if pending != thumbPrefetchWindow || running != 0 {
-		t.Fatalf("queue pending=%d running=%d, want %d waiting", pending, running, thumbPrefetchWindow)
+	if pending != width || running != 0 {
+		t.Fatalf("queue pending=%d running=%d, want %d waiting", pending, running, width)
 	}
-	if a.prefetchNext != thumbPrefetchWindow {
-		t.Fatalf("cursor = %d, want %d", a.prefetchNext, thumbPrefetchWindow)
+	if a.prefetchNext != width {
+		t.Fatalf("cursor = %d, want %d", a.prefetchNext, width)
 	}
 }
 
