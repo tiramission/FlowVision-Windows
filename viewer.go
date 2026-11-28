@@ -1381,7 +1381,9 @@ func (a *App) drawViewerStats(c *ui.Context, th *ui.Theme) {
 			Padding(2, 6).Radius(4).Background(th.Text.Alpha(.05)).Shrink(0).
 			Tooltip(stat.Tip)
 		if stat.MinWidth > 0 {
-			text.MinWidth(stat.MinWidth)
+			// A readout held to a minimum width has to centre inside it,
+			// otherwise the number sits at the left edge of its own pill.
+			text.MinWidth(stat.MinWidth).TextAlign(ui.Center)
 		}
 	}
 }
