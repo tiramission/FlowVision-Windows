@@ -308,6 +308,24 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 							},
 						},
 						{
+							ID: "viewer-hold-zoom", Title: "长按左键",
+							Description: "按住时临时放大到 100% 并可以拖动，松开回到原来的缩放",
+							Keywords:    []string{"long press", "长按", "100%", "原图", "缩放", "拖动"},
+							Leading:     settingsIcon(lucide.MousePointerClick()),
+							Build: func(c *ui.Context) {
+								a.viewerHoldZoomSetting(c)
+							},
+						},
+						{
+							ID: "viewer-hold-fit", Title: "长按右键",
+							Description: "按住时临时缩放到适合窗口，松开回到原来的缩放",
+							Keywords:    []string{"long press", "长按", "适合", "适应", "缩放", "右键"},
+							Leading:     settingsIcon(lucide.Minimize2()),
+							Build: func(c *ui.Context) {
+								a.viewerHoldFitSetting(c)
+							},
+						},
+						{
 							ID: "viewer-hud", Title: "查看器状态提示",
 							Description: "切图、加载、缩放、边界等瞬时状态；不堆叠，不挡画面中心",
 							Keywords:    []string{"hud", "toast", "status", "状态", "提示", "缩放"},
@@ -498,6 +516,62 @@ func (a *App) viewerHUDSetting(c *ui.Context) {
 			})
 		}
 	})
+}
+
+func (a *App) viewerHoldZoomSetting(c *ui.Context) {
+	sel := components.Select(c.Key("settings-viewer-hold-zoom"), &a.draft.ViewerHoldZoom)
+	sel.Trigger.Width(180).Label("长按左键")
+	sel.Trigger.Children(func() {
+		components.Text(c, viewerHoldZoomName(a.draft.ViewerHoldZoom)).SingleLine()
+	})
+	sel.Popup(func(panel ui.Element) {
+		for _, key := range []string{"peek", "jump", "off"} {
+			key := key
+			item := sel.Item(key)
+			item.Children(func() {
+				components.Text(c, viewerHoldZoomName(key)).SingleLine()
+			})
+		}
+	})
+}
+
+func (a *App) viewerHoldFitSetting(c *ui.Context) {
+	sel := components.Select(c.Key("settings-viewer-hold-fit"), &a.draft.ViewerHoldFit)
+	sel.Trigger.Width(180).Label("长按右键")
+	sel.Trigger.Children(func() {
+		components.Text(c, viewerHoldFitName(a.draft.ViewerHoldFit)).SingleLine()
+	})
+	sel.Popup(func(panel ui.Element) {
+		for _, key := range []string{"peek", "fit", "off"} {
+			key := key
+			item := sel.Item(key)
+			item.Children(func() {
+				components.Text(c, viewerHoldFitName(key)).SingleLine()
+			})
+		}
+	})
+}
+
+func viewerHoldFitName(key string) string {
+	switch key {
+	case "fit":
+		return "适合窗口，保持"
+	case "off":
+		return "关闭"
+	default:
+		return "临时适合，松开恢复"
+	}
+}
+
+func viewerHoldZoomName(key string) string {
+	switch key {
+	case "jump":
+		return "放大到 100%，保持"
+	case "off":
+		return "关闭"
+	default:
+		return "临时放大，松开恢复"
+	}
 }
 
 func viewerHUDName(key string) string {

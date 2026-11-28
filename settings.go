@@ -50,18 +50,26 @@ type Settings struct {
 	// on. Above it the fill would decode hundreds of pictures the user may
 	// never reach, so a big folder fills only as it scrolls. Zero lifts the
 	// limit.
-	ThumbPrefetchMax  int         `json:"thumbPrefetchMax"`
-	Tabs              []TabState  `json:"tabs"`
-	ActiveTab         int         `json:"activeTab"`
-	CacheLimitMB      int         `json:"cacheLimitMB"`
-	ThumbPrefetch     bool        `json:"thumbPrefetch"`
-	ViewerPreload     int         `json:"viewerPreload"`
-	ViewerAutoFullRes bool        `json:"viewerAutoFullRes"`
-	ViewerHUD         string      `json:"viewerHUD"` // off | auto | always
-	SidePrev          SideBinding `json:"sidePrev"`
-	SideNext          SideBinding `json:"sideNext"`
-	SidePrevHold      SideBinding `json:"sidePrevHold"`
-	SideNextHold      SideBinding `json:"sideNextHold"`
+	ThumbPrefetchMax  int        `json:"thumbPrefetchMax"`
+	Tabs              []TabState `json:"tabs"`
+	ActiveTab         int        `json:"activeTab"`
+	CacheLimitMB      int        `json:"cacheLimitMB"`
+	ThumbPrefetch     bool       `json:"thumbPrefetch"`
+	ViewerPreload     int        `json:"viewerPreload"`
+	ViewerAutoFullRes bool       `json:"viewerAutoFullRes"`
+	ViewerHUD         string     `json:"viewerHUD"` // off | auto | always
+	// ViewerHoldZoom is what a long press of the primary button does on the
+	// picture: jump to 100% and stay (jump), jump while held and go back to the
+	// zoom it was at on release (peek), or nothing (off).
+	ViewerHoldZoom string `json:"viewerHoldZoom"` // peek | jump | off
+	// ViewerHoldFit is the same gesture on the secondary button: fit the whole
+	// picture for as long as it is held (peek), keep it fitted (fit), or leave
+	// the button alone (off).
+	ViewerHoldFit string      `json:"viewerHoldFit"` // peek | fit | off
+	SidePrev      SideBinding `json:"sidePrev"`
+	SideNext      SideBinding `json:"sideNext"`
+	SidePrevHold  SideBinding `json:"sidePrevHold"`
+	SideNextHold  SideBinding `json:"sideNextHold"`
 }
 
 func defaultSettings() Settings {
@@ -88,6 +96,8 @@ func defaultSettings() Settings {
 		ViewerPreload:       2,
 		ViewerAutoFullRes:   true,
 		ViewerHUD:           "auto",
+		ViewerHoldZoom:      "peek",
+		ViewerHoldFit:       "peek",
 		SidePrev:            defaultSidePrev(),
 		SideNext:            defaultSideNext(),
 	}
@@ -207,6 +217,16 @@ func mergeSettings(def, s Settings) Settings {
 	}
 	if s.ThumbPrefetchMax > 10000 {
 		s.ThumbPrefetchMax = 10000
+	}
+	switch s.ViewerHoldFit {
+	case "peek", "fit", "off":
+	default:
+		s.ViewerHoldFit = def.ViewerHoldFit
+	}
+	switch s.ViewerHoldZoom {
+	case "peek", "jump", "off":
+	default:
+		s.ViewerHoldZoom = def.ViewerHoldZoom
 	}
 	switch s.ViewerHUD {
 	case "off", "auto", "always":

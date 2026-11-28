@@ -757,9 +757,17 @@ func (a *App) cancelViewerHold() {
 
 // dragViewer applies a real pointer movement. MyGo reports held=true for a
 // stationary primary press too, so zero movement must not cancel the pending
-// long-press actual-size transition.
+// long-press actual-size transition. While a peek holds the picture at 100%,
+// the same drag pans it, which is what makes the glance usable on a big photo.
 func (a *App) dragViewer(dx, dy, w, h float32) {
 	if dx == 0 && dy == 0 {
+		return
+	}
+	if a.viewer.Peeking {
+		a.viewer.PanX += dx
+		a.viewer.PanY += dy
+		a.clampViewerPan(w, h)
+		a.refresh()
 		return
 	}
 	a.clearViewerPendingActualSize()
@@ -790,6 +798,10 @@ func (a *App) moveViewerHold(x, y float32) {
 }
 
 func (a *App) endViewerHold(button int, canceled bool) {
+	if a.viewer.Peeking && (canceled || button == a.viewer.PeekButton) {
+		// The button that started the peek came up, or the system took it.
+		a.endViewerPeek()
+	}
 	if !a.viewer.HoldActive {
 		return
 	}
@@ -812,12 +824,84 @@ func (a *App) finishViewerHold(c *ui.Context, w, h float32) {
 		return
 	}
 	button, x, y := a.viewer.HoldButton, a.viewer.HoldX, a.viewer.HoldY
+	mode := a.settings.ViewerHoldZoom
 	a.cancelViewerHold()
 	if button == 0 {
-		a.viewerActualSizeAt(x, y, w, h)
+		switch mode {
+		case "off":
+			// The gesture is turned off: a long press does nothing.
+		case "jump":
+			a.viewerActualSizeAt(x, y, w, h)
+		default: // peek
+			a.beginViewerPeek(x, y, w, h)
+		}
 	} else if button == 1 {
-		a.viewerFit()
+		switch a.settings.ViewerHoldFit {
+		case "off":
+			// The gesture is turned off: a long press does nothing.
+		case "fit":
+			a.viewerFit()
+		default: // peek
+			a.beginViewerFitPeek()
+		}
 	}
+}
+
+// beginViewerFitPeek fits the whole picture for as long as the button is held,
+// saving the view it came from. Releasing restores it, so the gesture is a look
+// at the whole frame rather than a change of state.
+func (a *App) beginViewerFitPeek() {
+	if a.viewer.Item == nil || a.viewer.Item.Kind != "image" {
+		return
+	}
+	a.saveViewerPeekState()
+	a.viewer.Peeking = true
+	a.viewer.PeekButton = 1
+	a.viewer.Zoom = 1
+	a.viewer.PanX = 0
+	a.viewer.PanY = 0
+	a.viewer.OneToOne = false
+	a.clearViewerPendingActualSize()
+	a.refresh()
+}
+
+// beginViewerPeek jumps to 100% for as long as the button is held, saving the
+// view it came from. Releasing restores it, so a long press is a glance at the
+// pixels rather than a change of state.
+func (a *App) beginViewerPeek(x, y, w, h float32) {
+	if a.viewer.Bitmap == nil || a.viewer.Item == nil || a.viewer.Item.Kind != "image" {
+		return
+	}
+	a.saveViewerPeekState()
+	a.viewer.Peeking = true
+	a.viewer.PeekButton = 0
+	a.viewerActualSizeAt(x, y, w, h)
+}
+
+// saveViewerPeekState records the view a peek starts from, so releasing can put
+// it back exactly.
+func (a *App) saveViewerPeekState() {
+	a.viewer.PeekZoom = a.viewer.Zoom
+	a.viewer.PeekPanX = a.viewer.PanX
+	a.viewer.PeekPanY = a.viewer.PanY
+	a.viewer.PeekAngle = a.viewer.Angle
+	a.viewer.PeekOneToOne = a.viewer.OneToOne
+}
+
+// endViewerPeek restores the view a peek came from. A press that never reached
+// 100% changed nothing, so restoring is harmless either way.
+func (a *App) endViewerPeek() {
+	if !a.viewer.Peeking {
+		return
+	}
+	a.viewer.Peeking = false
+	a.viewer.Zoom = a.viewer.PeekZoom
+	a.viewer.PanX = a.viewer.PeekPanX
+	a.viewer.PanY = a.viewer.PeekPanY
+	a.viewer.Angle = a.viewer.PeekAngle
+	a.viewer.OneToOne = a.viewer.PeekOneToOne
+	a.clearViewerPendingActualSize()
+	a.refresh()
 }
 
 // showViewerCursor gives the pointer its own idle clock. Moving over the

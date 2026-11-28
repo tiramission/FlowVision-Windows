@@ -196,6 +196,13 @@ type Viewer struct {
 	HoldAt     time.Time
 	HoldX      float32
 	HoldY      float32
+	// Peeking marks a long press that jumped to 100% only while it is held,
+	// with the view it came from saved here to return to on release.
+	Peeking                      bool
+	PeekZoom, PeekPanX, PeekPanY float32
+	PeekAngle                    float32
+	PeekOneToOne                 bool
+	PeekButton                   int
 }
 
 // App holds the state the native view builds from. It is only changed on the
@@ -1108,6 +1115,8 @@ func settingsEditingEqual(a, b Settings) bool {
 		a.CacheLimitMB == b.CacheLimitMB &&
 		a.ViewerPreload == b.ViewerPreload &&
 		a.ViewerHUD == b.ViewerHUD &&
+		a.ViewerHoldZoom == b.ViewerHoldZoom &&
+		a.ViewerHoldFit == b.ViewerHoldFit &&
 		a.SidePrev == b.SidePrev &&
 		a.SideNext == b.SideNext &&
 		a.SidePrevHold == b.SidePrevHold &&
