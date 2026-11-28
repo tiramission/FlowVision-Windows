@@ -116,12 +116,41 @@ func TestViewerFooterIsQuietForVideos(t *testing.T) {
 	a.viewerPreloadDesired = map[string]bool{}
 	a.viewerPreloadMu.Unlock()
 
-	if len(a.viewerStatusItems()) != 0 {
-		t.Fatalf("a video reported %d readouts", len(a.viewerStatusItems()))
+	if len(a.viewerStatusItems(nil)) != 0 {
+		t.Fatalf("a video reported %d readouts", len(a.viewerStatusItems(nil)))
 	}
 	tt := ui.NewTester(a.view, 1280, 800)
 	tt.Frame()
 	if tt.HasText("大图") || tt.HasText("原图") || tt.HasText("预取") {
 		t.Fatalf("a video drew a picture readout: %q", tt.Texts())
+	}
+}
+
+// TestZoomReadoutStaysWithTheOthers covers the percentage: it answers the same
+// question as the quality and preload readouts, so it lives with them and
+// stays when the controls fade.
+func TestZoomReadoutStaysWithTheOthers(t *testing.T) {
+	a := viewerStripApp(t, 2, 2)
+	defer a.closeViewer()
+	a.viewer.Immersive = true
+	a.viewer.Zoom = 1
+
+	items := a.viewerStatusItems(nil)
+	if len(items) != 3 {
+		t.Fatalf("readouts = %d, want quality, preload and zoom", len(items))
+	}
+	last := items[2]
+	if last.MinWidth <= 0 {
+		t.Fatal("the percentage has no minimum width, so the buttons will shift as it grows")
+	}
+	if last.Tip == "" {
+		t.Fatal("the percentage has no tooltip explaining what it measures")
+	}
+
+	a.viewer.ChromeVisible = false
+	tt := ui.NewTester(a.view, 1280, 800)
+	tt.Frame()
+	if !tt.HasText(last.Text) {
+		t.Fatalf("the percentage vanished with the controls: %q", tt.Texts())
 	}
 }

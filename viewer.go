@@ -485,7 +485,7 @@ func (a *App) viewerShortcuts(c *ui.Context, it *Item) {
 // It reports whether anything was drawn, so the caller can skip an empty row.
 func (a *App) viewerFooter(c *ui.Context, it *Item, th *ui.Theme, floating, compact bool) bool {
 	if compact {
-		if len(a.viewerStatusItems()) == 0 {
+		if len(a.viewerStatusItems(c)) == 0 {
 			return false
 		}
 		bar := ui.Row(c).Absolute().Left(0).Right(0).Bottom(0).
@@ -516,8 +516,6 @@ func (a *App) viewerFooter(c *ui.Context, it *Item, th *ui.Theme, floating, comp
 
 func (a *App) viewerImageControls(c *ui.Context, th *ui.Theme) {
 	a.drawViewerStats(c, th)
-	components.Text(c, fmt.Sprintf("%d%%", a.viewerPercent(c))).FontSize(10.5).
-		TextColor(th.TextMuted).Width(52)
 	components.IconButton(c, lucide.ZoomOut(), "缩小 (−)", components.IconButtonPlain).
 		OnClick(func() { a.viewerZoom(0.8) })
 	components.IconButton(c, lucide.ZoomIn(), "放大 (+, =)", components.IconButtonPlain).
@@ -1343,11 +1341,14 @@ type viewerStat struct {
 	Text   string
 	Tip    string
 	Strong bool
+	// MinWidth keeps a readout from changing the layout as its number grows,
+	// which matters for the percentage: 9% and 100% must not shift the buttons.
+	MinWidth float32
 }
 
 // viewerStatusItems returns the readouts worth keeping on screen at all times.
-func (a *App) viewerStatusItems() []viewerStat {
-	stats := make([]viewerStat, 0, 2)
+func (a *App) viewerStatusItems(c *ui.Context) []viewerStat {
+	stats := make([]viewerStat, 0, 3)
 	if text, tip := a.viewerQualityLabel(); text != "" {
 		// The original is the state the user wants, so it stays quiet; the
 		// interim states are the ones worth noticing.
@@ -1357,19 +1358,31 @@ func (a *App) viewerStatusItems() []viewerStat {
 		ready, want := a.viewerPreloadProgress()
 		stats = append(stats, viewerStat{Text: text, Tip: tip, Strong: ready < want})
 	}
+	if a.viewer.Item != nil && a.viewer.Item.Kind == "image" {
+		// The percentage belongs with the other two: all three answer "what am I
+		// looking at", and none of them should disappear when the pointer rests.
+		stats = append(stats, viewerStat{
+			Text:     fmt.Sprintf("%d%%", a.viewerPercent(c)),
+			Tip:      "当前显示比例，相对原图尺寸",
+			MinWidth: 48,
+		})
+	}
 	return stats
 }
 
 // drawViewerStats draws the readouts inline in the control bar.
 func (a *App) drawViewerStats(c *ui.Context, th *ui.Theme) {
-	for _, stat := range a.viewerStatusItems() {
+	for _, stat := range a.viewerStatusItems(c) {
 		color := th.TextMuted.Alpha(.75)
 		if stat.Strong {
 			color = th.Text.Alpha(.85)
 		}
-		components.Text(c, stat.Text).FontSize(10).FontWeight(600).TextColor(color).
+		text := components.Text(c, stat.Text).FontSize(10).FontWeight(600).TextColor(color).
 			Padding(2, 6).Radius(4).Background(th.Text.Alpha(.05)).Shrink(0).
 			Tooltip(stat.Tip)
+		if stat.MinWidth > 0 {
+			text.MinWidth(stat.MinWidth)
+		}
 	}
 }
 
@@ -1379,7 +1392,7 @@ func (a *App) drawViewerStats(c *ui.Context, th *ui.Theme) {
 // pass-through so a drag or a double click near the bottom edge still reaches
 // the canvas.
 func (a *App) drawViewerStatsFloat(c *ui.Context, th *ui.Theme) {
-	stats := a.viewerStatusItems()
+	stats := a.viewerStatusItems(c)
 	if len(stats) == 0 {
 		return
 	}
