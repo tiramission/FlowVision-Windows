@@ -336,7 +336,10 @@ func (a *App) viewerOverlay(c *ui.Context) {
 				a.viewerCanvas(c, it, th)
 				if a.viewer.ChromeVisible {
 					a.viewerHeader(c, it, th, true)
-					a.viewerFooter(c, it, th, true)
+					a.viewerFooter(c, it, th, true, false)
+				} else {
+					// The controls are gone; the readouts are not.
+					a.viewerFooter(c, it, th, true, true)
 				}
 			} else {
 				a.viewerHeader(c, it, th, false)
@@ -346,7 +349,7 @@ func (a *App) viewerOverlay(c *ui.Context) {
 						a.viewerInfoPanel(c, it, th)
 					}
 				})
-				a.viewerFooter(c, it, th, false)
+				a.viewerFooter(c, it, th, false, false)
 			}
 			a.viewerShortcuts(c, it)
 		})
@@ -476,7 +479,22 @@ func (a *App) viewerShortcuts(c *ui.Context, it *Item) {
 	c.OnWindowShortcut(ui.Shift, ui.KeyR, func() { a.viewerRotate(-90) })
 }
 
-func (a *App) viewerFooter(c *ui.Context, it *Item, th *ui.Theme, floating bool) {
+// viewerFooter draws the control bar. compact draws only the resident readouts:
+// in the immersive layout the controls fade with the pointer, but what the
+// picture is showing and how the neighbour preload is going stay on screen.
+// It reports whether anything was drawn, so the caller can skip an empty row.
+func (a *App) viewerFooter(c *ui.Context, it *Item, th *ui.Theme, floating, compact bool) bool {
+	if compact {
+		if len(a.viewerStatusItems()) == 0 {
+			return false
+		}
+		bar := ui.Row(c).Absolute().Left(0).Right(0).Bottom(0).
+			Padding(0, 16, 16, 16).Gap(8).PassThrough()
+		bar.Children(func() {
+			a.drawViewerStatsFloat(c, th)
+		})
+		return true
+	}
 	bar := ui.Row(c).Height(52).Padding(8, 12, 8, 12).Gap(4)
 	if floating {
 		bar.Absolute().Left(0).Right(0).Bottom(0).
@@ -493,10 +511,11 @@ func (a *App) viewerFooter(c *ui.Context, it *Item, th *ui.Theme, floating bool)
 		}
 		a.viewerNavControls(c, it, th)
 	})
+	return true
 }
 
 func (a *App) viewerImageControls(c *ui.Context, th *ui.Theme) {
-	a.viewerQualityBadge(c, th)
+	a.drawViewerStats(c, th)
 	components.Text(c, fmt.Sprintf("%d%%", a.viewerPercent(c))).FontSize(10.5).
 		TextColor(th.TextMuted).Width(52)
 	components.IconButton(c, lucide.ZoomOut(), "缩小 (−)", components.IconButtonPlain).
@@ -1316,20 +1335,107 @@ func (a *App) viewerQualityLabel() (text, tip string) {
 	}
 }
 
-// viewerQualityBadge draws the quality label in the footer, quiet enough not to
-// pull the eye from the picture but present on every frame.
-func (a *App) viewerQualityBadge(c *ui.Context, th *ui.Theme) {
-	text, tip := a.viewerQualityLabel()
-	if text == "" {
+// viewerStat is one resident readout in the footer: what the picture is
+// showing, and how far the neighbour preload has got. They are built as data so
+// the same two lines can be drawn inside the control bar and, on their own,
+// over the photo when the controls are hidden.
+type viewerStat struct {
+	Text   string
+	Tip    string
+	Strong bool
+}
+
+// viewerStatusItems returns the readouts worth keeping on screen at all times.
+func (a *App) viewerStatusItems() []viewerStat {
+	stats := make([]viewerStat, 0, 2)
+	if text, tip := a.viewerQualityLabel(); text != "" {
+		// The original is the state the user wants, so it stays quiet; the
+		// interim states are the ones worth noticing.
+		stats = append(stats, viewerStat{Text: text, Tip: tip, Strong: !a.viewer.FullResReady})
+	}
+	if text, tip := a.viewerPreloadLabel(); text != "" {
+		ready, want := a.viewerPreloadProgress()
+		stats = append(stats, viewerStat{Text: text, Tip: tip, Strong: ready < want})
+	}
+	return stats
+}
+
+// drawViewerStats draws the readouts inline in the control bar.
+func (a *App) drawViewerStats(c *ui.Context, th *ui.Theme) {
+	for _, stat := range a.viewerStatusItems() {
+		color := th.TextMuted.Alpha(.75)
+		if stat.Strong {
+			color = th.Text.Alpha(.85)
+		}
+		components.Text(c, stat.Text).FontSize(10).FontWeight(600).TextColor(color).
+			Padding(2, 6).Radius(4).Background(th.Text.Alpha(.05)).Shrink(0).
+			Tooltip(stat.Tip)
+	}
+}
+
+// drawViewerStatsFloat draws the same readouts as one pill over the photo, for
+// the immersive layout where the control bar has faded out. It is dark and
+// translucent because the picture underneath can be any brightness, and it is
+// pass-through so a drag or a double click near the bottom edge still reaches
+// the canvas.
+func (a *App) drawViewerStatsFloat(c *ui.Context, th *ui.Theme) {
+	stats := a.viewerStatusItems()
+	if len(stats) == 0 {
 		return
 	}
-	// The original is the state the user wants, so it stays quiet; the two
-	// interim states are the ones worth noticing.
-	color := th.TextMuted.Alpha(.75)
-	if !a.viewer.FullResReady {
-		color = th.Text.Alpha(.85)
+	row := ui.Row(c).Padding(4, 10).Radius(999).Gap(8).
+		Background(ui.RGBA(0, 0, 0, 0.45)).AlignItems(ui.Center).PassThrough()
+	row.Children(func() {
+		for i, stat := range stats {
+			if i > 0 {
+				components.Text(c, "·").FontSize(10).TextColor(th.Text.Alpha(.45)).PassThrough()
+			}
+			// The pill sits on a photograph, not on a bar, so the quiet state
+			// still has to carry against a bright sky: th.TextMuted is tuned for
+			// the bar and disappears here.
+			color := th.Text.Alpha(.7)
+			if stat.Strong {
+				color = th.Text
+			}
+			components.Text(c, stat.Text).FontSize(10).FontWeight(600).TextColor(color).
+				PassThrough().Tooltip(stat.Tip)
+		}
+	})
+}
+
+// viewerPreloadLabel names the neighbour preload when there is one to show.
+func (a *App) viewerPreloadLabel() (text, tip string) {
+	ready, want := a.viewerPreloadProgress()
+	if want == 0 {
+		return "", ""
 	}
-	components.Text(c, text).FontSize(10).FontWeight(600).TextColor(color).
-		Padding(2, 6).Radius(4).Background(th.Text.Alpha(.05)).Shrink(0).
-		Tooltip(tip)
+	text = fmt.Sprintf("预取 %d/%d", ready, want)
+	if ready < want {
+		tip = fmt.Sprintf("正在解码前后共 %d 张的 2560 预览，已完成 %d 张；切到相邻图片时立即显示", want, ready)
+	} else {
+		tip = fmt.Sprintf("前后共 %d 张的 2560 预览已就绪，切到相邻图片时立即显示", want)
+	}
+	return text, tip
+}
+
+// viewerPreloadProgress counts the neighbours the window wants and the ones
+// already decoded. A picture being decoded right now is not ready yet, which is
+// what makes the counter move.
+func (a *App) viewerPreloadProgress() (ready, want int) {
+	current := ""
+	if a.viewer.Item != nil {
+		current = viewerPreloadKey(a.viewer.Item)
+	}
+	a.viewerPreloadMu.Lock()
+	defer a.viewerPreloadMu.Unlock()
+	for key := range a.viewerPreloadDesired {
+		if key == current || key == "" {
+			continue
+		}
+		want++
+		if a.viewerPreload[key] != nil {
+			ready++
+		}
+	}
+	return ready, want
 }

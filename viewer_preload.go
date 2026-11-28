@@ -262,6 +262,8 @@ func (a *App) runViewerPreloadWorker(epoch int) {
 		}
 		drained := a.viewerPreloadEpoch == epoch && len(a.viewerPreloadQueue) == 0 && len(a.viewerPreloadLoading) == 0
 		a.viewerPreloadMu.Unlock()
+		// The footer counts these, so every completion is worth a repaint.
+		a.update(func() { a.refresh() })
 		if drained {
 			// The neighbours are ready; the current image may now warm its
 			// original without competing with them.
