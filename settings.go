@@ -57,7 +57,6 @@ type Settings struct {
 	ThumbPrefetch     bool       `json:"thumbPrefetch"`
 	ViewerPreload     int        `json:"viewerPreload"`
 	ViewerAutoFullRes bool       `json:"viewerAutoFullRes"`
-	ViewerHUD         string     `json:"viewerHUD"` // off | auto | always
 	// ViewerHoldZoom is what a long press of the primary button does on the
 	// picture: jump to 100% and stay (jump), jump while held and go back to the
 	// zoom it was at on release (peek), or nothing (off).
@@ -95,7 +94,6 @@ func defaultSettings() Settings {
 		ShowPlaces:          true,
 		ViewerPreload:       2,
 		ViewerAutoFullRes:   true,
-		ViewerHUD:           "auto",
 		ViewerHoldZoom:      "peek",
 		ViewerHoldFit:       "peek",
 		SidePrev:            defaultSidePrev(),
@@ -227,11 +225,6 @@ func mergeSettings(def, s Settings) Settings {
 	case "peek", "jump", "off":
 	default:
 		s.ViewerHoldZoom = def.ViewerHoldZoom
-	}
-	switch s.ViewerHUD {
-	case "off", "auto", "always":
-	default:
-		s.ViewerHUD = def.ViewerHUD
 	}
 	if s.Favorites == nil {
 		s.Favorites = []Favorite{}

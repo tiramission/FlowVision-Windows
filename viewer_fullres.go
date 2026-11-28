@@ -94,9 +94,6 @@ func (a *App) startViewerFullRes(silent bool, taskID string) bool {
 	key := viewerFullResKey(it)
 	a.viewer.FullResLoading = true
 	viewerFullResWanted.Store(key)
-	if !silent {
-		a.startViewerFullTimer(gen)
-	}
 	go func() {
 		if !viewerFullResIsWanted(key) {
 			return
@@ -122,17 +119,14 @@ func (a *App) startViewerFullRes(silent bool, taskID string) bool {
 				}
 				return
 			}
-			a.stopViewerFullTimer()
 			a.viewer.FullResLoading = false
 			if err != nil {
 				if bmp != nil {
 					bmp.ReleasePixels()
 				}
 				a.viewer.FullResUnsupported = true
+				a.viewer.FullResErr = err.Error()
 				a.clearViewerPendingActualSize()
-				if !silent {
-					a.notifyViewer("fullres", "原图载入失败："+err.Error(), viewerNoticeError, 4*time.Second)
-				}
 				// A quiet warm-up failure is not actionable; it leaves no row.
 				a.dropTask(taskID)
 				a.refresh()
@@ -172,7 +166,6 @@ func (a *App) startViewerFullRes(silent bool, taskID string) bool {
 // at the next checkpoint and its result is dropped.
 func (a *App) cancelViewerWarmup(key string) {
 	viewerFullResWanted.Store("")
-	a.stopViewerFullTimer()
 	if key == "" || viewerFullResKey(a.viewer.Item) == key {
 		a.viewer.FullResLoading = false
 	}
@@ -197,26 +190,7 @@ func decodeViewerFullRes(it *Item) (*ui.Bitmap, int64, error) {
 	return bmp, int64(b.Dx()) * int64(b.Dy()) * 4, nil
 }
 
-func (a *App) startViewerFullTimer(gen int) {
-	a.stopViewerFullTimer()
-	a.viewerFullTimer = time.AfterFunc(1200*time.Millisecond, func() {
-		a.update(func() {
-			if a.viewer.Gen == gen && a.viewer.FullResLoading {
-				a.notifyViewer("fullres", "正在载入 1:1 原图…", viewerNoticeInfo, 0)
-			}
-		})
-	})
-}
-
-func (a *App) stopViewerFullTimer() {
-	if a.viewerFullTimer != nil {
-		a.viewerFullTimer.Stop()
-		a.viewerFullTimer = nil
-	}
-}
-
 func (a *App) clearViewerFullRes() {
-	a.stopViewerFullTimer()
 	viewerFullResWanted.Store("")
 	if a.viewerFullRes != nil {
 		if a.viewerFullRes.Bmp != nil {
@@ -287,7 +261,6 @@ func (a *App) viewerNeedsFullResForActualSize() bool {
 func (a *App) deferViewerActualSize(at bool, x, y, w, h float32) {
 	if a.viewer.FullResUnsupported {
 		a.clearViewerPendingActualSize()
-		a.notifyViewer("fullres", "原图载入失败，无法切换到 100%", viewerNoticeError, 4*time.Second)
 		a.refresh()
 		return
 	}
@@ -306,7 +279,6 @@ func (a *App) deferViewerActualSize(at bool, x, y, w, h float32) {
 		a.applyViewerPendingActualSize()
 		return
 	}
-	a.notifyViewer("fullres", "正在载入原图，完成后切换到 100%…", viewerNoticeInfo, 0)
 	a.refresh()
 }
 
@@ -319,10 +291,6 @@ func (a *App) clearViewerPendingActualSize() {
 	a.viewerPendingActualH = 0
 	a.viewerPendingActualOldW = 0
 	a.viewerPendingActualOldH = 0
-	if a.viewer.NoticeKey == "fullres" && a.viewer.Notice.Until.IsZero() {
-		a.viewer.Notice = viewerNotice{}
-		a.viewer.NoticeKey = ""
-	}
 }
 
 func (a *App) applyViewerPendingActualSize() {

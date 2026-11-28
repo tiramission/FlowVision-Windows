@@ -231,18 +231,6 @@ func TestEmbeddedExtract(t *testing.T) {
 	t.Logf("embedded thumbnails in 24: %d", count)
 }
 
-func TestDCTOne(t *testing.T) {
-	dir := corpusDir(t)
-	files := corpusFiles(t, dir, "24")
-	items := itemsForFiles(files)
-	start := time.Now()
-	rendered, err := dctThumb(items[0], 220)
-	if err != nil {
-		t.Fatalf("dct: %v", err)
-	}
-	t.Logf("DCT %s: %d bytes in %s", items[0].Name, len(rendered.Data), time.Since(start))
-}
-
 func TestRealSamples(t *testing.T) {
 	dir := corpusDir(t)
 	matches, _ := filepath.Glob(filepath.Join(dir, "real", "*"))

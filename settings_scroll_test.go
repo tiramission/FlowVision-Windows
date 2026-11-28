@@ -10,7 +10,7 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-func TestSettingsScrollsToViewerHUD(t *testing.T) {
+func TestSettingsScrollsToTheLastViewerGroup(t *testing.T) {
 	a := newViewTestApp()
 	a.openSettings()
 	a.settingsUI.Category = "viewer"
@@ -28,8 +28,8 @@ func TestSettingsScrollsToViewerHUD(t *testing.T) {
 	// The point is that scrolling brought the setting into the window, not
 	// where the row lands: the categories above it change the offset.
 	const winH = 745
-	if rect, ok := tt.Find("查看器状态提示"); !ok || rect.Y < 0 || rect.Y > winH-40 {
-		t.Fatalf("viewer HUD setting not visible after scrolling: %#v ok=%v", rect, ok)
+	if rect, ok := tt.Find("查看器侧键"); !ok || rect.Y < 0 || rect.Y > winH-40 {
+		t.Fatalf("last viewer setting not visible after scrolling: %#v ok=%v", rect, ok)
 	}
 	if out := os.Getenv("FLOWVISION_CAPTURE"); out != "" {
 		f, err := os.Create(out)

@@ -169,8 +169,10 @@ func TestAutoFullResFailureStaysQuiet(t *testing.T) {
 	if !a.viewer.FullResUnsupported {
 		t.Fatal("a missing file should mark the original unsupported")
 	}
-	if a.viewer.NoticeKey == "fullres" || a.viewer.Notice.Text != "" {
-		t.Fatalf("background failure raised a notice: %+v", a.viewer.Notice)
+	// The failure is a state of the picture now, so the readout carries it
+	// instead of a notice.
+	if got, tip := a.viewerQualityLabel(); got != "原图失败" || !strings.Contains(tip, "gone.png") {
+		t.Fatalf("failure readout = %q (%q)", got, tip)
 	}
 }
 

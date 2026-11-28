@@ -100,7 +100,6 @@ type debugState struct {
 	ViewerCached             int      `json:"viewerPreloadCached"`
 	ViewerPreloadMB          float64  `json:"viewerPreloadMB"`
 	ViewerPreloadHit         bool     `json:"viewerPreloadHit"`
-	ViewerHUD                string   `json:"viewerHUD"`
 	ViewerLoadMs             int64    `json:"viewerLoadMs"`
 	ViewerDecodeMs           int64    `json:"viewerDecodeMs"`
 	ViewerScaleMs            int64    `json:"viewerScaleMs"`
@@ -113,32 +112,34 @@ type debugState struct {
 	ViewerOneToOne           bool     `json:"viewerOneToOne"`
 	ViewerFullResLoading     bool     `json:"viewerFullResLoading"`
 	ViewerFullResUnsupported bool     `json:"viewerFullResUnsupported"`
-	ViewerFullResPending     bool     `json:"viewerFullResPending"`
-	ViewerNotice             string   `json:"viewerNotice,omitempty"`
-	HeapAllocMB              float64  `json:"heapAllocMB"`
-	HeapSysMB                float64  `json:"heapSysMB"`
-	StackSysMB               float64  `json:"stackSysMB"`
-	NumGC                    uint32   `json:"numGC"`
-	ShowHelp                 bool     `json:"showHelp"`
-	ShowAbout                bool     `json:"showAbout"`
-	UpdateOpen               bool     `json:"updateOpen"`
-	UpdatePhase              string   `json:"updatePhase"`
-	UpdateVersion            string   `json:"updateVersion,omitempty"`
-	Maximized                bool     `json:"maximized"`
-	Fullscreen               bool     `json:"fullscreen"`
-	PlayerReady              bool     `json:"playerReady"`
-	PlayerPlaying            bool     `json:"playerPlaying"`
-	PlayerPosMS              int64    `json:"playerPositionMs"`
-	PlayerDurMS              int64    `json:"playerDurationMs"`
-	VideoWidth               int      `json:"videoWidth"`
-	VideoHeight              int      `json:"videoHeight"`
-	VideoFPS                 float64  `json:"videoFps"`
-	VideoKbps                int      `json:"videoKbps"`
-	VideoLive                bool     `json:"videoLiveBitrate"`
-	ContentW                 int      `json:"contentWidth"`
-	ContentH                 int      `json:"contentHeight"`
-	ErrorMsg                 string   `json:"errorMessage,omitempty"`
-	Items                    []string `json:"items"`
+	// ViewerQuality is the footer readout: 缩略图 / 大图 / 原图, with the
+	// waiting or failed variant.
+	ViewerQuality        string   `json:"viewerQuality,omitempty"`
+	ViewerFullResPending bool     `json:"viewerFullResPending"`
+	HeapAllocMB          float64  `json:"heapAllocMB"`
+	HeapSysMB            float64  `json:"heapSysMB"`
+	StackSysMB           float64  `json:"stackSysMB"`
+	NumGC                uint32   `json:"numGC"`
+	ShowHelp             bool     `json:"showHelp"`
+	ShowAbout            bool     `json:"showAbout"`
+	UpdateOpen           bool     `json:"updateOpen"`
+	UpdatePhase          string   `json:"updatePhase"`
+	UpdateVersion        string   `json:"updateVersion,omitempty"`
+	Maximized            bool     `json:"maximized"`
+	Fullscreen           bool     `json:"fullscreen"`
+	PlayerReady          bool     `json:"playerReady"`
+	PlayerPlaying        bool     `json:"playerPlaying"`
+	PlayerPosMS          int64    `json:"playerPositionMs"`
+	PlayerDurMS          int64    `json:"playerDurationMs"`
+	VideoWidth           int      `json:"videoWidth"`
+	VideoHeight          int      `json:"videoHeight"`
+	VideoFPS             float64  `json:"videoFps"`
+	VideoKbps            int      `json:"videoKbps"`
+	VideoLive            bool     `json:"videoLiveBitrate"`
+	ContentW             int      `json:"contentWidth"`
+	ContentH             int      `json:"contentHeight"`
+	ErrorMsg             string   `json:"errorMessage,omitempty"`
+	Items                []string `json:"items"`
 }
 
 func debugSnapshot() debugState {
@@ -212,7 +213,6 @@ func debugSnapshot() debugState {
 	st.ViewerPreload = app.settings.ViewerPreload
 	st.ViewerCached = app.viewerPreloadCount()
 	st.ViewerPreloadMB = float64(app.viewerPreloadBytesValue()) / (1 << 20)
-	st.ViewerHUD = app.viewerHUDMode()
 	st.ShowHelp = app.showHelp
 	st.ShowAbout = app.showAbout
 	st.UpdateOpen = app.updateOpen
@@ -275,7 +275,9 @@ func debugSnapshot() debugState {
 		st.ViewerFullResLoading = app.viewer.FullResLoading
 		st.ViewerFullResUnsupported = app.viewer.FullResUnsupported
 		st.ViewerFullResPending = app.viewerPendingActual
-		st.ViewerNotice = app.viewer.Notice.Text
+		if label, _ := app.viewerQualityLabel(); label != "" {
+			st.ViewerQuality = label
+		}
 		if p := app.viewer.Player; p != nil {
 			st.PlayerReady = p.Ready()
 			st.PlayerPlaying = p.Playing()

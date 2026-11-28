@@ -1012,6 +1012,13 @@ func (a *App) viewerCanvas(c *ui.Context, it *Item, th *ui.Theme) {
 						p.Image(a.viewer.Placeholder, ui.Rect{X: -w / 2, Y: -h / 2, W: w, H: h}, ui.FillBox)
 					})
 				}
+				if a.viewer.Err != "" {
+					// The picture never arrived and the grid tile is standing
+					// in for it: dim the stand-in and say why, instead of
+					// showing a tile that will never become the real thing.
+					p.Fill(r, ui.RGBA(0, 0, 0, 0.62), 0)
+					drawViewerCenteredText(p, r, a.viewer.Err, ui.RGBA(240, 210, 210, 255))
+				}
 			case a.viewer.Bitmap == nil:
 				p.Fill(r, ui.Hex("#0a0a0b"), 0)
 				msg := "正在载入…"
@@ -1034,15 +1041,6 @@ func (a *App) viewerCanvas(c *ui.Context, it *Item, th *ui.Theme) {
 				p.Transform(ui.Scaling(s, s).Then(ui.Rotation(a.viewer.Angle)).Then(ui.Translation(cx, cy)), 0, 0, func() {
 					p.Image(a.viewer.Bitmap, ui.Rect{X: -w / 2, Y: -h / 2, W: w, H: h}, ui.FillBox)
 				})
-			}
-			if it.Kind == "image" {
-				pct := -1
-				if a.viewer.Bitmap != nil {
-					bw, bh := a.viewer.Bitmap.Size()
-					refW, refH := a.viewerReferenceSize()
-					pct = viewerPercentValue(bw, bh, refW, refH, a.viewer.Angle, a.viewer.Zoom, r.W, r.H, a.viewerDeviceScale())
-				}
-				a.drawViewerHUD(p, r, th, pct)
 			}
 		})
 		if a.viewer.Player != nil {
@@ -1344,15 +1342,31 @@ func (a *App) viewerQualityLabel() (text, tip string) {
 		return "", ""
 	}
 	switch {
+	case a.viewer.FullResUnsupported:
+		tip := "原图无法载入，正在显示 2560 预览"
+		if a.viewer.FullResErr != "" {
+			tip = "原图无法载入：" + a.viewer.FullResErr
+		}
+		return "原图失败", tip
 	case a.viewerShowsOriginal():
 		return "原图", "正在显示原始分辨率"
 	case a.viewer.Bitmap == nil:
 		return "缩略图", "正在显示网格缩略图，大图解码中"
+	case a.viewerPendingActual:
+		// The one thing a notice used to say that a percentage cannot: the
+		// picture is on its way to 100% and will switch by itself.
+		return "大图 · 待切 100%", "正在载入原图，完成后切换到 100%"
 	case a.viewer.FullResLoading:
-		return "大图", "正在显示 2560 预览，原图载入中"
+		return "大图 · 载入中", "正在显示 2560 预览，原图载入中"
 	default:
 		return "大图", "正在显示 2560 预览；按 1 载入原图"
 	}
+}
+
+// drawViewerCenteredText writes one line in the middle of the canvas.
+func drawViewerCenteredText(p *ui.Painter, r ui.Rect, msg string, color ui.Color) {
+	w, _ := p.MeasureText(0, ui.Span{Text: msg, Size: 13})
+	drawInterfaceText(p, r.X+(r.W-w)/2, r.Y+r.H/2, msg, 13, 0, color)
 }
 
 // viewerStat is one resident readout in the footer: what the picture is
@@ -1363,6 +1377,8 @@ type viewerStat struct {
 	Text   string
 	Tip    string
 	Strong bool
+	// Danger marks the one state that is a failure rather than a stage.
+	Danger bool
 	// MinWidth keeps a readout from changing the layout as its number grows,
 	// which matters for the percentage: 9% and 100% must not shift the buttons.
 	MinWidth float32
@@ -1427,7 +1443,12 @@ func (a *App) viewerStatusItems(c *ui.Context) []viewerStat {
 	if text, tip := a.viewerQualityLabel(); text != "" {
 		// The original is the state the user wants, so it stays quiet; the
 		// interim states are the ones worth noticing.
-		stats = append(stats, viewerStat{Text: text, Tip: tip, Strong: !a.viewerShowsOriginal()})
+		stats = append(stats, viewerStat{
+			Text:   text,
+			Tip:    tip,
+			Strong: !a.viewerShowsOriginal(),
+			Danger: a.viewer.FullResUnsupported,
+		})
 	}
 	if text, tip := a.viewerPreloadLabel(); text != "" {
 		ready, want := a.viewerPreloadProgress()
@@ -1451,6 +1472,9 @@ func (a *App) drawViewerStats(c *ui.Context, th *ui.Theme) {
 		color := th.TextMuted.Alpha(.75)
 		if stat.Strong {
 			color = th.Text.Alpha(.85)
+		}
+		if stat.Danger {
+			color = th.Danger
 		}
 		text := components.Text(c, stat.Text).FontSize(10).FontWeight(600).TextColor(color).
 			Padding(2, 6).Radius(4).Background(th.Text.Alpha(.05)).Shrink(0).
@@ -1486,6 +1510,9 @@ func (a *App) drawViewerStatsFloat(c *ui.Context, th *ui.Theme) {
 			color := th.Text.Alpha(.7)
 			if stat.Strong {
 				color = th.Text
+			}
+			if stat.Danger {
+				color = th.Danger
 			}
 			components.Text(c, stat.Text).FontSize(10).FontWeight(600).TextColor(color).
 				PassThrough().Tooltip(stat.Tip)

@@ -384,11 +384,6 @@ func renderStill(it *Item, size int) (thumbRender, error) {
 			return r, nil
 		}
 		return renderThumbGo(it, size)
-	case "dct":
-		if r, err := dctThumb(it, size); err == nil {
-			return r, nil
-		}
-		return renderThumbGo(it, size)
 	}
 
 	if strings.EqualFold(it.Ext, ".ico") {
@@ -444,7 +439,7 @@ func shellPreferred(ext string) bool {
 
 func thumbBackendMode() string {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("FLOWVISION_THUMB_BACKEND"))) {
-	case "wic", "shell", "go", "embedded", "dct":
+	case "wic", "shell", "go", "embedded":
 		return strings.ToLower(strings.TrimSpace(os.Getenv("FLOWVISION_THUMB_BACKEND")))
 	}
 	return "auto"

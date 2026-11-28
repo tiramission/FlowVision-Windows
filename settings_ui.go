@@ -325,15 +325,6 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 								a.viewerHoldFitSetting(c)
 							},
 						},
-						{
-							ID: "viewer-hud", Title: "查看器状态提示",
-							Description: "载入进度与出错提示；画质、预取、缩放已由底栏常驻，不再重复播报",
-							Keywords:    []string{"hud", "toast", "status", "状态", "提示", "载入", "错误"},
-							Leading:     settingsIcon(lucide.Sparkles()),
-							Build: func(c *ui.Context) {
-								a.viewerHUDSetting(c)
-							},
-						},
 					},
 				},
 				{
@@ -501,23 +492,6 @@ func (a *App) settingsCategories() []components.SettingsCategory {
 	}
 }
 
-func (a *App) viewerHUDSetting(c *ui.Context) {
-	sel := components.Select(c.Key("settings-viewer-hud"), &a.draft.ViewerHUD)
-	sel.Trigger.Width(180).Label("查看器状态提示")
-	sel.Trigger.Children(func() {
-		components.Text(c, viewerHUDName(a.draft.ViewerHUD)).SingleLine()
-	})
-	sel.Popup(func(panel ui.Element) {
-		for _, key := range []string{"off", "auto", "always"} {
-			key := key
-			item := sel.Item(key)
-			item.Children(func() {
-				components.Text(c, viewerHUDName(key)).SingleLine()
-			})
-		}
-	})
-}
-
 func (a *App) viewerHoldZoomSetting(c *ui.Context) {
 	sel := components.Select(c.Key("settings-viewer-hold-zoom"), &a.draft.ViewerHoldZoom)
 	sel.Trigger.Width(180).Label("长按左键")
@@ -571,17 +545,6 @@ func viewerHoldZoomName(key string) string {
 		return "关闭"
 	default:
 		return "临时放大，松开恢复"
-	}
-}
-
-func viewerHUDName(key string) string {
-	switch key {
-	case "off":
-		return "关闭"
-	case "always":
-		return "始终显示"
-	default:
-		return "自动（推荐）"
 	}
 }
 

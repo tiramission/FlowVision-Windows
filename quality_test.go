@@ -2,6 +2,7 @@ package main
 
 import (
 	"image"
+	"strings"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -74,5 +75,47 @@ func TestSmallImageReadsAsTheOriginal(t *testing.T) {
 	a.viewer.FullResReady = true
 	if got, _ := a.viewerQualityLabel(); got != "原图" {
 		t.Fatalf("a loaded original reads as %q", got)
+	}
+}
+
+// TestQualityReadoutCarriesThePendingAndFailedStates covers what the floating
+// notice used to announce: waiting for the original after pressing 1, and a
+// failure to decode it. Both are states of the picture, so both belong in the
+// readout that is always there.
+func TestQualityReadoutCarriesThePendingAndFailedStates(t *testing.T) {
+	a := newViewerGestureApp(t)
+	defer a.closeViewer()
+	a.viewer.Open = true
+	a.viewer.Item = &Item{ID: "big", Name: "big.jpg", Kind: "image", Path: `C:\Pictures\big.jpg`, W: 6000, H: 4000}
+	a.viewer.Bitmap = ui.NewBitmap(image.NewRGBA(image.Rect(0, 0, 2560, 1707)))
+
+	// Pressing 1 with no original yet: the readout says what will happen.
+	a.viewerPendingActual = true
+	a.viewer.FullResLoading = true
+	if got, tip := a.viewerQualityLabel(); got != "大图 · 待切 100%" {
+		t.Fatalf("pending state = %q", got)
+	} else if tip == "" {
+		t.Fatal("the pending state has no tooltip")
+	}
+
+	// Without the pending switch it is just a decode in progress.
+	a.viewerPendingActual = false
+	if got, _ := a.viewerQualityLabel(); got != "大图 · 载入中" {
+		t.Fatalf("loading state = %q", got)
+	}
+
+	// A failed original is a failure, not a stage, and it says why.
+	a.viewer.FullResLoading = false
+	a.viewer.FullResUnsupported = true
+	a.viewer.FullResErr = "磁盘错误"
+	got, tip := a.viewerQualityLabel()
+	if got != "原图失败" {
+		t.Fatalf("failed state = %q", got)
+	}
+	if !strings.Contains(tip, "磁盘错误") {
+		t.Fatalf("failure tooltip lost the reason: %q", tip)
+	}
+	if stats := a.viewerStatusItems(nil); len(stats) == 0 || !stats[0].Danger {
+		t.Fatal("the failure is not marked as one, so it cannot be coloured")
 	}
 }

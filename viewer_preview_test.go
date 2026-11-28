@@ -6,7 +6,6 @@ import (
 	"image/jpeg"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -210,8 +209,8 @@ func TestViewerActualSizeWaitsForFullRes(t *testing.T) {
 	if a.viewer.Zoom != 1 {
 		t.Fatalf("preview was upscaled while waiting: zoom=%v", a.viewer.Zoom)
 	}
-	if !strings.Contains(a.viewer.Notice.Text, "正在载入原图") {
-		t.Fatalf("missing wait notice: %q", a.viewer.Notice.Text)
+	if got, _ := a.viewerQualityLabel(); got != "大图 · 待切 100%" {
+		t.Fatalf("waiting for the original reads as %q", got)
 	}
 }
 
@@ -463,31 +462,6 @@ func TestViewerHoverZoneArmsAndCancels(t *testing.T) {
 	a.clearViewerHover()
 }
 
-func TestViewerHUDModesAndPersistentNotice(t *testing.T) {
-	a := newViewerGestureApp(t)
-	defer a.closeViewer()
-	a.viewer.Notice = viewerNotice{}
-	t.Setenv("FLOWVISION_VIEWER_HUD", "debug")
-	if got := a.viewerHUDMode(); got != "debug" {
-		t.Fatalf("hud mode = %q", got)
-	}
-	a.notifyViewer("load", "正在载入大图…", viewerNoticeInfo, 0)
-	if a.viewer.Notice.Text == "" {
-		t.Fatal("persistent notice missing")
-	}
-	if !a.viewer.Notice.Until.IsZero() {
-		t.Fatal("persistent notice should not have an expiry")
-	}
-	if !a.viewerHUDVisible() {
-		t.Fatal("persistent notice not visible")
-	}
-	a.viewer.Notice = viewerNotice{}
-	t.Setenv("FLOWVISION_VIEWER_HUD", "off")
-	if a.viewerHUDVisible() {
-		t.Fatal("debug notice visible while HUD off")
-	}
-}
-
 func TestViewerPreviewLimitsAtBoundaries(t *testing.T) {
 	if !viewerPreviewWithinLimit(10000, 8000) {
 		t.Fatal("exactly 80MP preview should be allowed")
@@ -540,24 +514,6 @@ func TestViewerPreviewFallbackHeight(t *testing.T) {
 			t.Errorf("fallback height(%d,%d) = %d, want %d", tc.w, tc.h, got, tc.want)
 		}
 	}
-}
-
-func TestViewerHUDSettingIsInSettings(t *testing.T) {
-	a := newViewTestApp()
-	cats := a.settingsCategories()
-	for _, cat := range cats {
-		if cat.ID != "viewer" {
-			continue
-		}
-		for _, group := range cat.Groups {
-			for _, item := range group.Items {
-				if item.ID == "viewer-hud" {
-					return
-				}
-			}
-		}
-	}
-	t.Fatal("viewer HUD setting missing from viewer-info category")
 }
 
 func TestViewerPreloadBudgetAccounting(t *testing.T) {

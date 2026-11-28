@@ -272,6 +272,14 @@ func (a *App) runViewerPreloadWorker(epoch int) {
 	}
 }
 
+// viewerPreloadBytesValue is the decoded-neighbour budget in use, for the debug
+// state.
+func (a *App) viewerPreloadBytesValue() int64 {
+	a.viewerPreloadMu.Lock()
+	defer a.viewerPreloadMu.Unlock()
+	return a.viewerPreloadBytes
+}
+
 func (a *App) clearViewerPreloadCache() {
 	a.viewerPreloadMu.Lock()
 	a.viewerPreloadEpoch++

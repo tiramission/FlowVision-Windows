@@ -159,21 +159,24 @@ type Viewer struct {
 	FullResReady       bool
 	FullResLoading     bool
 	FullResUnsupported bool
-	OneToOne           bool
-	LoadStarted        time.Time
-	Notice             viewerNotice
-	NoticeKey          string
-	NoticeAt           time.Time
-	Zoom               float32
-	Angle              float32
-	PanX               float32
-	PanY               float32
-	ShowInfo           bool
-	Immersive          bool
-	ChromeVisible      bool
-	ChromeUntil        time.Time
-	CursorVisible      bool
-	CursorUntil        time.Time
+	// FullResErr carries why the original could not be decoded, for the
+	// readout's tooltip: the failure is a state of the picture, not a message
+	// that should take over the screen.
+	FullResErr    string
+	OneToOne      bool
+	LoadStarted   time.Time
+	NoticeKey     string
+	NoticeAt      time.Time
+	Zoom          float32
+	Angle         float32
+	PanX          float32
+	PanY          float32
+	ShowInfo      bool
+	Immersive     bool
+	ChromeVisible bool
+	ChromeUntil   time.Time
+	CursorVisible bool
+	CursorUntil   time.Time
 	// CursorX and CursorY track the physical pointer between frames, so a
 	// pointer moving over the video layer wakes the cursor even when the
 	// video element, rather than the canvas, receives the motion.
@@ -316,9 +319,6 @@ type App struct {
 	viewerPendingActualH    float32
 	viewerPendingActualOldW int
 	viewerPendingActualOldH int
-	viewerSlowTimer         *time.Timer
-	viewerFullTimer         *time.Timer
-	viewerNoticeTimer       *time.Timer
 	// The resident readouts (quality, preload, zoom) follow the controls out of
 	// sight, but come back whenever one of them changes: viewerStatusKey is the
 	// last snapshot, viewerStatusUntil how long it may stay on screen, and
@@ -1125,7 +1125,6 @@ func settingsEditingEqual(a, b Settings) bool {
 		a.LoopVideo == b.LoopVideo &&
 		a.CacheLimitMB == b.CacheLimitMB &&
 		a.ViewerPreload == b.ViewerPreload &&
-		a.ViewerHUD == b.ViewerHUD &&
 		a.ViewerHoldZoom == b.ViewerHoldZoom &&
 		a.ViewerHoldFit == b.ViewerHoldFit &&
 		a.SidePrev == b.SidePrev &&
@@ -1726,7 +1725,6 @@ func (a *App) loadViewerMedia(it *Item) {
 	gen := a.viewer.Gen
 	a.startViewerChromeTicker(gen)
 	a.clearViewerHover()
-	a.stopViewerLoadTimers()
 	a.clearViewerFullRes()
 	a.clearViewerPendingActualSize()
 	a.releaseViewerOwnedBitmap()
@@ -1739,8 +1737,8 @@ func (a *App) loadViewerMedia(it *Item) {
 	a.viewer.FullResReady = false
 	a.viewer.FullResLoading = false
 	a.viewer.FullResUnsupported = false
+	a.viewer.FullResErr = ""
 	a.viewer.OneToOne = false
-	a.viewer.Notice = viewerNotice{}
 	a.viewer.LoadStarted = time.Now()
 	a.viewer.SeekSeconds = 0
 	a.viewer.SeekUntil = time.Time{}
@@ -1755,9 +1753,6 @@ func (a *App) loadViewerMedia(it *Item) {
 		a.viewerStats.PlaceholderHit = true
 	}
 	if it.Kind == "video" {
-		// A picture says 缩略图 in the footer while its preview decodes, so only
-		// a video needs a spoken notice for a slow first frame.
-		a.startViewerSlowNotice(gen, "正在载入大图…", viewerNoticeLoadDelay)
 		// Read the container before Media Foundation opens the file. Some
 		// decoders keep an exclusive handle while playing, which would make a
 		// later probe fail even though the file itself is valid.
@@ -1805,13 +1800,10 @@ func (a *App) loadViewerMedia(it *Item) {
 				}
 				return
 			}
-			a.stopViewerLoadTimers()
 			a.viewer.Loading = false
 			a.viewer.Placeholder = nil
-			a.viewer.Notice = viewerNotice{}
 			if err != nil {
 				a.viewer.Err = err.Error()
-				a.notifyViewerError(err.Error())
 			} else {
 				a.viewer.Player = player
 				player.SetLoop(a.settings.LoopVideo)
@@ -1826,12 +1818,10 @@ func (a *App) loadViewerMedia(it *Item) {
 		})
 	default:
 		if bmp := a.takeViewerPreload(it); bmp != nil {
-			a.stopViewerLoadTimers()
 			a.viewer.Loading = false
 			a.viewer.Bitmap = bmp
 			a.viewer.BitmapOwned = true
 			a.viewer.Placeholder = nil
-			a.viewer.Notice = viewerNotice{}
 			a.viewerStats.PreloadHit = true
 			a.viewerStats.LoadMs = time.Since(a.viewer.LoadStarted).Milliseconds()
 			a.scheduleViewerPreload()
@@ -1847,15 +1837,12 @@ func (a *App) loadViewerMedia(it *Item) {
 					}
 					return
 				}
-				a.stopViewerLoadTimers()
 				a.viewer.Loading = false
-				a.viewer.Notice = viewerNotice{}
 				if err != nil {
 					if res != nil && res.Bmp != nil {
 						res.Bmp.ReleasePixels()
 					}
 					a.viewer.Err = err.Error()
-					a.notifyViewerError(err.Error())
 					a.refresh()
 					return
 				}
@@ -1962,7 +1949,6 @@ func (a *App) startViewerChromeTicker(gen int) {
 func (a *App) closeViewer() {
 	wasOpen := a.viewer.Open
 	a.stopViewerSideMouseHook()
-	a.stopViewerLoadTimers()
 	if a.viewerStatusTimer != nil {
 		a.viewerStatusTimer.Stop()
 		a.viewerStatusTimer = nil
