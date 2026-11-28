@@ -1327,7 +1327,7 @@ func (a *App) viewerQualityLabel() (text, tip string) {
 		return "", ""
 	}
 	switch {
-	case a.viewer.FullResReady:
+	case a.viewerShowsOriginal():
 		return "原图", "正在显示原始分辨率"
 	case a.viewer.Bitmap == nil:
 		return "缩略图", "正在显示网格缩略图，大图解码中"
@@ -1349,6 +1349,23 @@ type viewerStat struct {
 	// MinWidth keeps a readout from changing the layout as its number grows,
 	// which matters for the percentage: 9% and 100% must not shift the buttons.
 	MinWidth float32
+}
+
+// viewerShowsOriginal reports whether the picture on screen is the whole
+// picture. A preview is capped at 2560, so anything at or below that limit is
+// already the original: the full-resolution decode is deliberately skipped for
+// those, which means FullResReady never becomes true and testing it alone
+// labelled every small picture "大图" forever.
+func (a *App) viewerShowsOriginal() bool {
+	if a.viewer.FullResReady {
+		return true
+	}
+	if a.viewer.Bitmap == nil {
+		return false
+	}
+	bw, bh := a.viewer.Bitmap.Size()
+	w, h := a.viewerReferenceSize()
+	return w > 0 && h > 0 && bw >= w && bh >= h
 }
 
 // viewerStatusLinger is how long the readouts stay after their last change.
@@ -1393,7 +1410,7 @@ func (a *App) viewerStatusItems(c *ui.Context) []viewerStat {
 	if text, tip := a.viewerQualityLabel(); text != "" {
 		// The original is the state the user wants, so it stays quiet; the
 		// interim states are the ones worth noticing.
-		stats = append(stats, viewerStat{Text: text, Tip: tip, Strong: !a.viewer.FullResReady})
+		stats = append(stats, viewerStat{Text: text, Tip: tip, Strong: !a.viewerShowsOriginal()})
 	}
 	if text, tip := a.viewerPreloadLabel(); text != "" {
 		ready, want := a.viewerPreloadProgress()

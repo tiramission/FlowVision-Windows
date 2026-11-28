@@ -14,7 +14,9 @@ func viewerStripApp(t *testing.T, want int, ready int) *App {
 	t.Helper()
 	a := newViewerGestureApp(t)
 	a.viewer.Open = true
-	a.viewer.Item = &Item{ID: "cur", Name: "cur.jpg", Kind: "image", Path: `C:\Pictures\cur.jpg`}
+	// A declared original size keeps the fixture on the "大图" side: the tiny
+	// bitmap below is a preview of it, not the whole picture.
+	a.viewer.Item = &Item{ID: "cur", Name: "cur.jpg", Kind: "image", Path: `C:\Pictures\cur.jpg`, W: 6000, H: 4000}
 	a.viewer.Bitmap = ui.NewBitmap(image.NewRGBA(image.Rect(0, 0, 8, 8)))
 
 	a.viewerPreloadMu.Lock()
